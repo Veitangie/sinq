@@ -1,0 +1,11 @@
+GET ${env.BASE_URL}/guilds/spellswords
+
+$POST{
+    local code = sinq.responses[1].code
+    if code == 200 then
+        -- Guild exists, skip the creation step (Request 2) and go straight to joining (Request 3)
+        sinq.setNextRequest(3)
+    elseif code ~= 404 then
+        sinq.test.fail("Unexpected status code when checking guild")
+    end
+}

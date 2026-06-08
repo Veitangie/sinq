@@ -1,0 +1,18 @@
+$PRE{
+    if not AUTH_TOKEN then error("Token missing") end
+}
+POST ${env.BASE_URL}/players
+Authorization: Bearer ${ AUTH_TOKEN }
+Content-Type: application/json
+
+{
+    "name": "Scyth",
+    "class": "Spellsword"
+}
+
+$POST{
+    if sinq.responses[2].code ~= 201 then
+        sinq.test.fail("Failed to create character")
+    end
+    PLAYER_ID = sinq.responses[2].body.id
+}

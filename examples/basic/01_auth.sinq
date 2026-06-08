@@ -1,0 +1,14 @@
+POST ${env.BASE_URL}/system/login
+Content-Type: application/json
+
+{
+    "user": "player_one",
+    "password": "hunter2"
+}
+
+$POST{
+    if sinq.responses[1].code ~= 200 then
+        sinq.test.fail("System login failed")
+    end
+    AUTH_TOKEN = sinq.responses[1].body.token
+}

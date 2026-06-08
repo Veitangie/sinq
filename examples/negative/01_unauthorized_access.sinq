@@ -1,0 +1,16 @@
+POST ${env.BASE_URL}/admin/wipe_server
+Content-Type: application/json
+
+{
+    "confirm": true
+}
+
+$ASSERT{
+    local code = sinq.responses[1].code
+    -- We EXPECT this to fail. If it succeeds (200), that is a critical security flaw.
+    if code == 200 then
+        sinq.test.fail("CRITICAL: Server wipe endpoint allowed unauthenticated access!")
+    elseif code ~= 401 then
+        sinq.test.fail("Expected 401 Unauthorized, got " .. tostring(code))
+    end
+}

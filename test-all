@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+set -e
+
+go test -race -coverprofile=coverage.txt ./...
+
+for pkg in $(go list ./...); do
+  if go test "$pkg" -list=Fuzz | grep -q "^Fuzz"; then
+    go test -fuzz=Fuzz -fuzztime=${1:-30s} "$pkg"
+  fi
+done

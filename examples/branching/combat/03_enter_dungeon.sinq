@@ -1,0 +1,17 @@
+$PRE{
+    if not PLAYER_ID then error("Player ID missing") end
+}
+POST ${env.BASE_URL}/dungeons/join
+Authorization: Bearer ${ AUTH_TOKEN }
+Content-Type: application/json
+
+{
+    "player_id": ${PLAYER_ID},
+    "dungeon": "goblin_cave"
+}
+
+$ASSERT{
+    if sinq.responses[3].code ~= 200 then
+        sinq.test.fail("Failed to enter dungeon")
+    end
+}

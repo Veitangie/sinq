@@ -1,0 +1,7 @@
+local/
+*.local
+out.xml
+*.test
+*.prof
+*.out
+*coverage*

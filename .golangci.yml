@@ -1,0 +1,71 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - staticcheck
+    - govet
+    - ineffassign
+    - bodyclose
+    - gocognit
+    - gocyclo
+    - exhaustive
+  
+  settings:
+    staticcheck:
+      checks: ["all", "-ST1000", "-ST1003", "-ST1005"] 
+    gocognit:
+      min-complexity: 40 
+    gocyclo:
+      min-complexity: 30
+    exhaustive:
+      default-signifies-exhaustive: true
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - os.MkdirAll
+        - (*os.File).Close
+        - (io.ReadCloser).Close
+        - (io/fs.File).Close
+
+  exclusions:
+    rules:
+      - path: standard-reporter.go
+        linters:
+          - gocognit
+          - gocyclo
+
+      - path: natsort.go
+        linters:
+          - errcheck
+          - staticcheck
+          - govet
+          - ineffassign
+          - bodyclose
+          - gocognit
+          - gocyclo
+          - exhaustive
+
+      - path: natsort_test.go
+        linters:
+          - errcheck
+          - staticcheck
+          - govet
+          - ineffassign
+          - bodyclose
+          - gocognit
+          - gocyclo
+          - exhaustive
+
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - gocognit
+          - gocyclo
+          - exhaustive
