@@ -43,7 +43,6 @@ func (w *worker) runTask(task []string) {
 	w.t.logger.Debug("Worker got task", "workerId", w.id, "taskPath", task)
 
 	scenarioConfig := scenario.SaneDefaultConfig()
-	scenarioConfig.Name = getDefaultScenarioNameFromPath(task[len(task)-1])
 	requestBlueprints := make([]*scenario.RequestBlueprint, 0, len(task))
 	for _, filePath := range task {
 		switch {
@@ -52,6 +51,10 @@ func (w *worker) runTask(task []string) {
 		case strings.HasSuffix(filePath, scenarioConfigFiletype):
 			w.handleScenarioConfigFile(&scenarioConfig, filePath)
 		}
+	}
+
+	if scenarioConfig.Name == "" {
+		scenarioConfig.Name = getDefaultScenarioNameFromPath(task[len(task)-1])
 	}
 
 	res := scenario.ScenarioBlueprint{Requests: requestBlueprints, Config: &scenarioConfig}
@@ -102,7 +105,6 @@ func (t *Treewalker) runWorkers(ctx context.Context, fileSystem fs.FS, taskCh <-
 
 func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfig, filePath string) {
 	if cachedScenarioConfig, isFound := readCache(filePath, w.scenarioConfigCache, w.scenarioConfigCacheLock); isFound {
-		w.t.logger.Debug("There was a cache hit", "filePath", filePath)
 		*scenarioConfig = cachedScenarioConfig
 		scenarioConfig.Env = maps.Clone(cachedScenarioConfig.Env)
 		return

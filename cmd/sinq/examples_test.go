@@ -4,12 +4,16 @@
 package main
 
 import (
+	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +23,12 @@ import (
 func Test_ExamplesDirectory(t *testing.T) {
 	var mu sync.Mutex
 	pollCount := 0
+
+	uploadBytes := make([]byte, 1024)
+	rand.Read(uploadBytes)
+
+	downloadBytes := make([]byte, 1024)
+	rand.Read(downloadBytes)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -54,8 +64,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 			if !checkAuth() {
 				return
 			}
-			// Sleep for 8 seconds. This will fail unless the leaf overrides the 5s root timeout.
-			time.Sleep(8 * time.Second)
+			time.Sleep(250 * time.Millisecond)
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"status": "purchased", "gold_remaining": 150}`)
 
@@ -89,6 +98,33 @@ func Test_ExamplesDirectory(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusOK)
 
+		case r.URL.Path == "/upload" && r.Method == "POST":
+			isChunked := r.ContentLength == -1
+			if slices.Contains(r.TransferEncoding, "chunked") {
+				isChunked = true
+			}
+
+			if !isChunked {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			data, err := io.ReadAll(r.Body)
+			if len(data) > 0 && err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			if !bytes.Equal(data, uploadBytes) {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+
+		case r.URL.Path == "/download" && r.Method == "GET":
+			w.WriteHeader(http.StatusOK)
+			w.Write(downloadBytes)
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -100,12 +136,26 @@ func Test_ExamplesDirectory(t *testing.T) {
 		t.Fatalf("Could not find examples directory at %s", examplesDir)
 	}
 
+	assetsDir := filepath.Join(examplesDir, "assets")
+	err = os.MkdirAll(assetsDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create assets directory: %v", err)
+	}
+	defer os.Remove(assetsDir)
+
+	uploadFilePath := filepath.Join(assetsDir, "file")
+	err = os.WriteFile(uploadFilePath, uploadBytes, 0644)
+	if err != nil {
+		t.Fatalf("Failed to write upload file: %v", err)
+	}
+	defer os.Remove(uploadFilePath)
+
 	configPath := filepath.Join(examplesDir, "config.scenario")
 	configData := map[string]any{
 		"env": map[string]string{
 			"BASE_URL": srv.URL,
 		},
-		"timeout": "5s",
+		"timeout": "50ms",
 	}
 	configBytes, _ := json.MarshalIndent(configData, "", "  ")
 
@@ -138,5 +188,16 @@ func Test_ExamplesDirectory(t *testing.T) {
 
 	if exitCode != 0 {
 		t.Fatalf("Example test failed. Expected sinq to exit with 0, got %d", exitCode)
+	}
+
+	receivedFilePath := filepath.Join(assetsDir, "received_file")
+	receivedData, err := os.ReadFile(receivedFilePath)
+	if err != nil {
+		t.Fatalf("Failed to read received file: %v", err)
+	}
+	defer os.Remove(receivedFilePath)
+
+	if !bytes.Equal(receivedData, downloadBytes) {
+		t.Fatalf("Received file content does not match the download bytes")
 	}
 }

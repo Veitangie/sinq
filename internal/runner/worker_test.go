@@ -7,25 +7,16 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
-	"sync"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Veitangie/sinq/internal/scenario"
-	lua "github.com/yuin/gopher-lua"
 )
 
 func TestWorker_ExecuteAndExtractValue_CacheTrap(t *testing.T) {
-	w := &worker{
-		scriptCacheLock: &sync.RWMutex{},
-		scriptCache:     make(map[scriptKey]*lua.FunctionProto),
-		wg:              &sync.WaitGroup{},
-	}
-	w.setupLuaEnvironment(context.Background(), nil)
-	w.wg.Add(1)
-	defer w.Close()
+	w := setupTestWorker(t, nil)
 
 	scriptPayload := []byte(`"hello world"`)
 	token := scenario.Token{
@@ -48,15 +39,8 @@ func TestWorker_ExecuteAndExtractValue_CacheTrap(t *testing.T) {
 }
 
 func TestWorker_RequestCompleted_Indexing(t *testing.T) {
-	w := &worker{
-		scriptCacheLock: &sync.RWMutex{},
-		scriptCache:     make(map[scriptKey]*lua.FunctionProto),
-		wg:              &sync.WaitGroup{},
-		logger:          slog.Default(),
-	}
-	w.setupLuaEnvironment(context.Background(), nil)
-	w.wg.Add(1)
-	defer w.Close()
+	w := setupTestWorker(t, nil)
+	w.lc.setupRequestEnvironment(0)
 
 	resp := &http.Response{
 		StatusCode: 200,
@@ -64,12 +48,12 @@ func TestWorker_RequestCompleted_Indexing(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewReader([]byte(`{"status": "ok"}`))),
 	}
 
-	err := w.requestCompleted(context.Background(), resp, 0)
+	err := w.requestCompleted(context.Background(), resp, "", 1<<20, 1)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	err = w.ls.DoString(`
+	err = w.lc.DoString(`
 		if sinq.responses[1] == nil then
 			error("Request not found at index 1. Go passed 0-index directly to Lua.")
 		end
@@ -83,15 +67,8 @@ func TestWorker_RequestCompleted_Indexing(t *testing.T) {
 }
 
 func TestWorker_RequestCompleted_JSONArrayBlindspot(t *testing.T) {
-	w := &worker{
-		scriptCacheLock: &sync.RWMutex{},
-		scriptCache:     make(map[scriptKey]*lua.FunctionProto),
-		wg:              &sync.WaitGroup{},
-		logger:          slog.Default(),
-	}
-	w.setupLuaEnvironment(context.Background(), nil)
-	w.wg.Add(1)
-	defer w.Close()
+	w := setupTestWorker(t, nil)
+	w.lc.setupRequestEnvironment(0)
 
 	resp := &http.Response{
 		StatusCode: 200,
@@ -99,17 +76,24 @@ func TestWorker_RequestCompleted_JSONArrayBlindspot(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewReader([]byte(`[{"id": 1}, {"id": 2}]`))),
 	}
 
-	err := w.requestCompleted(context.Background(), resp, 0)
+	err := w.requestCompleted(context.Background(), resp, "", 1<<20, 1)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	err = w.ls.DoString(`
+	err = w.lc.DoString(`
 		local req = sinq.responses[1]
-		if req.body == nil then
+		local bodyJson, err = req.extractBodyJson()
+		if err ~= nil then
+		  error("Expected successful parse, got " .. err)
+		end
+		if bodyJson == nil then
 			error("Body is nil. JSON array parsing silently failed in Go.")
 		end
-		if req.body[1].id ~= 1 then
+		if req.bodyJson == nil then
+			error("bodyJson is nil. The field has not been set after parse.")
+		end
+		if req.bodyJson[1].id ~= 1 then
 			error("Expected first element id to be 1")
 		end
 	`)
@@ -119,34 +103,79 @@ func TestWorker_RequestCompleted_JSONArrayBlindspot(t *testing.T) {
 }
 
 func TestWorker_ContextCancellation_CleanExit(t *testing.T) {
-	taskCh := make(chan scenario.ScenarioBlueprint)
+	taskCh := make(chan ScenarioBundle)
 	errorCh := make(chan error, 1)
 	resCh := make(chan ScenarioResult, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	w := &worker{
-		id:      1,
-		taskCh:  taskCh,
-		errorCh: errorCh,
-		resCh:   resCh,
-		wg:      &sync.WaitGroup{},
-	}
-	w.wg.Add(1)
-
-	go w.run(ctx)
-
-	cancel()
+	w := setupTestWorker(t, ctx)
+	w.taskCh = taskCh
+	w.errorCh = errorCh
+	w.resCh = resCh
 
 	done := make(chan struct{})
 	go func() {
-		w.wg.Wait()
+		w.run(ctx)
 		close(done)
 	}()
+
+	cancel()
 
 	select {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Worker deadlocked and failed to exit upon context cancellation")
+	}
+}
+
+func TestWorker_ProcessScenario_PanicRecovery(t *testing.T) {
+	resCh := make(chan ScenarioResult, 1)
+	errorCh := make(chan error, 1)
+
+	w := setupTestWorker(t, nil)
+	w.resCh = resCh
+	w.errorCh = errorCh
+
+	bundle := ScenarioBundle{
+		ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config: &scenario.ScenarioConfig{
+				Name:    "PanicScenario",
+				Timeout: scenario.Duration{Duration: 1 * time.Second},
+			},
+			Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
+		},
+		Workspace: nil,
+	}
+
+	w.processScenario(context.Background(), bundle)
+
+	select {
+	case res := <-resCh:
+		if res.Status != Error {
+			t.Errorf("Expected scenario status to be Error due to panic, got %v", res.Status)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Worker did not recover from panic and deadlocked")
+	}
+}
+
+func TestWorker_SandboxLeak_GlobalG(t *testing.T) {
+	w := setupTestWorker(t, nil)
+
+	w.setupScenarioEnvironment(context.Background(), nil)
+	token1 := scenario.Token{Type: scenario.Script, Name: "PRE"}
+	extract1 := func(scenario.Token) []byte { return []byte(`_G.LEAKED_VAR = "poison"`) }
+	w.safeExecute(token1, extract1, "scen1.sinq", 1*time.Second)
+
+	w.setupScenarioEnvironment(context.Background(), nil)
+	token2 := scenario.Token{Type: scenario.Script, Name: "PRE"}
+	extract2 := func(scenario.Token) []byte {
+		return []byte(`if _G.LEAKED_VAR == "poison" then error("LEAK DETECTED") end`)
+	}
+	err := w.safeExecute(token2, extract2, "scen2.sinq", 1*time.Second)
+
+	if err != nil && strings.Contains(err.Error(), "LEAK DETECTED") {
+		t.Fatalf("BUG EXPOSED: _G leaks across scenarios! %v", err)
 	}
 }

@@ -63,7 +63,7 @@ $POST{
 		sinq.test.fail("Login failed") 
 	end
 	-- Leak token into the global sandbox for subsequent requests
-	_G.AUTH_TOKEN = sinq.responses[1].body.token
+	_G.AUTH_TOKEN = sinq.responses[1].json().token
 }`
 	_ = os.WriteFile(filepath.Join(tmpDir, "01_login.sinq"), []byte(req1), 0644)
 
@@ -81,7 +81,7 @@ $POST{
 	if sinq.responses[2].code ~= 202 then 
 		sinq.test.fail("Failed to start job") 
 	end
-	_G.JOB_ID = sinq.responses[2].body.job_id
+	_G.JOB_ID = sinq.responses[2].json().job_id
 }`
 	_ = os.WriteFile(filepath.Join(tmpDir, "02_start_job.sinq"), []byte(req2), 0644)
 
@@ -89,7 +89,7 @@ $POST{
 
 $RETRY{
 	-- Wait for the job to complete
-	local status = sinq.responses[3].body.status
+	local status = sinq.responses[3].json().status
 	if status == "pending" then
 		return 10 -- sleep 10ms and retry
 	end
@@ -97,14 +97,15 @@ $RETRY{
 }
 
 $ASSERT{
-	if sinq.responses[3].body.status ~= "complete" then
+	if sinq.responses[3].json().status ~= "complete" then
 		sinq.test.fail("Job never completed")
 	end
 }`
 	_ = os.WriteFile(filepath.Join(tmpDir, "03_poll_job.sinq"), []byte(req3), 0644)
 
 	args := []string{
-		"--workers", "1",
+		"--color", "always",
+		"--workers", "6",
 		"--format", "default",
 		tmpDir,
 	}
@@ -128,7 +129,7 @@ func TestSinq_EndToEnd_Chaos(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/blackhole":
-			time.Sleep(5 * time.Second)
+			time.Sleep(250 * time.Millisecond)
 		case "/crash":
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprint(w, `{"error": "database melted"}`)
@@ -228,5 +229,63 @@ func TestSinq_EndToEnd_Stress(t *testing.T) {
 
 	if requestCount.Load() != uint64(numScenarios) {
 		t.Fatalf("Expected %d requests to hit the mock server, but got %d", numScenarios, requestCount.Load())
+	}
+}
+
+func TestSinq_CLI_BasicFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantCode int
+	}{
+		{"Help Flag", []string{"--help"}, 0},
+		{"Version Flag", []string{"--version"}, 0},
+		{"List Flag", []string{"--list"}, 0},
+		{"Invalid Flag", []string{"--this-does-not-exist"}, 1},
+		{"Missing Secrets Path", []string{"--secrets", "/path/to/nowhere.json", "."}, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldStdout, oldStderr := os.Stdout, os.Stderr
+			devNull, _ := os.Open(os.DevNull)
+			os.Stdout, os.Stderr = devNull, devNull
+			defer func() {
+				os.Stdout, os.Stderr = oldStdout, oldStderr
+				devNull.Close()
+			}()
+
+			if got := sinq(tt.args); got != tt.wantCode {
+				t.Errorf("sinq(%v) = %d; want %d", tt.args, got, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestSinq_CLI_OutputFormatters(t *testing.T) {
+	tmpDir := t.TempDir()
+	outFilePath := filepath.Join(tmpDir, "report.xml")
+
+	req := `GET http://localhost:9999/ping`
+	_ = os.WriteFile(filepath.Join(tmpDir, "dummy.sinq"), []byte(req), 0644)
+
+	args := []string{
+		"--out", outFilePath,
+		"--format", "junit",
+		tmpDir,
+	}
+
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	devNull, _ := os.Open(os.DevNull)
+	os.Stdout, os.Stderr = devNull, devNull
+	defer func() {
+		os.Stdout, os.Stderr = oldStdout, oldStderr
+		devNull.Close()
+	}()
+
+	sinq(args)
+
+	if _, err := os.Stat(outFilePath); os.IsNotExist(err) {
+		t.Fatalf("Expected --out flag to create file at %s, but it was not found", outFilePath)
 	}
 }

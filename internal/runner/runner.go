@@ -24,9 +24,14 @@ type Runner struct {
 	clock     Clock
 }
 
-func (r *Runner) RunScenarios(ctx context.Context, scenarios []scenario.ScenarioBlueprint, secrets map[string]any) (<-chan ScenarioResult, <-chan time.Duration, <-chan error) {
+type ScenarioBundle struct {
+	scenario.ScenarioBlueprint
+	Workspace Workspace
+}
 
-	taskCh := make(chan scenario.ScenarioBlueprint, r.cfg.Workers)
+func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, secrets map[string]any) (<-chan ScenarioResult, <-chan time.Duration, <-chan error) {
+
+	taskCh := make(chan ScenarioBundle, r.cfg.Workers)
 	errorCh := make(chan error, r.cfg.Workers)
 	resultCh := make(chan ScenarioResult, r.cfg.Workers)
 	durationCh := make(chan time.Duration, 1)
@@ -56,24 +61,37 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []scenario.Scenario
 			close(durationCh)
 		}()
 
+		compiler := cachedCompiler{
+			scriptCacheLock: &sharedLock,
+			scriptCache:     sharedCache,
+		}
+
+		env := workerEnv{
+			secrets:           secrets,
+			luaStateHardReset: r.cfg.Safe,
+			logger:            &r.logger,
+			transport:         r.transport,
+			clock:             r.clock,
+			compiler:          compiler,
+		}
+
 		for idx := range r.cfg.Workers {
 			w := worker{
-				id:                idx,
-				secrets:           secrets,
-				luaStateHardReset: r.cfg.Safe,
-				taskCh:            taskCh,
-				errorCh:           errorCh,
-				resCh:             resultCh,
-				logger:            &r.logger,
-				transport:         r.transport,
-				wg:                &wg,
-				scriptCacheLock:   &sharedLock,
-				scriptCache:       sharedCache,
-				clock:             r.clock,
+				id:      idx,
+				taskCh:  taskCh,
+				errorCh: errorCh,
+				resCh:   resultCh,
+				env:     env,
 			}
 			wg.Add(1)
 
-			go w.run(ctx)
+			go func() {
+				defer func() {
+					w.Close()
+					wg.Done()
+				}()
+				w.run(ctx)
+			}()
 		}
 		wg.Wait()
 		durationCh <- timer.Time()

@@ -1,0 +1,5 @@
+$PRE{ req.attach("assets/file") }
+
+POST ${env.BASE_URL}/upload HTTP/1.1
+
+$ASSERT{ sinq.assert.code(204) }

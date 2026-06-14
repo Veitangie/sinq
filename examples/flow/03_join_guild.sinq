@@ -1,8 +1,4 @@
 POST ${env.BASE_URL}/guilds/spellswords/join
 Authorization: Bearer test_token
 
-$ASSERT{
-    if sinq.responses[3].code ~= 200 then
-        sinq.test.fail("Failed to join guild")
-    end
-}
+$ASSERT{ sinq.assert.code(200, "Failed to join guild") }

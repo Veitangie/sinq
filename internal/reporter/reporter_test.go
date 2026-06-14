@@ -11,7 +11,6 @@ import (
 	"github.com/Veitangie/sinq/internal/runner"
 )
 
-// mockReporter atomically counts the number of reports it receives
 type mockReporter struct {
 	id            int
 	receivedCount atomic.Int32
@@ -26,7 +25,6 @@ func (m *mockReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 }
 
 func TestReporterPool_ConcurrencyRaceAndDelivery(t *testing.T) {
-	// 1. Setup a pool with multiple stateful mock reporters
 	rep1 := &mockReporter{id: 1}
 	rep2 := &mockReporter{id: 2}
 	rep3 := &mockReporter{id: 3}
@@ -38,7 +36,6 @@ func TestReporterPool_ConcurrencyRaceAndDelivery(t *testing.T) {
 
 	payloadCount := 1000
 
-	// 2. Pump it with dummy data
 	go func() {
 		for range payloadCount {
 			sourceCh <- runner.ScenarioResult{Name: "RaceTestPayload"}
@@ -48,13 +45,11 @@ func TestReporterPool_ConcurrencyRaceAndDelivery(t *testing.T) {
 		close(timerCh)
 	}()
 
-	// 3. Execute the pool report.
 	err := pool.Report(sourceCh, timerCh, payloadCount)
 	if err != nil {
 		t.Fatalf("ReporterPool failed unexpectedly: %v", err)
 	}
 
-	// 4. THE CRITICAL ASSERTION: Did every single reporter get every single payload?
 	if rep1.receivedCount.Load() != int32(payloadCount) {
 		t.Errorf("Reporter 1 dropped payloads. Expected %d, got %d", payloadCount, rep1.receivedCount.Load())
 	}

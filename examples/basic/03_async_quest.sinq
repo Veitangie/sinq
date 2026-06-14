@@ -1,17 +1,8 @@
 GET ${env.BASE_URL}/players/$Unnamed_1{ PLAYER_ID }/quests/evolution
 Authorization: Bearer ${ AUTH_TOKEN }
 
-$RETRY{
-    local status = sinq.responses[3].body.status
-    if status == "calculating_stats" then
-        return 10 -- sleep 10ms and retry
-    end
-    return -1
-}
+$RETRY{ return sinq.retry.when(res.json().status == "calculating_stats", 10) }
 
 $ASSERT{
-    if sinq.responses[3].body.status ~= "complete" then
-        sinq.test.fail("Class evolution never finished")
-        print(sinq.responses[3].bodyRaw)
-    end
+    sinq.assert.equals(res.json(), {status = "complete"})
 }

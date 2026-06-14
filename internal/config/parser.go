@@ -130,7 +130,7 @@ func (p *Parser) parseShortFlag() {
 	case 'w':
 		value, err := strconv.Atoi(p.getNext())
 		if err != nil {
-			p.accumulateError(fmt.Errorf("Failed to parse workers: %e", err))
+			p.accumulateError(fmt.Errorf("Failed to parse workers: %v", err))
 			return
 		}
 		p.result.Workers = value
@@ -175,6 +175,7 @@ func (p *Parser) parseColorOption() {
 	value := p.getNext()
 	switch value {
 	case "never":
+		p.result.Reporter.Color = Never
 	case "always":
 		p.result.Reporter.Color = Always
 	case "auto":

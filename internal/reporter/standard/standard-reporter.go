@@ -122,7 +122,7 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 				}
 			}
 			if err == nil && len(request.FailedAssertions) > 0 {
-				_, err = fmt.Fprintf(r.writer, " - Failed assertions: %s\n", strings.Join(request.FailedAssertions, ","))
+				_, err = fmt.Fprintf(r.writer, " - Failed assertions: %s\n", strings.Join(request.FailedAssertions, ", "))
 
 				if err != nil {
 					continue

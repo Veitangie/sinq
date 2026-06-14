@@ -21,7 +21,7 @@ sinq -f junit -o report.xml ./tests/integration
 
 * **`<testsuite>`:** Maps directly to a single `sinq` Scenario (a leaf directory).
 * **`<testcase>`:** Maps directly to a single `.sinq` file request within that scenario.
-* **`<failure>`:** Triggered exclusively by Lua `$ASSERT` block failures (e.g., `sinq.test.fail("Data missing")`). This indicates the system is up, but the business logic is wrong.
+* **`<failure>`:** Triggered exclusively by Lua `$ASSERT` block failures (e.g., `sinq.assert.fail("Data missing")`). This indicates the system is up, but the business logic is wrong.
 * **`<error>`:** Triggered by Go-level runtime panics, context timeouts, dial connection refusals, or malformed HTTP parsings. This indicates the system or the test architecture is fundamentally broken.
 
 ### Example Output

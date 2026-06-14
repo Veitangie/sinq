@@ -10,8 +10,4 @@ Content-Type: application/json
     "dungeon": "goblin_cave"
 }
 
-$ASSERT{
-    if sinq.responses[3].code ~= 200 then
-        sinq.test.fail("Failed to enter dungeon")
-    end
-}
+$ASSERT{ sinq.assert.code(200, "Failed to enter dungeon") }

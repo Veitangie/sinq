@@ -5,3 +5,5 @@ out.xml
 *.prof
 *.out
 *coverage*
+TODO*
+.DS_Store

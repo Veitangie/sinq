@@ -14,44 +14,37 @@ import (
 	"github.com/Veitangie/sinq/internal/runner"
 )
 
-// JUnitReport represents the top-level <testsuites> element.
 type JUnitReport struct {
 	XMLName  xml.Name         `xml:"testsuites"`
 	Tests    int              `xml:"tests,attr"`
 	Failures int              `xml:"failures,attr"`
 	Errors   int              `xml:"errors,attr"`
-	Time     string           `xml:"time,attr"` // Total duration in seconds
+	Time     string           `xml:"time,attr"`
 	Suites   []JUnitTestSuite `xml:"testsuite"`
 }
 
-// JUnitTestSuite represents a single <testsuite> element.
-// In your case, this maps directly to a ScenarioBlueprint/ScenarioResult.
 type JUnitTestSuite struct {
 	Name      string          `xml:"name,attr"`
 	Tests     int             `xml:"tests,attr"`
 	Failures  int             `xml:"failures,attr"`
 	Errors    int             `xml:"errors,attr"`
-	Time      string          `xml:"time,attr"`      // Duration in seconds
-	Timestamp string          `xml:"timestamp,attr"` // ISO8601 format
+	Time      string          `xml:"time,attr"`
+	Timestamp string          `xml:"timestamp,attr"`
 	TestCases []JUnitTestCase `xml:"testcase"`
 }
 
-// JUnitTestCase represents a single <testcase> element.
-// This maps directly to a RequestResult inside your scenario.
 type JUnitTestCase struct {
 	Name      string        `xml:"name,attr"`
-	Classname string        `xml:"classname,attr"` // Usually the scenario name or file path
-	Time      string        `xml:"time,attr"`      // Duration in seconds
+	Classname string        `xml:"classname,attr"`
+	Time      string        `xml:"time,attr"`
 	Failure   *JUnitFailure `xml:"failure,omitempty"`
 	Error     *JUnitFailure `xml:"error,omitempty"`
 }
 
-// JUnitFailure represents a <failure> or <error> element.
-// Test assertions go into Failure; framework/network crashes go into Error.
 type JUnitFailure struct {
-	Message  string `xml:"message,attr"` // Short summary
-	Type     string `xml:"type,attr"`    // e.g., "AssertionError", "NetworkError"
-	Contents string `xml:",chardata"`    // The raw, multi-line stack trace or detailed failure output
+	Message  string `xml:"message,attr"`
+	Type     string `xml:"type,attr"`
+	Contents string `xml:",chardata"`
 }
 
 type JUnitReporter struct {

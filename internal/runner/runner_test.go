@@ -7,12 +7,11 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"runtime"
 	"testing"
-	"time"
 
 	"github.com/Veitangie/sinq/internal/config"
 	"github.com/Veitangie/sinq/internal/scenario"
+	"go.uber.org/goleak"
 )
 
 type noopRoundTripper struct{}
@@ -21,10 +20,22 @@ func (r noopRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return nil, nil
 }
 
+func TestNewRunner_Validation(t *testing.T) {
+	cfg := config.SaneDefaults()
+
+	_, err := NewRunner(cfg, context.Background(), nil, *slog.Default(), nil)
+	if err == nil {
+		t.Error("Expected error when creating Runner with nil transport")
+	}
+
+	_, err = NewRunner(cfg, nil, noopRoundTripper{}, *slog.Default(), nil)
+	if err == nil {
+		t.Error("Expected error when creating Runner with nil context")
+	}
+}
+
 func TestRunner_GoroutineLeakage(t *testing.T) {
-	runtime.GC()
-	time.Sleep(200 * time.Millisecond)
-	baseline := runtime.NumGoroutine()
+	defer goleak.VerifyNone(t)
 
 	cfg := config.SaneDefaults()
 	cfg.Workers = 50
@@ -32,9 +43,9 @@ func TestRunner_GoroutineLeakage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runner, _ := NewRunner(cfg, ctx, noopRoundTripper{}, *slog.Default(), nil)
 
-	scenarios := make([]scenario.ScenarioBlueprint, 1000)
+	scenarios := make([]ScenarioBundle, 1000)
 	for i := range scenarios {
-		scenarios[i] = scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{Name: "LeakTest"}}
+		scenarios[i] = ScenarioBundle{scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{Name: "LeakTest"}}, nil}
 	}
 
 	resultCh, durationCh, errorCh := runner.RunScenarios(ctx, scenarios, nil)
@@ -54,23 +65,4 @@ func TestRunner_GoroutineLeakage(t *testing.T) {
 		}
 	}()
 	<-durationCh
-
-	deadline := time.Now().Add(3 * time.Second)
-	leaked := true
-	var final int
-
-	for time.Now().Before(deadline) {
-		runtime.GC()
-		final = runtime.NumGoroutine()
-
-		if final <= baseline+2 {
-			leaked = false
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	if leaked {
-		t.Fatalf("Severe Goroutine leak detected! Started with %d, stuck at %d", baseline, final)
-	}
 }

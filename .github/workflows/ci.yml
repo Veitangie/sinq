@@ -84,6 +84,7 @@ jobs:
             OUTPUT_NAME="${OUTPUT_NAME}.exe"
           fi
           go build -ldflags="-w -s" -o $OUTPUT_NAME ./cmd/sinq
+          sha256sum $OUTPUT_NAME > ${OUTPUT_NAME}.sha256
 
       - name: Upload to GitHub Release
         env:

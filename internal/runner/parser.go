@@ -1,3 +1,6 @@
+// sinq - A concurrent integration testing tool
+// Copyright (C) 2026 Veitangie
+// SPDX-License-Identifier: GPL-3.0-or-later
 package runner
 
 import (
@@ -74,19 +77,20 @@ func (r *requestParser) scanWord() ([]byte, error) {
 func (r *requestParser) scanLine() ([]byte, error) {
 	r.skipWhitespace()
 	start := r.current
+	lastNonSpace := r.current
 	for {
 		b, err := r.getCurrent()
 		r.advance()
 		if err != nil {
 			return r.source[start:r.current], err
 		}
-		if b == '\n' {
-			endModifier := 1
-			if r.current-2 >= 0 && r.source[r.current-2] == '\r' {
-				endModifier++
-			}
-			return r.source[start : r.current-endModifier], nil
+		if b == ' ' || b == '	' || b == '\r' {
+			continue
 		}
+		if b == '\n' {
+			return r.source[start:lastNonSpace], nil
+		}
+		lastNonSpace = r.current
 	}
 }
 
@@ -159,9 +163,6 @@ func (r *requestParser) parse() (http.Request, []byte, error) {
 	return res, body, nil
 }
 
-// sinq - A concurrent integration testing tool
-// Copyright (C) 2026 Veitangie
-// SPDX-License-Identifier: GPL-3.0-or-later
 func (r *requestParser) scanRequestLine(dest *http.Request) error {
 	contents := make([]string, 0, 3)
 	for range 3 {
@@ -208,8 +209,14 @@ func (r *requestParser) scanHeaders(dest *http.Request) error {
 	for {
 		name, err := r.scanWord()
 		err = coalesceErrors(err, r.ctx.Err())
-		if err != nil || len(name) == 0 {
+		if len(name) == 0 {
 			return nil
+		}
+
+		if err == io.EOF {
+			return r.unexpectedEOF()
+		} else if err != nil {
+			return err
 		}
 
 		if name[len(name)-1] != ':' {

@@ -6,13 +6,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -25,8 +25,6 @@ import (
 	"github.com/Veitangie/sinq/internal/scenario"
 	"github.com/Veitangie/sinq/internal/treewalker"
 )
-
-const PERM_RW fs.FileMode = 0666
 
 func populateConfigInRuntime(cfg *config.Config) {
 	if len(cfg.Paths) == 0 {
@@ -97,15 +95,22 @@ func sinq(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	allScenarios := []scenario.ScenarioBlueprint{}
+	allScenarios := []runner.ScenarioBundle{}
 	for _, path := range cfg.Paths {
-		fs := os.DirFS(path)
+		fs, err := NewOSWorkspace(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open filetree at %s: %s\n", path, err.Error())
+			continue
+		}
 		res, err := walker.ParseFiletree(ctx, fs)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: Failed to parse filetree from %s: %s\n", path, err.Error())
 			continue
 		}
-		allScenarios = append(allScenarios, res...)
+		allScenarios = slices.Grow(allScenarios, len(res))
+		for _, scenarioBlueprint := range res {
+			allScenarios = append(allScenarios, runner.ScenarioBundle{ScenarioBlueprint: scenarioBlueprint, Workspace: fs})
+		}
 	}
 
 	if cfg.List {
@@ -119,7 +124,7 @@ func sinq(args []string) int {
 				fmt.Fprintf(os.Stdout, "  - %d: %s\n", idx+1, rqBp.Filename)
 			}
 		}
-		os.Exit(0)
+		return 0
 	}
 
 	transport := &http.Transport{
@@ -143,7 +148,7 @@ func sinq(args []string) int {
 
 	report := reporter.NewPool(stderrReporter, resultReporter)
 	if cfg.Out != "" {
-		file, err := os.OpenFile(cfg.Out, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, PERM_RW)
+		file, err := os.OpenFile(cfg.Out, O_CRWRTR, PERM_RW)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: Failed to open output file: %s\n", err.Error())
 		} else {
@@ -207,11 +212,11 @@ Flags:
   -f, --format string  Output format: std or junit (default "std")
   -V, --verbose        Enable verbose logging
   -c, --color string   Terminal colors: always, never, auto (default "auto")
-	-l, --list           Parse and list scenarios at specified directories
+  -l, --list           Parse and list scenarios at specified directories
   -h, --help           Print this help message and exit
   -v, --version        Print the current sinq version and exit`
 
-const versionConstPart = `sinq v0.0.1 - `
+const versionConstPart = `sinq v1.0.0-RC1 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",

@@ -1,0 +1,5 @@
+$PRE{ res.saveTo("assets/received_file") }
+
+GET ${env.BASE_URL}/download
+
+$ASSERT{ sinq.assert.equals(res.size, 1024) }

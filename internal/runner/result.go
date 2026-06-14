@@ -28,9 +28,9 @@ const (
 )
 
 type ResultTimer struct {
-	clock      Clock
-	at         time.Time
-	intialized bool
+	clock       Clock
+	at          time.Time
+	initialized bool
 }
 
 func newTimer(clock Clock) ResultTimer {
@@ -38,19 +38,19 @@ func newTimer(clock Clock) ResultTimer {
 		clock = DefaultClock{}
 	}
 	return ResultTimer{
-		at:         clock.Now(),
-		clock:      clock,
-		intialized: true,
+		at:          clock.Now(),
+		clock:       clock,
+		initialized: true,
 	}
 }
 
 func (r *ResultTimer) start() {
 	r.at = r.clock.Now()
-	r.intialized = true
+	r.initialized = true
 }
 
 func (r *ResultTimer) Time() time.Duration {
-	if !r.intialized {
+	if !r.initialized {
 		return time.Duration(0)
 	}
 	return r.clock.Now().Sub(r.at)

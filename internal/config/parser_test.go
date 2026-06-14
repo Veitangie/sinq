@@ -74,7 +74,50 @@ func TestParser_Parse(t *testing.T) {
 			}(),
 			wantErrs: 0,
 		},
+		{
+			name:  "Chained Booleans Exhaustive",
+			flags: []string{"-vVhl"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Version = true
+				c.Verbose = true
+				c.Help = true
+				c.List = true
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:       "Color Never",
+			flags:      []string{"-c", "never"},
+			wantConfig: func() Config { c := SaneDefaults(); c.Reporter.Color = Never; return c }(),
+			wantErrs:   0,
+		},
+		{
+			name:       "Double Dash Stop Parsing",
+			flags:      []string{"--"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   0,
+		},
 		// --- Error Cases ---
+		{
+			name:       "Chained Boolean with Invalid Char",
+			flags:      []string{"-svX"},
+			wantConfig: func() Config { c := SaneDefaults(); c.Safe = true; c.Version = true; return c }(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Invalid Color",
+			flags:      []string{"-c", "magenta"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Missing Worker Value",
+			flags:      []string{"-w"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
 		{
 			name:       "Unknown Short Flag",
 			flags:      []string{"-x"},

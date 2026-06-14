@@ -6,8 +6,4 @@ Content-Type: application/json
     "type": "combat"
 }
 
-$POST{
-    if sinq.responses[2].code ~= 201 then
-        sinq.test.fail("Failed to create guild")
-    end
-}
+$ASSERT{ sinq.assert.code(201, "Failed to create guild") }

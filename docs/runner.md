@@ -14,13 +14,13 @@ In `sinq`, the absolute unit of concurrency is the **Scenario**, not the Request
 
 If you have 10 workers and 10 scenarios containing 5 requests each, all 10 scenarios will execute simultaneously. However, the 5 requests *within* each scenario are strictly guaranteed to execute **sequentially**. 
 
-This design choice ensures that complex, multi-step workflows (like logging in, extracting a token, and polling a background job) execute with determinism, while the test suite as a whole finishes as fast as the network allows.
+This design choice was made to ensure that complex, multi-step workflows (like logging in, extracting a token, and polling a background job) execute with determinism, while the test suite as a whole finishes as fast as the network allows.
 
 ## Worker Isolation
 
-Each concurrent worker gets its own Lua VM pool. Because the Treewalker branches the DAG at the directory level, if Leaf A and Leaf B both inherit `01_login.sinq`, they will each execute it independently.
+Each concurrent worker gets its own Lua VM. Because the Treewalker branches the DAG at the directory level, if Leaf A and Leaf B both inherit `01_login.sinq`, they will each execute it independently.
 
-To achieve this, `sinq` uses a soft-reset mechanism. Instead of destroying and rebuilding the Lua `LState` for every scenario, the worker reuses the VM but provides a semi-sandboxed environment to the scripts that is reset across scenario boundaries. However, this semi-sandboxed environment still allows user code to persistently mutate global libraries, which is too expensive to guard against. Any mutations of `sinq`, `env` and `secrets` tables are guaranteed to persist within the scenario but not carry over to any other scenario.
+To achieve this, `sinq` uses a soft-reset mechanism. Instead of destroying and rebuilding the Lua `LState` for every scenario, the worker reuses the VM but provides a semi-sandboxed environment to the scripts that is reset across scenario boundaries. However, this semi-sandboxed environment still allows user code to persistently mutate global libraries. These mutations (for example of `table.insert`) **will** persist for all scenarios ran on the worker. Any mutations of `sinq`, `env` and `secrets` tables are guaranteed to persist within the scenario but not carry over to any other scenario.
 
 *(If you suspect a core Lua library was mutated and leaked across scenarios, you can force a hard-reset of the VM on every request using the `--safe` flag).*
 
@@ -35,9 +35,7 @@ While the workers operate independently, they share underlying resources to opti
 
 When a worker encounters a Lua script block (like a `$PRE` or `$ASSERT` block), it does not execute the raw string. It parses and compiles the script into an Abstract Syntax Tree (AST) bytecode. 
 
-To prevent 100 workers from simultaneously compiling the exact same `01_login.sinq` script, the Runner maintains a thread-safe, globally shared AST cache. The cache key is bound to the physical byte-offset of the script in the `.sinq` file. 
-
-If Worker 2 hits a script that Worker 1 has already compiled, Worker 2 simply executes the cached bytecode. This makes large fan-out tests more CPU efficient.
+To prevent 100 workers from simultaneously compiling the exact same `01_login.sinq` script, the Runner maintains a thread-safe, globally shared AST cache. The cache key is bound to the physical byte-offset of the script in the `.sinq` file.
 
 ## Context Cancellation & Graceful Degradation
 

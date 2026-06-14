@@ -6,9 +6,9 @@ Content-Type: application/json
     "password": "hunter2"
 }
 
-$POST{
-    if sinq.responses[1].code ~= 200 then
-        sinq.test.fail("System login failed")
-    end
-    AUTH_TOKEN = sinq.responses[1].body.token
+$ASSERT{ 
+  sinq.assert.code(200, "System login failed") 
+  sinq.assert.isTrue(type(res.json().token) == "string", "Returned token is not string")
 }
+
+$POST{ AUTH_TOKEN = res.json().token }

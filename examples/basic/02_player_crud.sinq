@@ -10,9 +10,6 @@ Content-Type: application/json
     "class": "Spellsword"
 }
 
-$POST{
-    if sinq.responses[2].code ~= 201 then
-        sinq.test.fail("Failed to create character")
-    end
-    PLAYER_ID = sinq.responses[2].body.id
-}
+$ASSERT{ sinq.assert.code(201, "Failed to create character") }
+
+$POST{ PLAYER_ID = res.json().id }

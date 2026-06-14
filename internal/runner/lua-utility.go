@@ -4,13 +4,12 @@
 package runner
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/Veitangie/sinq/internal/scenario"
@@ -18,54 +17,18 @@ import (
 	"github.com/yuin/gopher-lua/parse"
 )
 
-type extractPayloadFunc = func(scenario.Token) []byte
-
-type scriptKey struct {
-	filename   string
-	scriptname string
-	length     int
-}
-
-func (sk scriptKey) string() string {
-	return sk.filename + "#" + sk.scriptname
-}
-
 func (w *worker) setRequestIdx(ls *lua.LState) int {
-	top := ls.GetTop()
-	if top <= 0 {
-		ls.Error(lua.LString("No value provided for the next request index"), 1)
-		return 0
-	}
+	nextIdxFloat := ls.CheckNumber(1)
 
-	nextIdxRaw := ls.Get(-1)
-	ls.Pop(1)
-
-	nextIdxFloat, ok := nextIdxRaw.(lua.LNumber)
-	if !ok {
-		ls.Error(lua.LString("The value provided for the next request index is not a number"), 1)
-		return 0
-	}
-
-	nextIdx := int(nextIdxFloat)
-	nextIdx--
+	nextIdx := int(nextIdxFloat) - 1
 	if nextIdx >= 0 && nextIdx <= w.maxRequestIdx {
 		w.requestIdx = nextIdx
 	}
-
 	return 0
 }
 
 func (w *worker) failAssert(ls *lua.LState) int {
-	top := ls.GetTop()
-	if top <= 0 {
-		ls.Error(lua.LString("No reason provided for assertion failure"), 1)
-		return 0
-	}
-
-	reasonRaw := ls.Get(-1)
-	ls.Pop(1)
-
-	reasonString := reasonRaw.String()
+	reasonString := ls.CheckString(1)
 	w.assertionFailures = append(w.assertionFailures, reasonString)
 	return 0
 }
@@ -74,10 +37,46 @@ func (w *worker) runEffectfulScript(token scenario.Token, extract extractPayload
 	return w.safeExecute(token, extract, filename, executionTimeout)
 }
 
+func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (string, string, error) {
+	var filenameIn, filenameOut string
+
+	w.lc.setupPreScript(func(L *lua.LState) int {
+		filename := L.CheckString(1)
+
+		info, err := w.env.workspace.Stat(filename)
+		if err != nil || info.IsDir() {
+			L.RaiseError("sinq.request.attach: invalid file path '%s'", filename)
+			return 0
+		}
+
+		filenameIn = filename
+		return 0
+	}, func(L *lua.LState) int {
+		filename := L.CheckString(1)
+
+		info, err := w.env.workspace.Stat(filepath.Dir(filename))
+		if err != nil || !info.IsDir() {
+			L.RaiseError("sinq.response.saveTo: invalid file path '%s'", filename)
+			return 0
+		}
+
+		filenameOut = filename
+		return 0
+	})
+	defer w.lc.tearDownPreScript()
+
+	err := w.runEffectfulScript(token, extract, filename, executionTimeout)
+
+	return filenameIn, filenameOut, err
+}
+
 func (w *worker) runRetryScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (int64, error) {
 	if token.Type != scenario.Script {
 		return -1, nil
 	}
+
+	w.lc.setupRetryScript()
+	defer w.lc.tearDownRetryScript()
 
 	shouldBeNumber, err := w.executeAndExtractValue(token, extract, filename, executionTimeout)
 	if err != nil {
@@ -96,69 +95,20 @@ func (w *worker) runRetryScript(token scenario.Token, extract extractPayloadFunc
 	return int64(resNumber), nil
 }
 
-func (w *worker) compileScript(token scenario.Token, extract extractPayloadFunc, filename string) (*lua.FunctionProto, error) {
-	scriptName := scriptKey{filename, token.Name, token.Start}
+func (w *worker) runAssertScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) error {
+	w.lc.setupAssertScript()
+	defer w.lc.tearDownAssertScript()
 
-	w.scriptCacheLock.RLock()
-	if cache, ok := w.scriptCache[scriptName]; ok {
-		w.scriptCacheLock.RUnlock()
-		return cache, nil
-	}
-	w.scriptCacheLock.RUnlock()
-
-	script := extract(token)
-	buf := make([]byte, 0, token.Line+token.Offset+len(token.Name)+2+len(script))
-	for range token.Line - 1 {
-		buf = append(buf, '\n')
-	}
-	for range token.Offset + len(token.Name) + 1 {
-		buf = append(buf, ' ')
-	}
-
-	buf = append(buf, script...)
-	scriptNameString := scriptName.string()
-	chunk, err := parse.Parse(bytes.NewReader(buf), scriptNameString)
-	if err != nil {
-		return nil, err
-	}
-	compiled, err := lua.Compile(chunk, scriptNameString)
-	if err != nil {
-		return nil, err
-	}
-
-	w.scriptCacheLock.Lock()
-	if cache, ok := w.scriptCache[scriptName]; ok {
-		w.scriptCacheLock.Unlock()
-		return cache, nil
-	}
-	w.scriptCache[scriptName] = compiled
-	w.scriptCacheLock.Unlock()
-
-	return compiled, nil
+	return w.runEffectfulScript(token, extract, filename, executionTimeout)
 }
 
 func (w *worker) safeExecute(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) error {
-	byteCode, err := w.compileScript(token, extract, filename)
+	byteCode, err := w.env.compiler.compileScript(token, extract, filename)
 	if err != nil {
 		return err
 	}
 
-	fn := w.ls.NewFunctionFromProto(byteCode)
-	fn.Env = w.sandbox
-
-	w.ls.Push(fn)
-
-	oldCtx := w.ls.Context()
-	if oldCtx == nil {
-		oldCtx = context.Background()
-	}
-	ctxWithTimeout, cancelCtx := context.WithTimeout(oldCtx, executionTimeout)
-	defer cancelCtx()
-
-	w.ls.SetContext(ctxWithTimeout)
-	err = w.ls.PCall(0, lua.MultRet, nil)
-	w.ls.SetContext(oldCtx)
-	return err
+	return w.lc.runSandboxed(byteCode, executionTimeout)
 }
 
 func fixError(err error) error {
@@ -177,17 +127,17 @@ func fixError(err error) error {
 
 func (w *worker) executeAndExtractValue(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (lua.LValue, error) {
 
-	oldTop := w.ls.GetTop()
-	defer w.ls.SetTop(oldTop)
+	oldTop := w.lc.GetTop()
+	defer w.lc.SetTop(oldTop)
 
 	err := w.safeExecute(token, extract, filename, executionTimeout)
-	newTop := w.ls.GetTop()
+	newTop := w.lc.GetTop()
 	if err == nil {
 		diff := newTop - oldTop
 		if diff < 1 {
 			return nil, fmt.Errorf("%s#%s:%d:%d: Lua script didn't fail in execution but produced no value", filename, token.Name, token.Line, token.Offset)
 		}
-		value := w.ls.Get(-1)
+		value := w.lc.Get(-1)
 		return value, nil
 	}
 
@@ -201,7 +151,7 @@ func (w *worker) executeAndExtractValue(token scenario.Token, extract extractPay
 		return append([]byte("return "), extract(token)...)
 	}
 	err2 := w.safeExecute(token, extractWithReturn, filename, executionTimeout)
-	newTop = w.ls.GetTop()
+	newTop = w.lc.GetTop()
 	if err2 != nil {
 		return nil, fmt.Errorf("Failed to execute lua script: %w", err)
 	}
@@ -210,125 +160,72 @@ func (w *worker) executeAndExtractValue(token scenario.Token, extract extractPay
 	if diff < 1 {
 		return nil, fmt.Errorf("%s#%s:%d:%d: Lua script didn't fail in execution but produced no value", filename, token.Name, token.Line, token.Offset)
 	}
-	value := w.ls.Get(-1)
+	value := w.lc.Get(-1)
 	return value, nil
 }
 
-func (w *worker) toLuaValue(value any) lua.LValue {
-	if value == nil {
-		return lua.LNil
-	}
-
-	switch v := value.(type) {
-	case bool:
-		return lua.LBool(v)
-
-	case float64:
-		return lua.LNumber(v)
-
-	case int:
-		return lua.LNumber(v)
-	case int64:
-		return lua.LNumber(v)
-
-	case string:
-		return lua.LString(v)
-
-	case []any:
-		tbl := w.ls.NewTable()
-		for _, item := range v {
-			tbl.Append(w.toLuaValue(item))
-		}
-		return tbl
-
-	case map[string]any:
-		tbl := w.ls.NewTable()
-		for key, val := range v {
-			tbl.RawSetString(key, w.toLuaValue(val))
-		}
-		return tbl
-
-	case http.Header:
-		tbl := w.ls.NewTable()
-		for key, values := range v {
-			if len(values) == 1 {
-				tbl.RawSetString(key, lua.LString(values[0]))
-			} else if len(values) > 1 {
-				valArray := w.ls.NewTable()
-				for _, val := range values {
-					valArray.Append(lua.LString(val))
-				}
-				tbl.RawSetString(key, valArray)
-			} else {
-				tbl.RawSetString(key, lua.LString(""))
-			}
-		}
-		return tbl
-
-	default:
-		return lua.LNil
-	}
-}
-
-func (w *worker) requestCompleted(ctx context.Context, response *http.Response, requestIdx int) error {
-	defer response.Body.Close()
-
-	resTable := w.ls.NewTable()
-	resTable.RawSetString("code", lua.LNumber(response.StatusCode))
-	resTable.RawSetString("headers", w.toLuaValue(response.Header))
-
-	data, err := io.ReadAll(response.Body)
+func (w *worker) captureBodyToFile(body io.Reader, filenameTo string) error {
+	file, err := w.env.workspace.Create(filenameTo)
 	if err != nil {
 		return err
 	}
-	if w.logger.Enabled(ctx, slog.LevelDebug) {
-		w.logger.Debug("Extracted response", append(w.loggingContext(ctx), "code", response.StatusCode, "headers", response.Header, "body", string(data))...)
+	defer file.Close()
+
+	written, err := io.Copy(file, body)
+	if err != nil {
+		return err
 	}
 
-	resTable.RawSetString("bodyRaw", lua.LString(data))
-
-	var unmarshalledResult any
-	err = json.Unmarshal(data, &unmarshalledResult)
-	if err == nil {
-		resTable.RawSetString("body", w.toLuaValue(unmarshalledResult))
-	}
-
-	// lua indexes start from 1
-	w.responsesTable.RawSetInt(requestIdx+1, resTable)
-
+	w.lc.RecordResponseFile(written)
 	return nil
 }
 
-func (w *worker) setupLuaEnvironment(ctx context.Context, env map[string]any) error {
-	if w.luaStateHardReset || w.ls == nil {
-		if w.ls != nil {
-			w.ls.Close()
-		}
-		w.ls = lua.NewState()
-		w.ls.SetContext(ctx)
-
-		w.sandbox = w.ls.NewTable()
-		sandboxMeta := w.ls.NewTable()
-		w.ls.SetField(sandboxMeta, "__index", w.ls.Get(lua.GlobalsIndex))
-		w.sandbox.Metatable = sandboxMeta
+func (w *worker) captureBodyToLua(body io.Reader, maxBodySize uint64) ([]byte, error) {
+	limited := io.LimitReader(body, int64(maxBodySize)+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return data, err
 	}
 
-	w.sandbox.ForEach(func(k, v lua.LValue) { w.sandbox.RawSet(k, lua.LNil) })
+	oversized := false
+	if uint64(len(data)) > maxBodySize {
+		data = data[:len(data)-1]
+		io.Copy(io.Discard, body)
+		oversized = true
+	}
 
-	sinqTable := w.ls.NewTable()
-	sinqTable.RawSetString("setNextRequest", w.ls.NewFunction(w.setRequestIdx))
+	w.lc.RecordResponseBody(data, oversized)
+	return data, nil
+}
 
-	testTable := w.ls.NewTable()
-	testTable.RawSetString("fail", w.ls.NewFunction(w.failAssert))
-	sinqTable.RawSetString("test", testTable)
+func (w *worker) requestCompleted(ctx context.Context, response *http.Response, filenameTo string, maxBodySize uint64, attempt int) error {
+	defer response.Body.Close()
 
-	responsesTable := w.ls.NewTable()
-	w.responsesTable = responsesTable
-	sinqTable.RawSetString("responses", responsesTable)
+	w.lc.RecordResponseMeta(attempt, response.StatusCode, response.Header)
 
-	w.ls.SetGlobal("secrets", w.toLuaValue(w.secrets))
-	w.ls.SetGlobal("env", w.toLuaValue(env))
+	var err error
+	if filenameTo != "" {
+		err = w.captureBodyToFile(response.Body, filenameTo)
+	} else {
+		var data []byte
+		data, err = w.captureBodyToLua(response.Body, maxBodySize)
+		if w.env.logger.Enabled(ctx, slog.LevelDebug) {
+			w.env.logger.Debug("Extracted response", append(w.loggingContext(ctx), "code", response.StatusCode, "headers", response.Header, "body", string(data))...)
+		}
+	}
 
-	w.ls.SetGlobal("sinq", sinqTable)
+	return err
+}
+
+func (w *worker) setupScenarioEnvironment(ctx context.Context, env map[string]any) error {
+	if w.env.luaStateHardReset || w.lc == nil {
+		if w.lc != nil {
+			w.lc.Close()
+		}
+		w.lc = newLuaContext(ctx)
+	}
+
+	w.lc.setupScenarioEnvironment(w.setRequestIdx, w.failAssert, w.env.secrets, env)
+
 	return nil
 }

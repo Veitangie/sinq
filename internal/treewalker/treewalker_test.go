@@ -6,9 +6,14 @@ package treewalker_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -223,5 +228,86 @@ func TestTreewalker_Cancellation(t *testing.T) {
 	case <-doneCh:
 	case <-time.After(1 * time.Second):
 		t.Fatal("Treewalker failed to exit after context cancellation (Deadlock detected)")
+	}
+}
+func TestTreewalker_MalformedConfig_GracefulFailure(t *testing.T) {
+	memFS := fstest.MapFS{
+		"root/config.scenario": {Data: []byte(`{"timeout": "5s", }`)},
+		"root/test.sinq":       {Data: []byte("GET /")},
+	}
+
+	cfg := config.Config{Workers: 1}
+	walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, mockParseConfig)
+
+	_, err := walker.ParseFiletree(context.Background(), memFS)
+
+	if err == nil {
+		t.Fatal("Expected Treewalker to return an error for malformed JSON, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid character") && !strings.Contains(err.Error(), "JSON") {
+		t.Errorf("Expected a JSON syntax error, got: %v", err)
+	}
+}
+
+func TestTreewalker_Constructors(t *testing.T) {
+	cfg := config.Config{}
+	_, err := treewalker.NewTreewalker(cfg, *slog.Default(), nil, mockParseConfig)
+	if err == nil {
+		t.Error("Expected error for nil parseRequest function")
+	}
+	_, err = treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, nil)
+	if err == nil {
+		t.Error("Expected error for nil parseScenarioConfig function")
+	}
+}
+
+func TestTreewalker_ParseSecrets(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("Valid JSON", func(t *testing.T) {
+		secFile := filepath.Join(tmpDir, "valid.json")
+		_ = os.WriteFile(secFile, []byte(`{"TOKEN": "123"}`), 0644)
+		tw, _ := treewalker.NewTreewalker(config.Config{Secrets: secFile}, *slog.Default(), mockParseRequest, mockParseConfig)
+		secrets, err := tw.ParseSecrets()
+		if err != nil || secrets["TOKEN"] != "123" {
+			t.Errorf("Failed to parse valid secrets: %v", err)
+		}
+	})
+
+	t.Run("Invalid JSON", func(t *testing.T) {
+		secFile := filepath.Join(tmpDir, "invalid.json")
+		_ = os.WriteFile(secFile, []byte(`{"TOKEN": "123"`), 0644)
+		tw, _ := treewalker.NewTreewalker(config.Config{Secrets: secFile}, *slog.Default(), mockParseRequest, mockParseConfig)
+		_, err := tw.ParseSecrets()
+		if err == nil {
+			t.Error("Expected error for malformed JSON secrets file")
+		}
+	})
+
+	t.Run("Missing File", func(t *testing.T) {
+		tw, _ := treewalker.NewTreewalker(config.Config{Secrets: filepath.Join(tmpDir, "missing.json")}, *slog.Default(), mockParseRequest, mockParseConfig)
+		_, err := tw.ParseSecrets()
+		if err == nil {
+			t.Error("Expected error for non-existent secrets file")
+		}
+	})
+}
+
+type errFS struct{}
+
+func (errFS) Open(name string) (fs.File, error) {
+	return nil, errors.New("simulated open error")
+}
+func (errFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	return nil, errors.New("simulated readdir error")
+}
+
+func TestTreewalker_FileSystemErrors(t *testing.T) {
+	cfg := config.Config{Workers: 1, Treewalker: config.TreewalkerConfig{Strict: false}}
+	walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, mockParseConfig)
+
+	_, err := walker.ParseFiletree(context.Background(), errFS{})
+	if err == nil {
+		t.Error("Expected error when FS fails to read directory")
 	}
 }

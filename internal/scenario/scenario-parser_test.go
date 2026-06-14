@@ -4,10 +4,17 @@
 package scenario
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"unicode"
 )
+
+type errorReader struct{}
+
+func (errorReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("simulated read error")
+}
 
 func TestParseRequestBlueprint(t *testing.T) {
 	tests := []struct {
@@ -289,6 +296,122 @@ func TestParseRequestBlueprint(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseSize(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantAmount uint64
+		wantUnit   DataUnit
+		wantErr    bool
+	}{
+		{"Bytes", "500 B", 500, Byte, false},
+		{"Bytes Without Space", "1024Byte", 1024, Byte, false},
+		{"Kilobytes", "2 K", 2048, KiByte, false},
+		{"Megabytes Decimals", "1.5 MiB", 1572864, MiByte, false},
+		{"Gigabytes", "10 G", 10737418240, GiByte, false},
+		{"Missing Unit Defaults to B", "256", 256, Byte, false},
+		{"Whitespace Heavy", "   42   KiByte  ", 43008, KiByte, false},
+		{"Empty String", "", 0, Byte, true},
+		{"Invalid Number", "abc MiB", 0, Byte, true},
+		{"Negative Number", "-10 M", 0, Byte, true},
+		{"Unknown Unit", "100 ZB", 0, Byte, true},
+		{"Multiple Decimals", "10.5.5 MiB", 0, Byte, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSize(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseSize(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if got.ByteAmount != tt.wantAmount {
+					t.Errorf("parseSize(%q) byte amount = %d, want %d", tt.input, got.ByteAmount, tt.wantAmount)
+				}
+				if got.Unit != tt.wantUnit {
+					t.Errorf("parseSize(%q) unit = %v, want %v", tt.input, got.Unit, tt.wantUnit)
+				}
+			}
+		})
+	}
+}
+
+func TestParseConfig(t *testing.T) {
+	t.Run("Valid JSON Parsing", func(t *testing.T) {
+		jsonStr := `{
+			"name": "Test Config",
+			"max_body": "5 MiB",
+			"fail_fast": true
+		}`
+		cfg := SaneDefaultConfig()
+		err := ParseConfig(&cfg, strings.NewReader(jsonStr))
+		if err != nil {
+			t.Fatalf("ParseConfig failed: %v", err)
+		}
+
+		if cfg.Name != "Test Config" {
+			t.Errorf("Expected Name 'Test Config', got %q", cfg.Name)
+		}
+		if cfg.FailFast != true {
+			t.Errorf("Expected FailFast true")
+		}
+		if cfg.MaxBodySize.ByteAmount != 5*uint64(MiByte) {
+			t.Errorf("Expected MaxBodySize to be parsed to 5 MiB, got %d bytes", cfg.MaxBodySize.ByteAmount)
+		}
+	})
+
+	t.Run("Invalid JSON structure", func(t *testing.T) {
+		jsonStr := `{ "name": "bad", "max_body": "10 M"`
+		cfg := SaneDefaultConfig()
+		err := ParseConfig(&cfg, strings.NewReader(jsonStr))
+		if err == nil {
+			t.Error("Expected error on invalid JSON, got nil")
+		}
+	})
+
+	t.Run("Invalid MaxBody format", func(t *testing.T) {
+		jsonStr := `{ "max_body": "invalid_size" }`
+		cfg := SaneDefaultConfig()
+		err := ParseConfig(&cfg, strings.NewReader(jsonStr))
+		if err == nil {
+			t.Error("Expected error on invalid max_body string, got nil")
+		}
+	})
+
+	t.Run("Reader Error", func(t *testing.T) {
+		cfg := SaneDefaultConfig()
+		err := ParseConfig(&cfg, errorReader{})
+		if err == nil {
+			t.Error("Expected error on reader failure, got nil")
+		}
+	})
+}
+
+func TestDataSize_StringAndUnit(t *testing.T) {
+	tests := []struct {
+		size     DataSize
+		expected string
+	}{
+		{DataSize{ByteAmount: 512, Unit: Byte}, "512.000000B"},
+		{DataSize{ByteAmount: 2048, Unit: KiByte}, "2.000000KiB"},
+		{DataSize{ByteAmount: 1572864, Unit: MiByte}, "1.500000MiB"},
+		{DataSize{ByteAmount: 10737418240, Unit: GiByte}, "10.000000GiB"},
+	}
+
+	for _, tt := range tests {
+		got := tt.size.String()
+		if got != tt.expected {
+			t.Errorf("DataSize.String() = %q, want %q", got, tt.expected)
+		}
+	}
+
+	unmappedUnit := DataUnit(999)
+	if unmappedUnit.String() != "" {
+		t.Errorf("Expected empty string for unknown unit, got %q", unmappedUnit.String())
 	}
 }
 

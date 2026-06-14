@@ -26,19 +26,17 @@ func TestRequestParser_Parse(t *testing.T) {
 				"Authorization: Bearer 12345\n" +
 				"Content-Type: application/json\n" +
 				"\n" +
-				`{"user_id": 1}`, // Length: 14 bytes
+				`{"user_id": 1}`,
 			validate: func(t *testing.T, r http.Request) {
 				if r.Method != "GET" {
 					t.Errorf("expected GET, got %s", r.Method)
 				}
-				// Verify URL parsing populated the scheme/host correctly
 				if r.URL.Scheme != "https" {
 					t.Errorf("expected scheme https, got %s", r.URL.Scheme)
 				}
 				if r.URL.Host != "api.example.com" {
 					t.Errorf("expected URL host api.example.com, got %s", r.URL.Host)
 				}
-				// Host field should match URL host unless overridden
 				if r.Host != "api.example.com" {
 					t.Errorf("expected req.Host api.example.com, got %s", r.Host)
 				}
@@ -49,7 +47,6 @@ func TestRequestParser_Parse(t *testing.T) {
 				if string(body) != `{"user_id": 1}` {
 					t.Errorf("wrong body: %s", string(body))
 				}
-				// 14 bytes: `{"user_id": 1}`
 				if r.ContentLength != 14 {
 					t.Errorf("expected ContentLength 14, got %d", r.ContentLength)
 				}
@@ -75,16 +72,13 @@ func TestRequestParser_Parse(t *testing.T) {
 		},
 		{
 			name: "Host Header Promotion (Virtual Domain)",
-			// Even if URL is IP or one domain, Host header must take precedence in req.Host
 			input: "GET https://10.0.0.1/foo HTTP/1.1\n" +
 				"Host: virtual-host.local\n" +
 				"\n",
 			validate: func(t *testing.T, r http.Request) {
-				// req.Host MUST be the manually set Host header
 				if r.Host != "virtual-host.local" {
 					t.Errorf("expected req.Host 'virtual-host.local', got %s", r.Host)
 				}
-				// But the URL object itself retains the original connection target
 				if r.URL.Host != "10.0.0.1" {
 					t.Errorf("expected URL.Host '10.0.0.1', got %s", r.URL.Host)
 				}
@@ -93,7 +87,7 @@ func TestRequestParser_Parse(t *testing.T) {
 		{
 			name: "Content-Length Override (Safety)",
 			input: "POST https://data.io/ingest HTTP/1.1\n" +
-				"Content-Length: 99999\n" + // User lies about length
+				"Content-Length: 99999\n" +
 				"\n" +
 				"small",
 			validate: func(t *testing.T, r http.Request) {
@@ -142,11 +136,10 @@ func TestRequestParser_Parse(t *testing.T) {
 			name: "Indented Headers (Treated as new header)",
 			input: "GET https://fail.com/ HTTP/1.1\n" +
 				"Header: value\n" +
-				"  Folded: oops\n" + // Leading space
+				"  Folded: oops\n" +
 				"\n",
 			wantErr: false,
 			validate: func(t *testing.T, r http.Request) {
-				// Verify that the parser stripped the space and treated it as a valid header
 				if r.Header.Get("Folded") != "oops" {
 					t.Errorf("expected indented line to be parsed as header 'Folded', got empty")
 				}
@@ -154,7 +147,6 @@ func TestRequestParser_Parse(t *testing.T) {
 		},
 		{
 			name: "Edge Case: Value containing colons",
-			// A naive tokenizer splitting on ":" might cut this off at 12
 			input: "POST https://api.com/time HTTP/1.1\n" +
 				"X-Time: 12:00:00\n" +
 				"X-Json: {\"key\":\"value\"}\n" +
@@ -170,7 +162,6 @@ func TestRequestParser_Parse(t *testing.T) {
 		},
 		{
 			name: "Edge Case: Empty Header Value",
-			// Valid in HTTP, often used to clear defaults or signal emptiness
 			input: "GET https://api.com/check HTTP/1.1\n" +
 				"X-Empty-Header:\n" +
 				"X-Empty-Header-With-Space: \n" +
@@ -179,7 +170,6 @@ func TestRequestParser_Parse(t *testing.T) {
 				if val := r.Header.Get("X-Empty-Header"); val != "" {
 					t.Errorf("expected empty string, got %q", val)
 				}
-				// Ensure the key exists even if value is empty
 				if _, ok := r.Header["X-Empty-Header"]; !ok {
 					t.Error("header key was skipped entirely")
 				}
@@ -187,7 +177,6 @@ func TestRequestParser_Parse(t *testing.T) {
 		},
 		{
 			name: "Edge Case: Multiple/Duplicate Headers",
-			// Should append (.Add), not overwrite (.Set)
 			input: "GET https://api.com/list HTTP/1.1\n" +
 				"X-List: Item 1\n" +
 				"X-List: Item 2\n" +
@@ -204,7 +193,6 @@ func TestRequestParser_Parse(t *testing.T) {
 		},
 		{
 			name: "URL: Query Parameters and Fragments",
-			// Ensure the parser doesn't chop off query strings when setting the URL
 			input: "GET https://api.com/search?q=hello&sort=asc#top HTTP/1.1\n" +
 				"\n",
 			validate: func(t *testing.T, r http.Request) {
@@ -218,7 +206,6 @@ func TestRequestParser_Parse(t *testing.T) {
 		},
 		{
 			name: "Structure: No Headers (Body immediately after request line)",
-			//  - The double newline is critical here
 			input: "POST https://api.com/echo HTTP/1.1\n" +
 				"\n" +
 				"Just Body",
@@ -231,7 +218,6 @@ func TestRequestParser_Parse(t *testing.T) {
 		},
 		{
 			name: "Structure: Missing HTTP Version (Defaults)",
-			// Robustness check: if user forgets HTTP/1.1, assume it
 			input: "GET https://api.com/simple\n" +
 				"\n",
 			wantErr: false,
@@ -239,7 +225,7 @@ func TestRequestParser_Parse(t *testing.T) {
 		{
 			name: "Edge Case: EOF after Header (No newline)",
 			input: "GET https://api.com/eof HTTP/1.1\n" +
-				"X-Last: value", // No \n at the very end of string
+				"X-Last: value",
 			validate: func(t *testing.T, r http.Request) {
 				if r.Header.Get("X-Last") != "value" {
 					t.Errorf("failed to parse last header before EOF")
@@ -249,10 +235,9 @@ func TestRequestParser_Parse(t *testing.T) {
 		{
 			name: "Case Insensitivity",
 			input: "GET https://api.com/ HTTP/1.1\n" +
-				"content-type: application/json\n" + // Lowercase key
+				"content-type: application/json\n" +
 				"\n",
 			validate: func(t *testing.T, r http.Request) {
-				// Should be accessible via canonical format
 				if r.Header.Get("Content-Type") != "application/json" {
 					t.Errorf("header canonicalization failed")
 				}
@@ -261,18 +246,36 @@ func TestRequestParser_Parse(t *testing.T) {
 		{
 			name: "Panic on Empty Value",
 			input: "GET https://api.com HTTP/1.1\n" +
-				"Empty-Val:\n" + // <-- Will Panic index out of range
+				"Empty-Val:\n" +
 				"\n",
 			wantErr: false,
 		},
 		{
 			name: "Trailing Whitespace",
 			input: "GET https://api.com HTTP/1.1\n" +
-				"Token: 123   \n" + // <-- Will parse as "123   "
+				"Token: 123   \n" +
 				"\n",
 			wantErr: false,
 		},
+		{
+			name: "Edge Case: Host Trailing Whitespace",
+			input: "GET https://api.com HTTP/1.1\n" +
+				"Host: custom-host.local   \n" +
+				"\n",
+			validate: func(t *testing.T, r http.Request) {
+				if r.Host != "custom-host.local" {
+					t.Errorf("expected trimmed host 'custom-host.local', got %q", r.Host)
+				}
+			},
+		},
 		// --- Failure Cases ---
+		{
+			name: "Fail: Abrupt EOF Mid-Header Key",
+			input: "GET https://api.com HTTP/1.1\n" +
+				"Head",
+			wantErr:     true,
+			errContains: "Unexpected end of file",
+		},
 		{
 			name: "Fail: Header Missing Colon",
 			input: "GET https://fail.com/ HTTP/1.1\n" +
@@ -328,32 +331,27 @@ func TestRequestParser_Parse(t *testing.T) {
 }
 
 func FuzzRequestParser_Heavy(f *testing.F) {
-	f.Add([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n"))                      // Standard CRLF
-	f.Add([]byte("POST / HTTP/1.1\n\nBody"))                                // Standard LF
-	f.Add([]byte("GET\t/path\tHTTP/1.1\n\n"))                               // Tab separated
-	f.Add([]byte("GET / HTTP/1.1\nHeader:"))                                // Trailing colon, no value
-	f.Add([]byte("   GET / HTTP/1.1\n\n"))                                  // Leading whitespace
-	f.Add([]byte{0x00, 0x01, 0xFF})                                         // Pure binary garbage
-	f.Add([]byte("GET / HTTP/1.1\nContent-Length: 999999999999999999\n\n")) // Integer overflow attempts
+	f.Add([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n"))
+	f.Add([]byte("POST / HTTP/1.1\n\nBody"))
+	f.Add([]byte("GET\t/path\tHTTP/1.1\n\n"))
+	f.Add([]byte("GET / HTTP/1.1\nHeader:"))
+	f.Add([]byte("   GET / HTTP/1.1\n\n"))
+	f.Add([]byte{0x00, 0x01, 0xFF})
+	f.Add([]byte("GET / HTTP/1.1\nContent-Length: 999999999999999999\n\n"))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		// Target 1: The full parser
 		p, err := newParser(data, context.Background())
 		if err == nil {
 			_, _, _ = p.parse()
 		}
 
-		// Target 2: Isolate the raw cursor math to ensure no infinite loops
 		p2, err := newParser(data, context.Background())
 		if err == nil {
-			// If scanWord or scanLine don't advance the cursor properly on weird bytes,
-			// this will hang the fuzzer, revealing an infinite loop bug.
 			for p2.current < len(p2.source) {
 				_, _ = p2.scanWord()
 				_, _ = p2.scanLine()
 				p2.skipWhitespace()
 
-				// Fuzzer anti-hang guardrail: force advancement if it gets stuck
 				if p2.current == 0 && len(data) > 0 {
 					p2.current++
 				}
