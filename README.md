@@ -319,7 +319,7 @@ Choose another tool when:
 ## Useful Links
 
 - [Documentation](docs/)
-- [Tree-sitter Grammar](https://Veitangie/tree-sitter-sinq) - syntax highlighting for tree-sitter compatible editors
+- [Tree-sitter Grammar](https://github.com/Veitangie/tree-sitter-sinq) - syntax highlighting for tree-sitter compatible editors
 - [VSCode Extension](https://marketplace.visualstudio.com/items?itemName=Veitangie.sinq) - syntax highlighting for VSCode
 
 ---
