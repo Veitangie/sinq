@@ -73,6 +73,7 @@ $ASSERT{ sinq.assert.isTrue(res.json().status == "complete", "Job never complete
 ```bash
 go install github.com/Veitangie/sinq/cmd/sinq@latest
 ```
+> NOTE: To use sinq after installing it via go make sure your go bin directory is in your `$PATH`
 
 ### Docker (Alpine Minimal)
 ```bash
@@ -84,6 +85,7 @@ docker run -v $(pwd):/tests ghcr.io/veitangie/sinq /tests
 ```bash
 curl https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh | bash
 ```
+> NOTE: This script is targeting **stable releases only**, to install a release candidate or a pre-release you need to pass target version explicitly
 
 ### From Source
 ```bash
