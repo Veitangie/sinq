@@ -66,3 +66,165 @@ func TestRunner_GoroutineLeakage(t *testing.T) {
 	}()
 	<-durationCh
 }
+
+func TestRunner_CartesianMath_TakePath(t *testing.T) {
+	allLabels := [][]string{
+		{"admin", "guest"},
+		{"visa", "amex", "mc"},
+	}
+
+	expected := [][]string{
+		{"admin", "visa"},
+		{"admin", "amex"},
+		{"admin", "mc"},
+		{"guest", "visa"},
+		{"guest", "amex"},
+		{"guest", "mc"},
+	}
+
+	for i := range 6 {
+		got := takePath(i, allLabels)
+		if len(got) != len(expected[i]) {
+			t.Fatalf("takePath(%d) returned length %d, expected %d", i, len(got), len(expected[i]))
+		}
+		for j := range got {
+			if got[j] != expected[i][j] {
+				t.Errorf("takePath(%d)[%d] = %s, expected %s", i, j, got[j], expected[i][j])
+			}
+		}
+	}
+}
+
+func TestRunner_StartDataSource_MatrixFanOut(t *testing.T) {
+	cfg := config.SaneDefaults()
+	cfg.Workers = 2
+
+	runner := &Runner{
+		cfg: cfg,
+	}
+
+	scenarios := []ScenarioBundle{
+		{
+			ScenarioBlueprint: scenario.ScenarioBlueprint{
+				Config: &scenario.ScenarioConfig{
+					Name: "MatrixCheckout",
+					Env: map[string]any{
+						"base_url": "https://api.test",
+						"ttl":      30,
+					},
+					EnvMatrix: []map[string]map[string]any{
+						{
+							"admin": {"role": "admin", "ttl": 60},
+							"guest": {"role": "guest"},
+						},
+						{
+							"success": {"expect": 200},
+							"decline": {"expect": 402},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	taskCh := runner.startDataSource(ctx, scenarios)
+
+	var tasks []taskBundle
+	for task := range taskCh {
+		tasks = append(tasks, task)
+	}
+
+	if len(tasks) != 4 {
+		t.Fatalf("Expected exactly 4 tasks from matrix fan-out, got %d", len(tasks))
+	}
+
+	seenCombinations := make(map[string]bool)
+
+	for _, task := range tasks {
+		if len(task.labels) != 2 {
+			t.Fatalf("Expected 2 labels per task, got %v", task.labels)
+		}
+
+		expectedName := "MatrixCheckout_" + task.labels[0] + "_" + task.labels[1]
+		if task.getFullName() != expectedName {
+			t.Errorf("getFullName() = %s, expected %s", task.getFullName(), expectedName)
+		}
+
+		if task.env["base_url"] != "https://api.test" {
+			t.Errorf("Base env leaked or not copied: %v", task.env)
+		}
+
+		role := task.env["role"].(string)
+		status := task.env["expect"].(int)
+		ttl := task.env["ttl"].(int)
+
+		var comboKey string
+		if role == "admin" {
+			if ttl != 60 {
+				t.Errorf("Matrix overwrite failed! Admin should have ttl 60, got %d", ttl)
+			}
+			comboKey += "admin-"
+		} else {
+			if ttl != 30 {
+				t.Errorf("Base env corrupted! Guest should have ttl 30, got %d", ttl)
+			}
+			comboKey += "guest-"
+		}
+
+		if status == 200 {
+			comboKey += "success"
+		} else {
+			comboKey += "decline"
+		}
+
+		seenCombinations[comboKey] = true
+	}
+
+	expectedCombos := []string{"admin-success", "admin-decline", "guest-success", "guest-decline"}
+	for _, expected := range expectedCombos {
+		if !seenCombinations[expected] {
+			t.Errorf("Matrix fan-out missed combination: %s", expected)
+		}
+	}
+}
+
+func TestRunner_StartDataSource_NoMatrix(t *testing.T) {
+	runner := &Runner{cfg: config.SaneDefaults()}
+
+	scenarios := []ScenarioBundle{
+		{
+			ScenarioBlueprint: scenario.ScenarioBlueprint{
+				Config: &scenario.ScenarioConfig{
+					Name: "PlainScenario",
+					Env: map[string]any{
+						"key": "value",
+					},
+					EnvMatrix: nil,
+				},
+			},
+		},
+	}
+
+	taskCh := runner.startDataSource(context.Background(), scenarios)
+
+	tasks := []taskBundle{}
+	for task := range taskCh {
+		tasks = append(tasks, task)
+	}
+
+	if len(tasks) != 1 {
+		t.Fatalf("Expected exactly 1 task for non-matrix scenario, got %d", len(tasks))
+	}
+
+	task := tasks[0]
+	if len(task.labels) != 0 {
+		t.Errorf("Expected 0 labels, got %d", len(task.labels))
+	}
+	if task.getFullName() != "PlainScenario" {
+		t.Errorf("getFullName mutated base name unnecessarily: %s", task.getFullName())
+	}
+	if task.env["key"] != "value" {
+		t.Errorf("Env map was corrupted in standard execution")
+	}
+}

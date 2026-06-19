@@ -144,7 +144,7 @@ func TestSinq_EndToEnd_Chaos(t *testing.T) {
 	timeoutDir := filepath.Join(tmpDir, "01_timeout")
 	os.MkdirAll(timeoutDir, 0755)
 
-	_ = os.WriteFile(filepath.Join(timeoutDir, "config.scenario"), []byte(`{"timeout": "50ms"}`), 0644)
+	_ = os.WriteFile(filepath.Join(timeoutDir, "config.scenario"), []byte(`{"req_timeout": "50ms"}`), 0644)
 
 	req1 := fmt.Sprintf("GET %s/blackhole\n", srv.URL)
 	_ = os.WriteFile(filepath.Join(timeoutDir, "blackhole.sinq"), []byte(req1), 0644)

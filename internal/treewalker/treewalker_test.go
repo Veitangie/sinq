@@ -47,9 +47,9 @@ func TestTreewalker_InheritanceAndLeaves(t *testing.T) {
 
 	memFS := fstest.MapFS{
 		"root/setup.sinq":        {Data: []byte("SETUP")},
-		"root/config.scenario":   {Data: []byte(`{"timeout": "10s", "env": {"GLOBAL": "1"}}`)},
+		"root/config.scenario":   {Data: []byte(`{"req_timeout": "10s", "env": {"GLOBAL": "1"}}`)},
 		"root/A/test.sinq":       {Data: []byte("TEST_A")},
-		"root/A/config.scenario": {Data: []byte(`{"timeout": "5s", "env": {"A_VAL": "2"}}`)},
+		"root/A/config.scenario": {Data: []byte(`{"req_timeout": "5s", "env": {"A_VAL": "2"}}`)},
 		"root/B/test.sinq":       {Data: []byte("TEST_B")},
 	}
 
@@ -92,8 +92,8 @@ func TestTreewalker_InheritanceAndLeaves(t *testing.T) {
 	if len(bpA.Requests) != 2 {
 		t.Errorf("Scenario A: Expected 2 requests (inherited setup), got %d", len(bpA.Requests))
 	}
-	if bpA.Config.Timeout.Duration != 5*time.Second {
-		t.Errorf("Scenario A: Expected timeout 5s (override), got %v", bpA.Config.Timeout)
+	if bpA.Config.ReqTimeout.Duration != 5*time.Second {
+		t.Errorf("Scenario A: Expected timeout 5s (override), got %v", bpA.Config.ReqTimeout)
 	}
 	if bpA.Config.Env["GLOBAL"] != "1" || bpA.Config.Env["A_VAL"] != "2" {
 		t.Errorf("Scenario A: Env merging failed. Got %v", bpA.Config.Env)
@@ -106,8 +106,8 @@ func TestTreewalker_InheritanceAndLeaves(t *testing.T) {
 	if len(bpB.Requests) != 2 {
 		t.Errorf("Scenario B: Expected 2 requests, got %d", len(bpB.Requests))
 	}
-	if bpB.Config.Timeout.Duration != 10*time.Second {
-		t.Errorf("Scenario B: Expected timeout 10s (inherited), got %v", bpB.Config.Timeout)
+	if bpB.Config.ReqTimeout.Duration != 10*time.Second {
+		t.Errorf("Scenario B: Expected timeout 10s (inherited), got %v", bpB.Config.ReqTimeout)
 	}
 	if _, hasA := bpB.Config.Env["A_VAL"]; hasA {
 		t.Error("Scenario B: Poisoned! Found env var from Sibling A")
@@ -232,7 +232,7 @@ func TestTreewalker_Cancellation(t *testing.T) {
 }
 func TestTreewalker_MalformedConfig_GracefulFailure(t *testing.T) {
 	memFS := fstest.MapFS{
-		"root/config.scenario": {Data: []byte(`{"timeout": "5s", }`)},
+		"root/config.scenario": {Data: []byte(`{"req_timeout": "5s", }`)},
 		"root/test.sinq":       {Data: []byte("GET /")},
 	}
 

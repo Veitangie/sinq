@@ -20,7 +20,7 @@ When a leaf directory inherits a `config.scenario` file from a parent, the confi
 **Parent `config.scenario`:**
 ```json
 {
-  "timeout": "5s",
+  "req_timeout": "5s",
   "env": {
     "BASE_URL": "[https://api.local](https://api.local)",
     "FEATURE_FLAG": "true"
@@ -31,7 +31,7 @@ When a leaf directory inherits a `config.scenario` file from a parent, the confi
 **Child (Leaf) `config.scenario`:**
 ```json
 {
-  "timeout": "15s",
+  "req_timeout": "15s",
   "env": {
     "FEATURE_FLAG": "false",
     "NEW_VAR": "hello"
@@ -42,7 +42,7 @@ When a leaf directory inherits a `config.scenario` file from a parent, the confi
 **Final Aggregated Configuration for the Leaf:**
 ```json
 {
-  "timeout": "15s",
+  "req_timeout": "15s",
   "fail_fast": true, 
   "env": {
     "BASE_URL": "[https://api.local](https://api.local)",

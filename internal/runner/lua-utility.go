@@ -222,8 +222,10 @@ func (w *worker) setupScenarioEnvironment(ctx context.Context, env map[string]an
 		if w.lc != nil {
 			w.lc.Close()
 		}
-		w.lc = newLuaContext(ctx)
+		w.lc = newLuaContext()
 	}
+
+	w.lc.SetContext(ctx)
 
 	w.lc.setupScenarioEnvironment(w.setRequestIdx, w.failAssert, w.env.secrets, env)
 

@@ -103,7 +103,7 @@ func TestWorker_RequestCompleted_JSONArrayBlindspot(t *testing.T) {
 }
 
 func TestWorker_ContextCancellation_CleanExit(t *testing.T) {
-	taskCh := make(chan ScenarioBundle)
+	taskCh := make(chan taskBundle)
 	errorCh := make(chan error, 1)
 	resCh := make(chan ScenarioResult, 1)
 
@@ -137,15 +137,17 @@ func TestWorker_ProcessScenario_PanicRecovery(t *testing.T) {
 	w.resCh = resCh
 	w.errorCh = errorCh
 
-	bundle := ScenarioBundle{
+	bundle := taskBundle{
 		ScenarioBlueprint: scenario.ScenarioBlueprint{
 			Config: &scenario.ScenarioConfig{
-				Name:    "PanicScenario",
-				Timeout: scenario.Duration{Duration: 1 * time.Second},
+				Name:       "PanicScenario",
+				ReqTimeout: scenario.Duration{Duration: 1 * time.Second},
 			},
 			Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
 		},
-		Workspace: nil,
+		workspace: nil,
+		env:       map[string]any{},
+		labels:    []string{},
 	}
 
 	w.processScenario(context.Background(), bundle)

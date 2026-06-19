@@ -1,0 +1,12 @@
+POST ${env.BASE_URL}/checkout
+Authorization: Bearer ${env.auth_token}
+Content-Type: application/json
+
+{
+    "role": "${env.role}",
+    "payment_method": "${env.method}"
+}
+
+$ASSERT{
+    sinq.assert.code(env.expected_status, "Matrix status code mismatch for " .. env.role .. " using " .. env.method)
+}

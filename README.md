@@ -134,13 +134,13 @@ Because `stage_two` is the only directory with no subfolders, this resolves into
 #### Example 2: Branching
 ```text
 tests/
-├── 00_base.scenario       (Sets "timeout": "5s", "env": {"host": "api.local"})
+├── 00_base.scenario       (Sets "req_timeout": "5s", "env": {"host": "api.local"})
 ├── 01_auth.sinq           (Logs in, saves AUTH_TOKEN to globals)
 ├── users/
 │   ├── 02_create.sinq     (Uses AUTH_TOKEN)
 │   └── 03_delete.sinq     (Uses AUTH_TOKEN)
 └── payments/
-    ├── payments.scenario  (Overrides "timeout": "15s" only for the payments/ scenario)
+    ├── payments.scenario  (Overrides "req_timeout": "15s" only for the payments/ scenario)
     ├── 02_process.sinq    (Uses AUTH_TOKEN)
     └── 03_refund.sinq     (Uses AUTH_TOKEN)
 ```
@@ -231,19 +231,31 @@ Each response table contains:
 Default configuration that can be overridden in `.scenario` files:
 ```json
 {
-  "name": "path/to/first/.scenario/file",
+  "name": "path/to/dir/of/last/file",
   "description": "",
   "env": { },
-  "timeout": "5s",
+  "req_timeout": "5s",
+  "script_timeout": "5s",
+  "timeout": "10m",
   "fail_fast": true,
   "max_retries": 10,
   "max_redirects": 5,
-  "max_body_size": "1MB"
+  "max_body_size": "1MB",
+  "env_matrix": [{ }]
 }
 ```
 
-* **`max_body_size`**: Protects the Lua VM from massive payloads. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
-* **`timeout`**: The global timeout for the entire scenario execution.
+* **`name`**: The name of the scenario. If this particular `.scenario` file is used in several scenarios - they will all have the same name.
+* **`description`**: Description of the scenario.
+* **`env`**: Object that will be parsed into `sinq.env` Lua table, which will then be acessible from all Lua scripts.
+* **`req_timeout`**: Timeout for any single request in the scenario.
+* **`script_timeout`**: Timeout for any single script run in the scenario.
+* **`timeout`**: Total timeout for the whole scenario.
+* **`fail_fast`**: When true, scenarios will not be ran if any of them fails to compile for some reason, and the scenarios stop at the first failed assertion.
+* **`max_retries`**: The maximum amount of times any request in the scenario can be retried upon retry script returning a valid non-negative number.
+* **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
+* **`max_body_size`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
+* **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](docs/env-matrix.md).
 
 Everything defined in the `env` object can be accessed directly in your HTTP paths and headers using `${env.variableName}`, or inside your Lua scripts via the global `env` table.
 

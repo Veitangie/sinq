@@ -29,25 +29,50 @@ type ScenarioBundle struct {
 	Workspace Workspace
 }
 
-func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, secrets map[string]any) (<-chan ScenarioResult, <-chan time.Duration, <-chan error) {
-
-	taskCh := make(chan ScenarioBundle, r.cfg.Workers)
-	errorCh := make(chan error, r.cfg.Workers)
-	resultCh := make(chan ScenarioResult, r.cfg.Workers)
-	durationCh := make(chan time.Duration, 1)
-	wg := sync.WaitGroup{}
+func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle) <-chan taskBundle {
+	taskCh := make(chan taskBundle, r.cfg.Workers)
 
 	go func() {
 	Loop:
 		for _, sc := range scenarios {
-			select {
-			case <-ctx.Done():
-				break Loop
-			case taskCh <- sc:
+
+			allLabels, totalPaths := buildAllPaths(sc.Config.EnvMatrix)
+
+			for path := range totalPaths {
+
+				labels := takePath(path, allLabels)
+				totalEnv := deepCopy(sc.Config.Env)
+				for idx, label := range labels {
+					deepMerge(totalEnv, sc.Config.EnvMatrix[idx][label])
+				}
+
+				bundle := taskBundle{
+					sc.ScenarioBlueprint,
+					sc.Workspace,
+					totalEnv,
+					labels,
+				}
+
+				select {
+				case <-ctx.Done():
+					break Loop
+				case taskCh <- bundle:
+				}
 			}
 		}
 		close(taskCh)
 	}()
+
+	return taskCh
+}
+
+func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, secrets map[string]any) (<-chan ScenarioResult, <-chan time.Duration, <-chan error) {
+
+	taskCh := r.startDataSource(ctx, scenarios)
+	errorCh := make(chan error, r.cfg.Workers)
+	resultCh := make(chan ScenarioResult, r.cfg.Workers)
+	durationCh := make(chan time.Duration, 1)
+	wg := sync.WaitGroup{}
 
 	sharedCache := map[scriptKey]*lua.FunctionProto{}
 	sharedLock := sync.RWMutex{}
