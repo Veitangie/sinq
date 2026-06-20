@@ -12,6 +12,10 @@ import (
 	"strings"
 )
 
+type envMatrixHelper struct {
+	EnvMatrix []map[string]any `json:"env_matrix"`
+}
+
 func ParseConfig(target *ScenarioConfig, source io.Reader) error {
 	bytes, err := io.ReadAll(source)
 	if err != nil {
@@ -30,6 +34,39 @@ func ParseConfig(target *ScenarioConfig, source io.Reader) error {
 			return fmt.Errorf("Failed to parse max body size: %w", err)
 		}
 		target.MaxBodySize = bodySize
+	}
+
+	helper := envMatrixHelper{}
+	err = json.Unmarshal(bytes, &helper)
+	if err != nil {
+		return fmt.Errorf("Failed to parse env matrix: %w", err)
+	}
+
+	if len(helper.EnvMatrix) > 0 {
+		invalidKeys := []string{}
+		allTypeSafe := make([]map[string]map[string]any, 0, len(helper.EnvMatrix))
+		for idx, env := range helper.EnvMatrix {
+			if len(env) == 0 {
+				continue
+			}
+
+			typeSafe := make(map[string]map[string]any, len(env))
+			for k, v := range env {
+				if typeSafeEntry, ok := v.(map[string]any); ok {
+					typeSafe[k] = typeSafeEntry
+				} else {
+					invalidKeys = append(invalidKeys, fmt.Sprintf("[%d].%s", idx, k))
+				}
+			}
+
+			allTypeSafe = append(allTypeSafe, typeSafe)
+		}
+
+		if len(invalidKeys) > 0 {
+			return fmt.Errorf("Failed to parse env matrix: keys %v have non-object values", invalidKeys)
+		}
+
+		target.EnvMatrix = append(target.EnvMatrix, allTypeSafe...)
 	}
 
 	return nil

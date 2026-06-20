@@ -1,0 +1,12 @@
+{
+  "env_matrix": [
+    {
+      "admin": { "role": "admin", "auth_token": "sys-jwt-999" },
+      "guest": { "role": "guest", "auth_token": "guest-jwt-111" }
+    },
+    {
+      "card": { "method": "card", "expected_status": 200 },
+      "crypto": { "method": "crypto", "expected_status": 202 }
+    }
+  ]
+}

@@ -34,8 +34,9 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 
 	scenarioBp := &scenario.ScenarioBlueprint{
 		Config: &scenario.ScenarioConfig{
-			MaxRetries: 3,
-			Timeout:    scenario.Duration{Duration: 30 * time.Second},
+			MaxRetries:    3,
+			ReqTimeout:    scenario.Duration{Duration: 30 * time.Second},
+			ScriptTimeout: scenario.Duration{Duration: 30 * time.Second},
 		},
 	}
 
@@ -213,8 +214,9 @@ func TestRequestProcessor_MaxRetriesExceeded(t *testing.T) {
 
 	scenarioBp := &scenario.ScenarioBlueprint{
 		Config: &scenario.ScenarioConfig{
-			MaxRetries: 2,
-			Timeout:    scenario.Duration{Duration: 5 * time.Second},
+			MaxRetries:    2,
+			ReqTimeout:    scenario.Duration{Duration: 5 * time.Second},
+			ScriptTimeout: scenario.Duration{Duration: 5 * time.Second},
 		},
 	}
 

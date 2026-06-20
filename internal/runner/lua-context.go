@@ -1,3 +1,6 @@
+// sinq - A concurrent integration testing tool
+// Copyright (C) 2026 Veitangie
+// SPDX-License-Identifier: GPL-3.0-or-later
 package runner
 
 import (
@@ -20,13 +23,8 @@ type luaContext struct {
 	responseTable     *lua.LTable
 }
 
-func newLuaContext(ctx context.Context) *luaContext {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
+func newLuaContext() *luaContext {
 	lc := luaContext{LState: *lua.NewState()}
-	lc.SetContext(ctx)
 
 	lc.sandbox = lc.NewTable()
 	sandboxMeta := lc.NewTable()

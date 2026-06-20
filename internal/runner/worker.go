@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
+	"strings"
 	"time"
 
 	"github.com/Veitangie/sinq/internal/scenario"
@@ -21,6 +22,20 @@ import (
 type Workspace interface {
 	fs.StatFS
 	Create(string) (io.WriteCloser, error)
+}
+
+type taskBundle struct {
+	scenario.ScenarioBlueprint
+	workspace Workspace
+	env       map[string]any
+	labels    []string
+}
+
+func (t taskBundle) getFullName() string {
+	if len(t.labels) > 0 {
+		return t.Config.Name + "_" + strings.Join(t.labels, "_")
+	}
+	return t.Config.Name
 }
 
 type workerEnv struct {
@@ -36,7 +51,7 @@ type workerEnv struct {
 type worker struct {
 	id                int
 	env               workerEnv
-	taskCh            <-chan ScenarioBundle
+	taskCh            <-chan taskBundle
 	errorCh           chan<- error
 	resCh             chan<- ScenarioResult
 	requestIdx        int
@@ -98,7 +113,9 @@ Scenarios:
 				break Scenarios
 			}
 
-			w.processScenario(context.WithValue(ctx, scenarioNameContext, task.Config.Name), task)
+			ctxTimeout, cancel := context.WithTimeout(ctx, task.Config.Timeout.Duration)
+			w.processScenario(context.WithValue(ctxTimeout, scenarioNameContext, task.getFullName()), task)
+			cancel()
 		case <-ctx.Done():
 			break Scenarios
 		}
@@ -169,7 +186,7 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 	return nil, true
 }
 
-func (w *worker) processScenario(ctx context.Context, bundle ScenarioBundle) {
+func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	w.env.logger.Debug("Starting scenario", w.loggingContext(ctx)...)
 	requestResults := make([]RequestResult, len(bundle.Requests))
 	scenarioTimer := newTimer(w.env.clock)
@@ -179,14 +196,14 @@ func (w *worker) processScenario(ctx context.Context, bundle ScenarioBundle) {
 		w.errorCh <- err
 		w.env.logger.Warn("Failed to create cookiejar for scenario", w.loggingContextWithErr(ctx, err)...)
 		requestResults[0].ErrorMessage = "Failed to create cookie jar"
-		w.reportResult(ctx, scenarioTimer, bundle.Config.Name, Aborted, requestResults)
+		w.reportResult(ctx, scenarioTimer, bundle.getFullName(), Aborted, requestResults)
 		return
 	}
 
 	client := http.Client{
 		Transport: w.env.transport,
 		Jar:       jar,
-		Timeout:   bundle.Config.Timeout.Duration,
+		Timeout:   bundle.Config.ReqTimeout.Duration,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= bundle.Config.MaxRedirects {
 				return errors.New("Too many redirects")
@@ -195,25 +212,25 @@ func (w *worker) processScenario(ctx context.Context, bundle ScenarioBundle) {
 		},
 	}
 
-	w.env.workspace = bundle.Workspace
+	w.env.workspace = bundle.workspace
 	defer func() {
 		w.env.workspace = nil
 		if r := recover(); r != nil {
 			w.env.logger.Warn("Panic during scenario run", w.loggingContext(ctx)...)
 			w.env.logger.Debug("More detailed info on panic", append(w.loggingContext(ctx), "panic", r)...)
-			w.reportResult(ctx, scenarioTimer, bundle.Config.Name, Error, requestResults)
+			w.reportResult(ctx, scenarioTimer, bundle.getFullName(), Error, requestResults)
 		}
 	}()
 
 	w.requestIdx = 0
 	w.maxRequestIdx = len(bundle.Requests) - 1
 	w.assertionFailures = make([]string, 0)
-	err = w.setupScenarioEnvironment(ctx, bundle.Config.Env)
+	err = w.setupScenarioEnvironment(ctx, bundle.env)
 	if err != nil {
 		w.errorCh <- err
 		w.env.logger.Warn("Failed to set up lua environment for scenario", w.loggingContextWithErr(ctx, err)...)
 		requestResults[0].ErrorMessage = "Failed to set up lua scenario"
-		w.reportResult(ctx, scenarioTimer, bundle.Config.Name, Aborted, requestResults)
+		w.reportResult(ctx, scenarioTimer, bundle.getFullName(), Aborted, requestResults)
 		return
 	}
 	scenarioTimer.start()
@@ -243,7 +260,7 @@ func (w *worker) processScenario(ctx context.Context, bundle ScenarioBundle) {
 		}
 	}
 
-	w.reportResult(ctx, scenarioTimer, bundle.Config.Name, status, requestResults)
+	w.reportResult(ctx, scenarioTimer, bundle.getFullName(), status, requestResults)
 }
 
 func (w *worker) materializeRequest(ctx context.Context, req *scenario.RequestBlueprint, executionTimeout time.Duration) ([]byte, error) {

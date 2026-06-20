@@ -125,6 +125,31 @@ func Test_ExamplesDirectory(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			w.Write(downloadBytes)
 
+		case r.URL.Path == "/checkout" && r.Method == "POST":
+			var body struct {
+				Role          string `json:"role"`
+				PaymentMethod string `json:"payment_method"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			auth := r.Header.Get("Authorization")
+			if body.Role == "admin" && auth != "Bearer sys-jwt-999" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			if body.Role == "guest" && auth != "Bearer guest-jwt-111" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+
+			if body.PaymentMethod == "crypto" {
+				w.WriteHeader(http.StatusAccepted)
+			} else {
+				w.WriteHeader(http.StatusOK)
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -155,7 +180,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 		"env": map[string]string{
 			"BASE_URL": srv.URL,
 		},
-		"timeout": "50ms",
+		"req_timeout": "50ms",
 	}
 	configBytes, _ := json.MarshalIndent(configData, "", "  ")
 
@@ -178,8 +203,9 @@ func Test_ExamplesDirectory(t *testing.T) {
 	defer os.Remove(secretsPath)
 
 	args := []string{
-		"--workers", "6",
+		"--workers", "10",
 		"--format", "default",
+		"--color", "always",
 		"--secrets", secretsPath,
 		examplesDir,
 	}

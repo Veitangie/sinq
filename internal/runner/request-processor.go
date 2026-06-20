@@ -50,7 +50,7 @@ func (p *RequestProcessor) handleError(err error) error {
 func (p *RequestProcessor) runPre() error {
 	p.w.env.logger.Debug("Worker running pre script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.start()
-	filenameFrom, filenameTo, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.Timeout.Duration)
+	filenameFrom, filenameTo, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.result.Pre = p.requestTimer.Time()
 	p.totalRequestTimer = p.requestTimer
 	p.result.StartedAt = p.requestTimer.at
@@ -67,7 +67,7 @@ func (p *RequestProcessor) runPre() error {
 func (p *RequestProcessor) materialize() error {
 	p.w.env.logger.Debug("Worker materializing request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.start()
-	materialized, err := p.w.materializeRequest(p.ctx, p.requestBp, p.scenarioBp.Config.Timeout.Duration)
+	materialized, err := p.w.materializeRequest(p.ctx, p.requestBp, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.materialized = materialized
 	p.result.Materialization = p.requestTimer.Time()
 
@@ -153,7 +153,7 @@ func (p *RequestProcessor) send() error {
 func (p *RequestProcessor) runRetry() error {
 	p.w.env.logger.Debug("Worker running retry script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.start()
-	retryIn, err := p.w.runRetryScript(p.requestBp.Retry, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.Timeout.Duration)
+	retryIn, err := p.w.runRetryScript(p.requestBp.Retry, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.result.Retry = p.requestTimer.Time()
 	p.retryIn = retryIn
 
@@ -200,7 +200,7 @@ func (p *RequestProcessor) run() error {
 func (p *RequestProcessor) runAssert() error {
 	p.w.env.logger.Debug("Worker running assert script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.start()
-	err := p.w.runAssertScript(p.requestBp.Assert, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.Timeout.Duration)
+	err := p.w.runAssertScript(p.requestBp.Assert, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.result.Assert = p.requestTimer.Time()
 
 	if err != nil {
@@ -212,7 +212,7 @@ func (p *RequestProcessor) runAssert() error {
 func (p *RequestProcessor) runPost() error {
 	p.w.env.logger.Debug("Worker running post script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.start()
-	err := p.w.runEffectfulScript(p.requestBp.Post, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.Timeout.Duration)
+	err := p.w.runEffectfulScript(p.requestBp.Post, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.result.Post = p.requestTimer.Time()
 
 	if err != nil {

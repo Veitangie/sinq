@@ -74,12 +74,15 @@ type ScenarioConfig struct {
 
 	Env map[string]any `json:"env"`
 
-	Timeout      Duration `json:"timeout"`
-	FailFast     bool     `json:"fail_fast"`
-	MaxRedirects int      `json:"max_redirects"`
-	MaxRetries   int      `json:"max_retries"`
-	MaxBody      string   `json:"max_body"`
-	MaxBodySize  DataSize
+	ReqTimeout    Duration `json:"req_timeout"`
+	ScriptTimeout Duration `json:"script_timeout"`
+	Timeout       Duration `json:"timeout"`
+	FailFast      bool     `json:"fail_fast"`
+	MaxRedirects  int      `json:"max_redirects"`
+	MaxRetries    int      `json:"max_retries"`
+	MaxBody       string   `json:"max_body"`
+	MaxBodySize   DataSize
+	EnvMatrix     []map[string]map[string]any
 }
 
 type DataSize struct {
@@ -121,7 +124,7 @@ func (sc ScenarioConfig) String() string {
 		sc.Name,
 		sc.Description,
 		sc.Env,
-		sc.Timeout,
+		sc.ReqTimeout,
 		sc.FailFast,
 		sc.MaxRedirects,
 		sc.MaxRetries,
@@ -135,10 +138,12 @@ type Duration struct {
 
 func SaneDefaultConfig() ScenarioConfig {
 	return ScenarioConfig{
-		Timeout:      Duration{5 * time.Second},
-		FailFast:     true,
-		MaxRedirects: 10,
-		MaxRetries:   5,
+		ReqTimeout:    Duration{5 * time.Second},
+		ScriptTimeout: Duration{5 * time.Second},
+		Timeout:       Duration{10 * time.Minute},
+		FailFast:      true,
+		MaxRedirects:  10,
+		MaxRetries:    5,
 		MaxBodySize: DataSize{
 			ByteAmount: 1 << 20,
 			Unit:       MiByte,

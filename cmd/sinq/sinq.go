@@ -216,11 +216,12 @@ Flags:
   -h, --help           Print this help message and exit
   -v, --version        Print the current sinq version and exit`
 
-const versionConstPart = `sinq v1.0.0-RC1 - `
+const versionConstPart = `sinq v1.0.0-rc.2 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",
 	"Sinq Is Not Quokka",
 	"Save Intergalactic Neutrino Quants",
 	"A[s]ynchronous Test[in]g Tool[q]it",
+	"Sinq Is Now Qombinatorial",
 }
