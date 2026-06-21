@@ -4,26 +4,25 @@ set -e
 REPO="Veitangie/sinq"
 INSTALL_DIR="/usr/local/bin"
 TARGET_VERSION=$1
-EXE_EXT=""
 
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+OS=$(uname -s)
 ARCH=$(uname -m)
 
-case "$ARCH" in
-    x86_64) ARCH="amd64" ;;
-    aarch64|arm64) ARCH="arm64" ;;
-    *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
-esac
-
 case "$OS" in
-    linux*)     OS="linux" ;;
-    darwin*)    OS="darwin" ;;
-    msys*|cygwin*|mingw*|nt|win*) OS="windows"; EXE_EXT=".exe" ;;
+    Linux*)     OS_NAME="linux"; EXT=".tar.gz" ;;
+    Darwin*)    OS_NAME="macOS"; EXT=".tar.gz" ;;
+    CYGWIN*|MINGW*|MSYS*) OS_NAME="windows"; EXT=".zip"; EXE_EXT=".exe" ;;
     *)          echo "Unsupported OS: $OS"; exit 1 ;;
 esac
 
-BINARY_NAME="sinq${EXE_EXT}"
-echo "Detected OS: $OS, Architecture: $ARCH"
+case "$ARCH" in
+    x86_64|amd64) ARCH_NAME="x86_64" ;;
+    aarch64|arm64) ARCH_NAME="arm64" ;;
+    *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+esac
+
+BINARY_NAME="sinq${EXE_EXT:-}"
+echo "Detected OS: $OS_NAME, Architecture: $ARCH_NAME"
 
 if [ -z "$TARGET_VERSION" ]; then
     echo "Fetching latest release version..."
@@ -38,58 +37,67 @@ else
     echo "Target version specified: $TARGET_VERSION"
 fi
 
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TARGET_VERSION/sinq-${OS}-${ARCH}${EXE_EXT}"
-TMP_FILE="/tmp/sinq_download${EXE_EXT}"
+RAW_VERSION=$(echo "$TARGET_VERSION" | sed 's/^v//')
+ARCHIVE_NAME="sinq-${RAW_VERSION}-${OS_NAME}-${ARCH_NAME}${EXT}"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TARGET_VERSION/$ARCHIVE_NAME"
+CHECKSUMS_URL="https://github.com/$REPO/releases/download/$TARGET_VERSION/checksums.txt"
+
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+TMP_ARCHIVE="$TMP_DIR/$ARCHIVE_NAME"
+TMP_CHECKSUMS="$TMP_DIR/checksums.txt"
 
 echo "Downloading $DOWNLOAD_URL..."
-if ! curl -sL "$DOWNLOAD_URL" -o "$TMP_FILE"; then
-    echo "Error: Download failed."
+if ! curl -sL "$DOWNLOAD_URL" -o "$TMP_ARCHIVE"; then
+    echo "Error: Failed to download archive."
     exit 1
 fi
 
-CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
-CHECKSUM_FILE="${TMP_FILE}.sha256"
-
-echo "Downloading checksum file..."
-if ! curl -sL "$CHECKSUM_URL" -o "$CHECKSUM_FILE"; then
-    echo "Error: Failed to download checksum file."
-    rm -f "$TMP_FILE"
+echo "Downloading checksums..."
+if ! curl -sL "$CHECKSUMS_URL" -o "$TMP_CHECKSUMS"; then
+    echo "Error: Failed to download checksums file."
     exit 1
 fi
 
 echo "Verifying checksum..."
-EXPECTED_CHECKSUM=$(awk '{print $1}' "$CHECKSUM_FILE")
+EXPECTED_CHECKSUM=$(grep "$ARCHIVE_NAME" "$TMP_CHECKSUMS" | awk '{print $1}')
+if [ -z "$EXPECTED_CHECKSUM" ]; then
+    echo "Error: Checksum for $ARCHIVE_NAME not found in checksums.txt"
+    exit 1
+fi
 
 if command -v sha256sum >/dev/null 2>&1; then
-    ACTUAL_CHECKSUM=$(sha256sum "$TMP_FILE" | awk '{print $1}')
+    ACTUAL_CHECKSUM=$(sha256sum "$TMP_ARCHIVE" | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then
-    ACTUAL_CHECKSUM=$(shasum -a 256 "$TMP_FILE" | awk '{print $1}')
+    ACTUAL_CHECKSUM=$(shasum -a 256 "$TMP_ARCHIVE" | awk '{print $1}')
 else
-    echo "Error: Neither sha256sum nor shasum utility found. Cannot verify binary integrity."
-    rm -f "$TMP_FILE" "$CHECKSUM_FILE"
+    echo "Error: Neither sha256sum nor shasum utility found. Cannot verify integrity."
     exit 1
 fi
 
 if [ "$ACTUAL_CHECKSUM" != "$EXPECTED_CHECKSUM" ]; then
-    echo "Error: Checksum verification failed! The binary may be corrupted or compromised."
+    echo "Error: Checksum verification failed!"
     echo "Expected: $EXPECTED_CHECKSUM"
     echo "Actual:   $ACTUAL_CHECKSUM"
-    rm -f "$TMP_FILE" "$CHECKSUM_FILE"
     exit 1
 fi
-
 echo "Checksum verified successfully."
-rm -f "$CHECKSUM_FILE"
-# --- End Checksum Verification ---
 
-chmod +x "$TMP_FILE"
+echo "Extracting archive..."
+if [ "$EXT" = ".tar.gz" ]; then
+    tar -xzf "$TMP_ARCHIVE" -C "$TMP_DIR" "$BINARY_NAME"
+else
+    unzip -q "$TMP_ARCHIVE" "$BINARY_NAME" -d "$TMP_DIR"
+fi
 
 echo "Installing $BINARY_NAME to $INSTALL_DIR..."
+chmod +x "$TMP_DIR/$BINARY_NAME"
 if [ -w "$INSTALL_DIR" ]; then
-    mv "$TMP_FILE" "$INSTALL_DIR/$BINARY_NAME"
+    mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
 else
     echo "Elevated permissions required to write to $INSTALL_DIR. Prompting for sudo..."
-    sudo mv "$TMP_FILE" "$INSTALL_DIR/$BINARY_NAME"
+    sudo mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
 fi
 
 echo "Successfully installed $BINARY_NAME $TARGET_VERSION!"

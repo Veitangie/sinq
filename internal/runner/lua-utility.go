@@ -27,6 +27,11 @@ func (w *worker) setRequestIdx(ls *lua.LState) int {
 	return 0
 }
 
+func (w *worker) finishScenario(ls *lua.LState) int {
+	w.requestIdx = w.maxRequestIdx + 1
+	return 0
+}
+
 func (w *worker) failAssert(ls *lua.LState) int {
 	reasonString := ls.CheckString(1)
 	w.assertionFailures = append(w.assertionFailures, reasonString)
@@ -227,7 +232,7 @@ func (w *worker) setupScenarioEnvironment(ctx context.Context, env map[string]an
 
 	w.lc.SetContext(ctx)
 
-	w.lc.setupScenarioEnvironment(w.setRequestIdx, w.failAssert, w.env.secrets, env)
+	w.lc.setupScenarioEnvironment(w.setRequestIdx, w.finishScenario, w.failAssert, w.env.secrets, env)
 
 	return nil
 }

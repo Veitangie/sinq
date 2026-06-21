@@ -34,12 +34,13 @@ func newLuaContext() *luaContext {
 	return &lc
 }
 
-func (lc *luaContext) setupScenarioEnvironment(setIdx lua.LGFunction, failAssert lua.LGFunction, secrets any, env any) {
+func (lc *luaContext) setupScenarioEnvironment(setIdx lua.LGFunction, finishScenario lua.LGFunction, failAssert lua.LGFunction, secrets any, env any) {
 	lc.sandbox.ForEach(func(k, v lua.LValue) { lc.sandbox.RawSet(k, lua.LNil) })
 	lc.sandbox.RawSetString("_G", lc.sandbox)
 
 	lc.sinqTable = lc.NewTable()
 	lc.sinqTable.RawSetString("setNextRequest", lc.NewFunction(setIdx))
+	lc.sinqTable.RawSetString("finishScenario", lc.NewFunction(finishScenario))
 
 	lc.allResponsesTable = lc.NewTable()
 	lc.sinqTable.RawSetString("responses", lc.allResponsesTable)

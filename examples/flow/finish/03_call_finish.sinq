@@ -1,0 +1,8 @@
+GET ${env.BASE_URL}/guilds/spellswords
+
+$ASSERT{ sinq.assert.code(200, "Failed to double check guild") }
+
+$POST{
+    -- Trigger the new API feature to cleanly exit before request #4
+    sinq.finishScenario()
+}

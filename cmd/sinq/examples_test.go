@@ -150,6 +150,11 @@ func Test_ExamplesDirectory(t *testing.T) {
 			} else {
 				w.WriteHeader(http.StatusOK)
 			}
+
+		case r.URL.Path == "/unreachable":
+			t.Errorf("The /unreachable endpoint was hit! sinq.finishScenario() failed to abort the sequence.")
+			w.WriteHeader(http.StatusBadRequest)
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

@@ -27,6 +27,7 @@ Shorthands for the *current* request and response being processed.
 
 ### Flow Control
 * **`sinq.setNextRequest(index)`**: Alters execution flow. The next request executed will be the one at the specified `index` (1-based). Useful for building loops or conditional skips within a scenario.
+* **`sinq.finishScenario()`**: Alters execution flow. Tells `sinq` to finish the scenario once the current request completes its life cycle. Useful for gracefully finishing loops or conditional scenario shutdowns.
 
 ---
 

@@ -69,42 +69,134 @@ $ASSERT{ sinq.assert.isTrue(res.json().status == "complete", "Job never complete
 
 ## Installation & Usage
 
-### Via Go (Requires Go 1.25+)
-```bash
-go install github.com/Veitangie/sinq/cmd/sinq@latest
-```
-> NOTE: To use sinq after installing it via go make sure your go bin directory is in your `$PATH`
+Choose your preferred installation method below to get started.
 
-### Docker (Alpine Minimal)
+<details>
+<summary><strong>🍺 Homebrew (macOS & Linux)</strong></summary>
+
+The easiest way to install and stay updated on macOS or Linux is via the official Homebrew tap.
+
+```bash
+brew install Veitangie/tap/sinq
+```
+
+> For MacOS Users: Due to Apple's policies, you will need to turn off the quarantine flag for the installed binary:
+> ```bash
+> xattr -d com.apple.quarantine $(which sinq)
+> ```
+</details>
+
+<details>
+<summary><strong>🐧 Debian / Ubuntu (.deb)</strong></summary>
+
+Pre-compiled `.deb` packages are generated for every release.
+
+1. Go to the [Releases page](https://github.com/Veitangie/sinq/releases) and find the latest version.
+2. Download the `.deb` file for your architecture (`amd64` or `arm64`).
+3. Install it using `dpkg`:
+```bash
+sudo dpkg -i sinq-*.deb
+```
+</details>
+
+<details>
+<summary><strong>🎩 Fedora / RHEL (.rpm)</strong></summary>
+
+Pre-compiled `.rpm` packages are generated for every release.
+
+1. Go to the [Releases page](https://github.com/Veitangie/sinq/releases) and find the latest version.
+2. Download the `.rpm` file for your architecture (`amd64` or `arm64`).
+3. Install it using `rpm`:
+```bash
+sudo rpm -i sinq-*.rpm
+```
+</details>
+
+<details>
+<summary><strong>❄️ Nix & NixOS</strong></summary>
+
+Nix flakes are officially supported via the dedicated `sinq-nix` registry. You can run `sinq` directly without installing it:
+
+```bash
+nix run github:Veitangie/sinq-nix
+```
+
+Or add it to your environment/configuration:
+```nix
+# flake.nix
+inputs.sinq.url = "github:Veitangie/sinq-nix";
+
+# In your configuration package list:
+# inputs.sinq.packages.${system}.default
+```
+</details>
+
+<details>
+<summary><strong>📦 Arch Linux (AUR)</strong></summary>
+
+*Coming soon.* The Arch User Repository package (`sinq-bin`) will be available shortly once the AUR resumes normal operations. 
+</details>
+
+<details>
+<summary><strong>🐳 Docker (Alpine Minimal)</strong></summary>
+
+Official multi-architecture images are hosted on the GitHub Container Registry. Mount your local test directory into the container to execute scenarios.
+
 ```bash
 docker pull ghcr.io/veitangie/sinq:latest
 docker run -v $(pwd):/tests ghcr.io/veitangie/sinq /tests
 ```
+</details>
 
-### From Install Script
+<details>
+<summary><strong>⚡ Install Script (macOS & Linux)</strong></summary>
+
+A quick curl script that downloads the correct binary archive, verifies the SHA256 checksum, and extracts it to `/usr/local/bin`.
+
 ```bash
-curl https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh | bash
+curl -sL [https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh](https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh) | bash
 ```
-> NOTE: This script is targeting **stable releases only**, to install a release candidate or a pre-release you need to pass target version explicitly
+> *Note: This script targets stable releases by default. To install a specific version (like a release candidate), pass the version tag as an argument:*
+> `curl -sL .../install.sh | bash -s v1.0.0-rc.3`
+</details>
 
-### From Source
+<details>
+<summary><strong>🐹 Go Install (Requires Go 1.25+)</strong></summary>
+
+If you have a Go environment set up, you can compile and install directly from the module.
+
+```bash
+go install github.com/Veitangie/sinq/cmd/sinq@latest
+```
+> *Note: Ensure your `$(go env GOPATH)/bin` directory is in your system `$PATH`.*
+</details>
+
+<details>
+<summary><strong>🔧 Build From Source</strong></summary>
+
 ```bash
 git clone git@github.com:Veitangie/sinq.git
 cd sinq
-go build ./cmd/sinq/
+go build -ldflags="-w -s" -o sinq ./cmd/sinq/
 ```
+</details>
 
-### As [GitHub Action](https://github.com/Veitangie/sinq-action)
+<details>
+<summary><strong>🤖 GitHub Actions (CI/CD)</strong></summary>
+
+Integrate `sinq` natively into your GitHub Actions pipeline using the official action.
+
 ```yaml
 steps:
   - name: Checkout code
     uses: actions/checkout@v6
 
-  - name: Run Sinq
+  - name: Run Sinq Integration Tests
     uses: Veitangie/sinq-action@v1
     with:
       args: '-w 10 -S path/to/secrets.json tests/e2e'
 ```
+</details>
 
 ---
 
@@ -195,6 +287,7 @@ There are two categories of scripts within a `.sinq` file:
 * `env` — Table of environment variables configured for the scenario.
 * `secrets` — Table of secrets passed via the `-S` argument.
 * `sinq.setNextRequest(index)` — Change execution flow to the n-th request (1-indexed). Allows loops or skipping requests.
+* `sinq.finishScenario()` — Change execution flow to end after the current request.
 * `res` — Shorthand for current request's response table
 * `req` — Shorthand for current request table
 
@@ -334,7 +427,7 @@ Choose another tool when:
 
 - [Documentation](docs/)
 - [Tree-sitter Grammar](https://github.com/Veitangie/tree-sitter-sinq) - syntax highlighting for tree-sitter compatible editors
-- [VSCode Extension](https://marketplace.visualstudio.com/items?itemName=Veitangie.sinq) - syntax highlighting for VSCode
+- [VSCode Extension](https://marketplace.visualstudio.com/items?itemName=Veitangie.sinq-helper) - syntax highlighting for VSCode
 
 ---
 
