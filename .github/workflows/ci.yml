@@ -3,6 +3,7 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [ "**" ]
+    tags: [ "v*" ]
     paths:
       - 'cmd/**'
       - 'examples/**'
@@ -21,8 +22,6 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/ci.yml'
-  release:
-    types: [published]
 
 jobs:
   test:
@@ -52,20 +51,19 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  release-binaries:
-    name: Compile & Upload Binaries
+  release:
+    name: Build, Pack & Publish
     needs: test
-    if: github.event_name == 'release'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    strategy:
-      matrix:
-        goos: [linux, windows, darwin]
-        goarch: [amd64, arm64]
+      packages: write
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -73,41 +71,10 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Compile Binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+      - name: Generate Man Page
         run: |
-          OUTPUT_NAME=sinq-${{ matrix.goos }}-${{ matrix.goarch }}
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            OUTPUT_NAME="${OUTPUT_NAME}.exe"
-          fi
-          go build -ldflags="-w -s" -o $OUTPUT_NAME ./cmd/sinq
-          sha256sum $OUTPUT_NAME > ${OUTPUT_NAME}.sha256
-
-      - name: Upload to GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.event.release.tag_name }} sinq-*
-
-  release-docker:
-    name: Build & Push Multi-Arch GHCR
-    needs: test
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v6
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+          go install github.com/cpuguy83/go-md2man/v2@latest
+          go-md2man -in=docs/man.md -out=sinq.1
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
@@ -116,23 +83,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/veitangie/sinq
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
+      - name: Set up QEMU & Docker Buildx
+        uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
-      - name: Build and push
-        uses: docker/build-push-action@v7
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
         with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          NIX_GITHUB_TOKEN: ${{ secrets.NIX_GITHUB_TOKEN }}
+          AUR_KEY: ${{ secrets.AUR_SSH_KEY }}

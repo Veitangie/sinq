@@ -1,0 +1,90 @@
+version: 2
+project_name: sinq
+
+builds:
+  - id: sinq
+    main: ./cmd/sinq
+    binary: sinq
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: '{{ .ProjectName }}-{{ .Version }}-{{ if eq .Os "darwin" }}macOS{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "amd64" }}x86_64{{ else if eq .Arch "386" }}i386{{ else }}{{ .Arch }}{{ end }}'
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE.md
+      - sinq.1
+
+nfpms:
+  - id: packages
+    maintainer: Veitangie
+    description: A concurrent HTTP functional and integration testing tool.
+    homepage: https://github.com/Veitangie/sinq
+    license: GPLv3
+    formats:
+      - deb
+      - rpm
+    contents:
+      - src: sinq.1
+        dst: /usr/share/man/man1/sinq.1.gz
+        file_info:
+          mode: 0644
+
+homebrew_casks:
+  - repository:
+      owner: Veitangie
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/Veitangie/sinq
+    description: A concurrent HTTP functional and integration testing tool.
+    license: GPL-3.0-only
+    manpages:
+      - sinq.1
+
+# aurs:
+#   - name: sinq-bin
+#     homepage: https://github.com/Veitangie/sinq
+#     description: A concurrent HTTP functional and integration testing tool.
+#     maintainer: Veitangie
+#     license: GPL-3.0
+#     private_key: '{{ .Env.AUR_KEY }}'
+#     git_url: 'ssh://aur@aur.archlinux.org/sinq-bin.git'
+#     package: |-
+#       install -Dm755 sinq "${pkgdir}/usr/bin/sinq"
+#       install -Dm644 sinq.1 "${pkgdir}/usr/share/man/man1/sinq.1"
+
+nix:
+  - name: sinq
+    repository:
+      owner: Veitangie
+      name: sinq-nix
+      token: "{{ .Env.NIX_GITHUB_TOKEN }}"
+    homepage: https://github.com/Veitangie/sinq
+    description: A concurrent HTTP functional and integration testing tool.
+    license: gpl3Only
+
+dockers_v2:
+  - images:
+      - ghcr.io/veitangie/sinq
+    dockerfile: Dockerfile
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    tags:
+      - "{{ .Tag }}"
+      - "{{ if not .Prerelease }}v{{ .Major }}{{ end }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"

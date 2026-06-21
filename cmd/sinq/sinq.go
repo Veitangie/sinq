@@ -216,7 +216,7 @@ Flags:
   -h, --help           Print this help message and exit
   -v, --version        Print the current sinq version and exit`
 
-const versionConstPart = `sinq v1.0.0-rc.2 - `
+const versionConstPart = `sinq v1.0.0-rc.3 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",
