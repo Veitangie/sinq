@@ -1,4 +1,6 @@
 local condition, message = ...
-if type(message) ~= "string" then error("lua.assert.true: Call with non-string message", 1) end
+if type(message) == "nil" then message = "sinq.assert.isTrue: Assertion failed" end
+
+if type(message) ~= "string" then error("sinq.assert.isTrue: Call with non-string message", 1) end
 
 if not condition then sinq.assert.fail(message) end

@@ -18,11 +18,13 @@ func NewResultReporter() *ResultReporter {
 }
 
 func (r *ResultReporter) Report(source <-chan runner.ScenarioResult, timer <-chan time.Duration, size int) error {
+	count := 0
 	for result := range source {
 		if !r.success {
 			continue
 		}
 
+		count += 1
 		for _, reqResult := range result.RequestResults {
 			if reqResult.Status == runner.Failure || reqResult.Status == runner.Error {
 				r.success = false
@@ -32,6 +34,7 @@ func (r *ResultReporter) Report(source <-chan runner.ScenarioResult, timer <-cha
 
 	}
 	<-timer
+	r.success = r.success && count == size
 	return nil
 }
 

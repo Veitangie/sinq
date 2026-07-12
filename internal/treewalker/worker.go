@@ -40,7 +40,7 @@ func (w *worker) run(ctx context.Context) {
 }
 
 func (w *worker) runTask(task []string) {
-	w.t.logger.Debug("Worker got task", "workerId", w.id, "taskPath", task)
+	w.t.logger.Debug("[Treewalker] Worker got task", "workerId", w.id, "taskPaths", task)
 
 	scenarioConfig := scenario.SaneDefaultConfig()
 	requestBlueprints := make([]*scenario.RequestBlueprint, 0, len(task))
@@ -51,6 +51,10 @@ func (w *worker) runTask(task []string) {
 		case strings.HasSuffix(filePath, scenarioConfigFiletype):
 			w.handleScenarioConfigFile(&scenarioConfig, filePath)
 		}
+	}
+
+	if len(requestBlueprints) == 0 {
+		return
 	}
 
 	if scenarioConfig.Name == "" {
@@ -112,7 +116,7 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 
 	file, err := w.fileSystem.Open(filePath)
 	if err != nil {
-		w.t.logger.Error("Error occurred while opening file", "error", err, "filePath", filePath)
+		w.t.logger.Error("[Treewalker] Error occurred while opening file", "error", err, "filePath", filePath)
 		w.errorCh <- fmt.Errorf("Error occurred while opening file %s: %w", filePath, err)
 		return
 	}
@@ -120,7 +124,7 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 
 	err = w.t.parseScenarioConfig(scenarioConfig, file)
 	if err != nil {
-		w.t.logger.Error("Error occurred while parsing file", "error", err, "filePath", filePath)
+		w.t.logger.Error("[Treewalker] Error occurred while parsing file", "error", err, "filePath", filePath)
 		w.errorCh <- fmt.Errorf("Error occurred while parsing file %s: %w", filePath, err)
 	}
 
@@ -132,14 +136,14 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 func (w *worker) handleRequestFile(requestBlueprints *[]*scenario.RequestBlueprint, filePath string) {
 
 	if cachedRequest, isFound := readCache(filePath, w.requestCache, w.requestCacheLock); isFound {
-		w.t.logger.Debug("There was a cache hit", "filePath", filePath)
+		w.t.logger.Debug("[Treewalker] There was a cache hit", "filePath", filePath)
 		*requestBlueprints = append(*requestBlueprints, cachedRequest)
 		return
 	}
 
 	file, err := w.fileSystem.Open(filePath)
 	if err != nil {
-		w.t.logger.Error("Error occurred while opening file", "error", err, "filePath", filePath)
+		w.t.logger.Error("[Treewalker] Error occurred while opening file", "error", err, "filePath", filePath)
 		w.errorCh <- fmt.Errorf("Error occurred while opening file %s: %w", filePath, err)
 		return
 	}
@@ -147,7 +151,7 @@ func (w *worker) handleRequestFile(requestBlueprints *[]*scenario.RequestBluepri
 
 	requestBlueprint, err := w.t.parseRequest(file, filePath)
 	if err != nil {
-		w.t.logger.Error("Error occurred while parsing file", "error", err, "filePath", filePath)
+		w.t.logger.Error("[Treewalker] Error occurred while parsing file", "error", err, "filePath", filePath)
 		w.errorCh <- fmt.Errorf("Error occurred while parsing file %s: %w", filePath, err)
 		return
 	}

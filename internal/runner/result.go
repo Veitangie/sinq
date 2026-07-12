@@ -21,7 +21,8 @@ func (d DefaultClock) Now() time.Time {
 type ResultStatus int
 
 const (
-	Aborted ResultStatus = iota
+	Unset ResultStatus = iota
+	Aborted
 	Success
 	Error
 	Failure

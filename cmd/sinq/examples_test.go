@@ -209,7 +209,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 
 	args := []string{
 		"--workers", "10",
-		"--format", "default",
+		"--format", "std",
 		"--color", "always",
 		"--secrets", secretsPath,
 		examplesDir,

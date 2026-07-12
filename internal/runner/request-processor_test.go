@@ -89,9 +89,9 @@ func TestBug_SaveToLeak(t *testing.T) {
 		t.Fatalf("runPreScript failed: %v", err)
 	}
 
-	saveToVal := w.lc.responseTable.RawGetString("saveTo")
+	saveToVal := w.lc.requestTable.RawGetString("saveResponseTo")
 	if saveToVal.Type().String() != "nil" {
-		t.Errorf("BUG EXPOSED: 'saveTo' leaked! Expected LNil in responseTable, got %s", saveToVal.Type().String())
+		t.Errorf("BUG EXPOSED: 'saveResponseTo' leaked! Expected LNil in requestTable, got %s", saveToVal.Type().String())
 	}
 }
 

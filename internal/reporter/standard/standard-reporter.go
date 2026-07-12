@@ -21,6 +21,12 @@ const (
 	Yellow = "\033[33m"
 )
 
+const (
+	checkmark = "✓"
+	cross     = "✗"
+	circle    = "○"
+)
+
 type StandardReporter struct {
 	cfg    config.ReporterConfig
 	writer io.Writer
@@ -34,131 +40,164 @@ func NewReporter(cfg config.ReporterConfig, writer io.Writer) StandardReporter {
 
 func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-chan time.Duration, size int) error {
 	var err error
-	reset := Reset
-	red := Red
-	green := Green
-	yellow := Yellow
 
-	if r.cfg.Color == config.Never {
-		reset = ""
-		red = ""
-		green = ""
-		yellow = ""
+	markSuccess := checkmark
+	markFail := cross
+	markAborted := circle
+
+	if r.cfg.Color != config.Never {
+		markSuccess = Green + markSuccess + Reset
+		markFail = Red + markFail + Reset
+		markAborted = Yellow + markAborted + Reset
 	}
 
-	resetBytes := []byte(reset)
-	total := 0
-	passed := 0
+	totalScenarios := 0
+	ranScenarios := 0
+	successfulScenarios := 0
+	totalRequests := 0
+	ranRequests := 0
+	successfulRequests := 0
 	for result := range source {
-		total += 1
-		scenarioColor := green
+		totalScenarios += 1
+		scenarioMark := markSuccess
 		switch result.Status {
 		case runner.Aborted:
-			scenarioColor = yellow
+			scenarioMark = markAborted
 		case runner.Success:
-			passed += 1
+			successfulScenarios += 1
+			ranScenarios += 1
 		default:
-			scenarioColor = red
+			scenarioMark = markFail
+			ranScenarios += 1
 		}
 
-		_, err = fmt.Fprintf(r.writer, "%sScenario: %s, Started At: %s\n", scenarioColor, result.Name, result.StartedAt.Format(time.RFC3339))
+		scenarioTackOn := ""
+		if r.cfg.Verbose {
+			scenarioTackOn = fmt.Sprintf(" [Started: %s]", result.StartedAt.Format("15:04:05.000"))
+		}
+
+		_, err = fmt.Fprintf(r.writer, " %s Scenario: %s (%s)%s\n", scenarioMark, result.Name, fmtDuration(result.TotalDuration), scenarioTackOn)
 		if err != nil {
 			continue
 		}
-		_, err = fmt.Fprintf(r.writer, "Status: %v, Total duration: %v%s\n", result.Status, result.TotalDuration, reset)
-		if err != nil {
-			continue
-		}
 
-		for idx, request := range result.RequestResults {
+		for _, request := range result.RequestResults {
+			totalRequests += 1
 			if err != nil {
 				continue
 			}
-			requestColor := green
+			requestMark := markSuccess
 			switch request.Status {
 			case runner.Aborted:
-				requestColor = yellow
+				requestMark = markAborted
 			case runner.Success:
+				successfulRequests += 1
+				ranRequests += 1
 			default:
-				requestColor = red
+				requestMark = markFail
+				ranRequests += 1
 			}
 
-			_, err = fmt.Fprintf(r.writer, "%s - %0d: Request %s, Started At: %v, Status: %v\n", requestColor, idx, request.Name, request.StartedAt, request.Status)
-			if err != nil {
-				continue
+			requestTackOn := ""
+			if r.cfg.Verbose {
+				requestTackOn = fmt.Sprintf(" [Started: %s]", request.StartedAt.Format("15:04:05.000"))
 			}
-			_, err = fmt.Fprintf(r.writer, " - Duration total: %v\n", request.Total)
+
+			_, err = fmt.Fprintf(r.writer, "   %s %s (%s)%s\n", requestMark, request.Name, fmtDuration(request.Total), requestTackOn)
 			if err != nil {
 				continue
 			}
 			if r.cfg.Verbose {
-				_, err = reportTime(r.writer, "   - Pre script duration: %v\n", request.Pre)
+				_, err = reportTime(r.writer, "     - Pre:    %8s\n", request.Pre)
 				if err != nil {
 					continue
 				}
-				_, err = reportTime(r.writer, "   - Materialization duration: %v\n", request.Materialization)
+				_, err = reportTime(r.writer, "     - Mat:    %8s\n", request.Materialization)
 				if err != nil {
 					continue
 				}
-				_, err = reportTime(r.writer, "   - Parsing duration: %v\n", request.Parsing)
+				_, err = reportTime(r.writer, "     - Parse:  %8s\n", request.Parsing)
 				if err != nil {
 					continue
 				}
-				_, err = reportTime(r.writer, "   - Execution duration: %v\n", request.Execution)
+				_, err = reportTime(r.writer, "     - Exec:   %8s\n", request.Execution)
 				if err != nil {
 					continue
 				}
-				_, err = reportTime(r.writer, "   - Retry script duration: %v\n", request.Retry)
+				_, err = reportTime(r.writer, "     - Retry:  %8s\n", request.Retry)
 				if err != nil {
 					continue
 				}
-				_, err = reportTime(r.writer, "   - Assert script duration: %v\n", request.Assert)
+				_, err = reportTime(r.writer, "     - Assert: %8s\n", request.Assert)
 				if err != nil {
 					continue
 				}
-				_, err = reportTime(r.writer, "   - Post script duration: %v\n", request.Post)
+				_, err = reportTime(r.writer, "     - Post:   %8s\n", request.Post)
 				if err != nil {
 					continue
 				}
 			}
 			if err == nil && len(request.FailedAssertions) > 0 {
-				_, err = fmt.Fprintf(r.writer, " - Failed assertions: %s\n", strings.Join(request.FailedAssertions, ", "))
+				_, err = fmt.Fprintf(r.writer, "   - Failed assertions: %s\n", strings.Join(request.FailedAssertions, ", "))
 
 				if err != nil {
 					continue
 				}
 			}
 			if err == nil && request.ErrorMessage != "" {
-				_, err = fmt.Fprintf(r.writer, " - Error: %s\n", request.ErrorMessage)
+				_, err = fmt.Fprintf(r.writer, "   - Error: %s\n", request.ErrorMessage)
 				if err != nil {
 					continue
 				}
 			}
+		}
 
-			_, err = r.writer.Write(resetBytes)
-			if err != nil {
-				continue
-			}
-			_, err = r.writer.Write([]byte{'\n'})
-			if err != nil {
-				continue
-			}
+		_, err = r.writer.Write([]byte{'\n'})
+		if err != nil {
+			continue
 		}
 	}
 
 	if err == nil {
-		finalColor := green
-		if passed != total {
-			finalColor = red
+		finalMark := markSuccess
+		statusText := "PASSED"
+
+		if successfulScenarios != totalScenarios {
+			finalMark = markFail
+			statusText = "FAILED"
 		}
-		_, err = fmt.Fprintf(r.writer, "%sTotal tests: %d, successful: %d, total duration: %v%s\n", finalColor, total, passed, <-timer, reset)
+		skippedScenarios := size - ranScenarios
+		failedScenarios := size - successfulScenarios - skippedScenarios
+		_, err = fmt.Fprintf(r.writer, " %s %s in %s | Scenarios: %d%s %d%s %d%s (%d) | %d requests sent\n",
+			finalMark,
+			statusText,
+			fmtDuration(<-timer),
+			successfulScenarios, markSuccess,
+			failedScenarios, markFail,
+			skippedScenarios, markAborted,
+			size,
+			ranRequests,
+		)
 	}
 	return err
 }
 
 func reportTime(writer io.Writer, format string, duration time.Duration) (int, error) {
 	if duration > 0 {
-		return fmt.Fprintf(writer, format, duration)
+		return fmt.Fprintf(writer, format, fmtDuration(duration))
 	}
 	return 0, nil
+}
+
+func fmtDuration(d time.Duration) string {
+	if d < time.Microsecond {
+		return fmt.Sprintf("%dns", d.Nanoseconds())
+	}
+	if d < time.Millisecond {
+		return fmt.Sprintf("%dµs", d.Microseconds())
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.2fs", d.Seconds())
 }

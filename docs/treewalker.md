@@ -22,7 +22,7 @@ When a leaf directory inherits a `config.scenario` file from a parent, the confi
 {
   "req_timeout": "5s",
   "env": {
-    "BASE_URL": "[https://api.local](https://api.local)",
+    "BASE_URL": "https://api.local",
     "FEATURE_FLAG": "true"
   }
 }
@@ -45,7 +45,7 @@ When a leaf directory inherits a `config.scenario` file from a parent, the confi
   "req_timeout": "15s",
   "fail_fast": true, 
   "env": {
-    "BASE_URL": "[https://api.local](https://api.local)",
+    "BASE_URL": "https://api.local",
     "FEATURE_FLAG": "false",
     "NEW_VAR": "hello"
   }

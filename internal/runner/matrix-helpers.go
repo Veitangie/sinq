@@ -7,6 +7,10 @@ func buildAllPaths(wholeMap []map[string]map[string]any) ([][]string, int) {
 	total := 1
 	allLabels := make([][]string, 0, len(wholeMap))
 	for _, mat := range wholeMap {
+		if len(mat) == 0 {
+			continue
+		}
+
 		total *= len(mat)
 		curLabels := make([]string, 0, len(mat))
 		for k := range mat {

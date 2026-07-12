@@ -3,15 +3,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package config
 
+import "log/slog"
+
 type Config struct {
 	Workers  int
-	Verbose  bool
 	Safe     bool
 	Insecure bool
 	Version  bool
 	Help     bool
 	List     bool
 
+	LogLevel   slog.Level
 	Format     string
 	Secrets    string
 	Out        string
@@ -40,13 +42,13 @@ type ReporterConfig struct {
 func SaneDefaults() Config {
 	return Config{
 		Workers:  10,
-		Verbose:  false,
 		Safe:     false,
 		Insecure: false,
 		Version:  false,
 		Help:     false,
 		List:     false,
-		Format:   "default",
+		LogLevel: slog.LevelWarn,
+		Format:   "std",
 		Secrets:  "",
 		Out:      "",
 		Paths:    []string{},

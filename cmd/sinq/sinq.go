@@ -30,20 +30,12 @@ func populateConfigInRuntime(cfg *config.Config) {
 	if len(cfg.Paths) == 0 {
 		cfg.Paths = append(cfg.Paths, "./")
 	}
-
-	if cfg.Reporter.Color == config.Auto {
-		fi, _ := os.Stdout.Stat()
-
-		if fi.Mode()&os.ModeCharDevice == 0 {
-			cfg.Reporter.Color = config.Never
-		} else {
-			cfg.Reporter.Color = config.Always
-		}
-	}
-
 }
 
 func sinq(args []string) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	cfgParser := config.NewParser()
 	cfgParser.Parse(args)
 	cfg, errs := cfgParser.Result()
@@ -71,11 +63,7 @@ func sinq(args []string) int {
 
 	populateConfigInRuntime(&cfg)
 
-	var logLevel = slog.LevelInfo
-	if cfg.Verbose {
-		logLevel = slog.LevelDebug
-	}
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 
 	walker, err := treewalker.NewTreewalker(cfg, *logger, scenario.ParseRequestBlueprint, scenario.ParseConfig)
 	if err != nil {
@@ -91,9 +79,6 @@ func sinq(args []string) int {
 			return 1
 		}
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	allScenarios := []runner.ScenarioBundle{}
 	for _, path := range cfg.Paths {
@@ -127,6 +112,12 @@ func sinq(args []string) int {
 		return 0
 	}
 
+	scenarioCount := countTotalScenarios(allScenarios)
+	if scenarioCount == 0 {
+		fmt.Fprintf(os.Stderr, "Error: No scenarios found\n")
+		return 1
+	}
+
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -135,19 +126,40 @@ func sinq(args []string) int {
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          cfg.Workers,
+		MaxIdleConnsPerHost:   cfg.Workers,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
-	rn, _ := runner.NewRunner(cfg, ctx, transport, *logger, nil)
+	rn, err := runner.NewRunner(cfg, ctx, transport, *logger, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to construct runner: %s\n", err.Error())
+		return 1
+	}
+
 	resultCh, durationCh, errorCh := rn.RunScenarios(ctx, allScenarios, secrets)
 
-	stderrReporter := standard.NewReporter(cfg.Reporter, os.Stderr)
+	code := handleReporting(cfg, logger, resultCh, durationCh, scenarioCount)
+
+	for err := range errorCh {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+	}
+
+	return code
+}
+
+func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan runner.ScenarioResult, durationCh <-chan time.Duration, scenarioCount int) int {
+
 	resultReporter := result.NewResultReporter()
 
-	report := reporter.NewPool(stderrReporter, resultReporter)
+	report := reporter.NewPool(resultReporter)
 	if cfg.Out != "" {
+		err := report.Register(standard.NewReporter(cfg.Reporter, os.Stderr))
+		if err != nil {
+			logger.Warn("[sinq] Failed to attach reporter", "error", err)
+		}
+
 		file, err := os.OpenFile(cfg.Out, O_CRWRTR, PERM_RW)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: Failed to open output file: %s\n", err.Error())
@@ -158,39 +170,61 @@ func sinq(args []string) int {
 					fmt.Fprintf(os.Stderr, "Error: Failed to close output file: %s\n", err.Error())
 				}
 			}()
-			var newReporter reporter.Reporter
 
-			switch cfg.Format {
-			case "junit":
-				newReporter = junit.NewReporter(file)
-			default:
-				reporterConfig := cfg.Reporter
-				reporterConfig.Color = config.Never
-				newReporter = standard.NewReporter(reporterConfig, file)
-			}
-
-			err = report.Register(newReporter)
+			err = report.Register(createReporter(cfg, file))
 			if err != nil {
-				logger.Warn("Failed to attach reporter", "error", err)
+				logger.Warn("[sinq] Failed to attach reporter", "error", err)
 			}
+		}
+	} else {
+		err := report.Register(createReporter(cfg, os.Stdout))
+		if err != nil {
+			logger.Warn("[sinq] Failed to attach reporter", "error", err)
 		}
 	}
 
-	err = report.Report(resultCh, durationCh, len(allScenarios))
+	err := report.Report(resultCh, durationCh, scenarioCount)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to report results: %s\n", err.Error())
 	}
 
-	for err := range errorCh {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
-	}
-
-	code := 1
 	if resultReporter.Success() {
-		code = 0
+		return 0
 	}
 
-	return code
+	return 1
+}
+
+func createReporter(cfg config.Config, out *os.File) reporter.Reporter {
+	switch cfg.Format {
+	case "junit":
+		return junit.NewReporter(out)
+	default:
+		reporterCfg := cfg.Reporter
+		if reporterCfg.Color == config.Auto {
+			fi, _ := out.Stat()
+			if fi.Mode()&os.ModeCharDevice == 0 {
+				reporterCfg.Color = config.Never
+			} else {
+				reporterCfg.Color = config.Always
+			}
+		}
+		return standard.NewReporter(reporterCfg, out)
+	}
+}
+
+func countTotalScenarios(scenarios []runner.ScenarioBundle) int {
+	res := len(scenarios)
+	for _, scBp := range scenarios {
+		mod := 1
+		for _, mat := range scBp.Config.EnvMatrix {
+			if len(mat) > 0 {
+				mod *= len(mat)
+			}
+		}
+		res += mod - 1
+	}
+	return res
 }
 
 func ponderSinqMeaning() string {
@@ -204,19 +238,20 @@ const helpSuffix = `Usage: sinq [flags] [directories...]
 A concurrent HTTP functional and integration testing tool.
 
 Flags:
-  -w, --workers int    Number of concurrent workers (default 10)
-  -s, --safe           Instantiate a new Lua VM per request instead of resetting state
-  -i, --insecure       Disable SSL/TLS certificate verification
-  -S, --secrets path   Path to the secrets JSON file
-  -o, --out path       Path to write the output file (prints to stdout if omitted)
-  -f, --format string  Output format: std or junit (default "std")
-  -V, --verbose        Enable verbose logging
-  -c, --color string   Terminal colors: always, never, auto (default "auto")
-  -l, --list           Parse and list scenarios at specified directories
-  -h, --help           Print this help message and exit
-  -v, --version        Print the current sinq version and exit`
+  -w, --workers int      Number of concurrent workers (default 10)
+  -s, --safe             Instantiate a new Lua VM per request instead of resetting state
+  -i, --insecure         Disable SSL/TLS certificate verification
+  -S, --secrets path     Path to the secrets JSON file
+  -o, --out path         Path to write the output file (prints to stdout if omitted)
+  -L, --log-level string Log level to use: debug, info, warn or error (default "warn")
+  -f, --format string    Output format: std or junit (default "std")
+  -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps)
+  -c, --color string     Terminal colors: always, never, auto (default "auto")
+  -l, --list             Parse and list scenarios at specified directories
+  -h, --help             Print this help message and exit
+  -v, --version          Print the current sinq version and exit`
 
-const versionConstPart = `sinq v1.0.0-rc.3 - `
+const versionConstPart = `sinq v1.0.0-rc.4 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",
@@ -224,4 +259,5 @@ var sinqMeaning []string = []string{
 	"Save Intergalactic Neutrino Quants",
 	"A[s]ynchronous Test[in]g Tool[q]it",
 	"Sinq Is Now Qombinatorial",
+	"Slick, Independent, Novel, Quirky",
 }

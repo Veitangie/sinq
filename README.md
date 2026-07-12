@@ -154,7 +154,7 @@ docker run -v $(pwd):/tests ghcr.io/veitangie/sinq /tests
 A quick curl script that downloads the correct binary archive, verifies the SHA256 checksum, and extracts it to `/usr/local/bin`.
 
 ```bash
-curl -sL [https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh](https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh) | bash
+curl -sL https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh | bash
 ```
 > *Note: This script targets stable releases by default. To install a specific version (like a release candidate), pass the version tag as an argument:*
 > `curl -sL .../install.sh | bash -s v1.0.0-rc.3`
@@ -267,7 +267,7 @@ There are two categories of scripts within a `.sinq` file:
 
 * **`$PRE` (Setup & File I/O):** Executes immediately when a worker picks up the request, before it is materialized. This is the **only** scope where you can modify the filesystem interactions for the request. Current request body payload is inaccessible here.
     * `req.attach("path/file.txt")` — Replaces the request body with the contents of a file. (Fails if a body is already defined in the request).
-    * `res.saveTo("path/download.bin")` — Streams the incoming response body directly to disk, bypassing the Lua memory buffer.
+    * `req.saveResponseTo("path/download.bin")` — Streams the incoming response body directly to disk, bypassing the Lua memory buffer.
 
 * **`$RETRY` (Retry Policies):** Executes immediately after receiving the HTTP response. **This is the only lifecycle script that must return a value.** It must return a Lua number representing milliseconds to wait before retrying, or a negative number to stop retrying.
     * Scope-Exclusive API: `sinq.retry.when()`, `sinq.retry.whenExponential()`, `sinq.retry.withJitter()`.
@@ -305,11 +305,11 @@ Each response table contains:
 * `code` *(number)* — HTTP status code.
 * `headers` *(table)* — Response headers (multiple headers with the same key are stored as nested array tables).
 * `oversized` *(boolean | nil)* — `true` if the payload exceeded `MaxBodySize` and was clamped.
-* `size` *(number | nil)* — Total bytes written to disk (only present if `res.saveTo()` was used in `$PRE`).
-* `bodyRaw` *(string | nil)* — Raw response body bytes (only present if `res.saveTo()` wasn't used in `$PRE`).
+* `size` *(number | nil)* — Total bytes written to disk (only present if `req.saveResponseTo()` was used in `$PRE`).
+* `bodyRaw` *(string | nil)* — Raw response body bytes (only present if `req.saveResponseTo()` wasn't used in `$PRE`).
 * `bodyJson` *(table | nil)* — The cached JSON table (initially `nil`).
 
-**JSON Parsing Methods (Only Present If `res.saveTo()` Wasn't Used In $PRE):**
+**JSON Parsing Methods (Only Present If `req.saveResponseTo()` Wasn't Used In $PRE):**
 * `extractBodyJson()` — Safely parses `bodyRaw`, stores it in `bodyJson`, and returns `(table, error)`.
 * `json()` — Unsafe convenience parser. Returns the table directly, but calls `error()` and fails the scenario if the body is not valid JSON.
 
@@ -340,7 +340,7 @@ Default configuration that can be overridden in `.scenario` files:
 
 * **`name`**: The name of the scenario. If this particular `.scenario` file is used in several scenarios - they will all have the same name.
 * **`description`**: Description of the scenario.
-* **`env`**: Object that will be parsed into `sinq.env` Lua table, which will then be acessible from all Lua scripts.
+* **`env`**: Object that will be parsed into `sinq.env` Lua table, which will then be accessible from all Lua scripts.
 * **`req_timeout`**: Timeout for any single request in the scenario.
 * **`script_timeout`**: Timeout for any single script run in the scenario.
 * **`timeout`**: Total timeout for the whole scenario.
@@ -393,17 +393,18 @@ sinq -iV ./tests/local
 ### Options
 
 ```text
-  -w, --workers int    Number of concurrent workers (default 10)
-  -s, --safe           Instantiate a new Lua VM per request instead of resetting state
-  -i, --insecure       Disable SSL/TLS certificate verification
-  -S, --secrets path   Path to the secrets JSON file
-  -o, --out path       Path to write the output file (prints to stdout if omitted)
-  -f, --format string  Output format: std or junit (default "std")
-  -V, --verbose        Enable verbose logging
-  -c, --color string   Terminal colors: always, never, auto (default "auto")
-  -l, --list           Parse and list scenarios at specified directories
-  -h, --help           Print this help message and exit
-  -v, --version        Print the current sinq version and exit
+  -w, --workers int      Number of concurrent workers (default 10)
+  -s, --safe             Instantiate a new Lua VM per request instead of resetting state
+  -i, --insecure         Disable SSL/TLS certificate verification
+  -S, --secrets path     Path to the secrets JSON file
+  -o, --out path         Path to write the output file (prints to stdout if omitted)
+  -L, --log-level string Log level to use: debug, info, warn or error (default "warn")
+  -f, --format string    Output format: std or junit (default "std")
+  -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps)
+  -c, --color string     Terminal colors: always, never, auto (default "auto")
+  -l, --list             Parse and list scenarios at specified directories
+  -h, --help             Print this help message and exit
+  -v, --version          Print the current sinq version and exit
 ```
 
 ---

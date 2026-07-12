@@ -94,10 +94,11 @@ func TestLuaAssertions(t *testing.T) {
 			failureSubstr: "Custom math failed",
 		},
 		{
-			name:         "AssertCondition: Panic on missing message",
-			protoFunc:    AssertCondition,
-			args:         []any{true},
-			expectLuaErr: true,
+			name:          "AssertCondition: Panic on missing message",
+			protoFunc:     AssertCondition,
+			args:          []any{false},
+			wantFailures:  1,
+			failureSubstr: "sinq.assert.isTrue: Assertion failed",
 		},
 
 		// --- Assert Contains ---

@@ -48,11 +48,14 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **-o**, **--out** *path*
 : Path to write the output file (prints to stdout if omitted).
 
+**-L**, **--log-level** *string*
+: Log level to use: debug, info, warn or error (default "warn")
+
 **-f**, **--format** *string*
 : Output format: std or junit (default "std").
 
 **-V**, **--verbose**
-: Enable verbose logging.
+: Enable verbose reporting (reports each stage duration and timestamps)
 
 **-c**, **--color** *string*
 : Terminal colors: always, never, auto (default "auto").
@@ -100,7 +103,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **req.attach(filepath)**
 : Replace request body with file contents.
 
-**res.saveTo(filepath)**
+**req.saveResponseTo(filepath)**
 : Stream upcoming response directly to disk.
 
 ### $RETRY Scope API
@@ -122,16 +125,16 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **sinq.assert.fail(reason)**
 : Mark test as failed (does not halt execution).
 
-**sinq.assert.code(expected)**
+**sinq.assert.code(expected, message?)**
 : Fail if HTTP status code does not match.
 
-**sinq.assert.equals(actual, expected)**
+**sinq.assert.equals(actual, expected, message?)**
 : Fail if values are not strictly equal.
 
-**sinq.assert.contains(str, substring)**
+**sinq.assert.contains(str, substring, message?)**
 : Fail if string lacks substring.
 
-**sinq.assert.isTrue(condition)**
+**sinq.assert.isTrue(condition, message?)**
 : Fail if condition is false or nil.
 
 ### Response Methods And Fields
@@ -147,6 +150,18 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 
 **res.code**
 : HTTP status code of the response.
+
+**res.headers**
+: Lua table representation of response headers.
+
+**res.attempt**
+: Count of times the request was retried before.
+
+**res.size**
+: Count of bytes written to file if `req.saveResponseTo` was called in `$PRE` hook.
+
+**res.oversized**
+: Boolean flag set if the response body size was bigger than the configured size for the scenario.
 
 ## EXIT STATUS
 **0**

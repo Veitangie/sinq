@@ -189,6 +189,7 @@ func (p *RequestProcessor) run() error {
 				timer.Stop()
 				continue
 			case <-p.ctx.Done():
+				timer.Stop()
 				*p.status = Aborted
 				return errors.New("Context aborted while waiting for retry")
 			}
@@ -221,10 +222,9 @@ func (p *RequestProcessor) runPost() error {
 	return p.handleError(err)
 }
 
-func (p *RequestProcessor) finalize() error {
-	if p.result.Status == Aborted {
+func (p *RequestProcessor) finalize() {
+	if p.result.Status == Unset {
 		p.result.Status = Success
 	}
 	p.result.Total = p.totalRequestTimer.Time()
-	return nil
 }

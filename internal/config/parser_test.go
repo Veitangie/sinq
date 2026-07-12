@@ -4,6 +4,7 @@
 package config
 
 import (
+	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
@@ -80,9 +81,9 @@ func TestParser_Parse(t *testing.T) {
 			wantConfig: func() Config {
 				c := SaneDefaults()
 				c.Version = true
-				c.Verbose = true
 				c.Help = true
 				c.List = true
+				c.Reporter.Verbose = true
 				return c
 			}(),
 			wantErrs: 0,
@@ -94,12 +95,17 @@ func TestParser_Parse(t *testing.T) {
 			wantErrs:   0,
 		},
 		{
+			name:       "Log Level Debug",
+			flags:      []string{"-L", "Debug"},
+			wantConfig: func() Config { c := SaneDefaults(); c.LogLevel = slog.LevelDebug; return c }(),
+			wantErrs:   0,
+		},
+		{
 			name:       "Double Dash Stop Parsing",
 			flags:      []string{"--"},
 			wantConfig: SaneDefaults(),
 			wantErrs:   0,
 		},
-		// --- Error Cases ---
 		{
 			name:       "Chained Boolean with Invalid Char",
 			flags:      []string{"-svX"},
@@ -147,10 +153,16 @@ func TestParser_Parse(t *testing.T) {
 			flags: []string{"--format", "yaml"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
-				c.Format = "default"
+				c.Format = "std"
 				return c
 			}(),
 			wantErrs: 1,
+		},
+		{
+			name:       "Invalid Log Level",
+			flags:      []string{"-L", "custom"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
 		},
 	}
 
@@ -184,10 +196,10 @@ func TestParser_CommaFormatterLogic(t *testing.T) {
 	}
 
 	errMsg := errs[0].Error()
-	if strings.Contains(errMsg, ", defaultjunit") || strings.Contains(errMsg, ", junitdefault") {
+	if strings.Contains(errMsg, ", stdjunit") || strings.Contains(errMsg, ", junitstd") {
 		t.Errorf("Comma formatter bug detected in error string: %s", errMsg)
 	}
-	if !strings.Contains(errMsg, "junit") || !strings.Contains(errMsg, "default") {
+	if !strings.Contains(errMsg, "junit") || !strings.Contains(errMsg, "std") {
 		t.Errorf("Error message missing known formats: %s", errMsg)
 	}
 }

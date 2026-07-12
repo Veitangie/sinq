@@ -1,4 +1,4 @@
-$PRE{ res.saveTo("assets/received_file") }
+$PRE{ req.saveResponseTo("../assets/received_file") }
 
 GET ${env.BASE_URL}/download
 

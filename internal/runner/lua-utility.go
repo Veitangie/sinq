@@ -46,26 +46,36 @@ func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, 
 	var filenameIn, filenameOut string
 
 	w.lc.setupPreScript(func(L *lua.LState) int {
-		filename := L.CheckString(1)
-
-		info, err := w.env.workspace.Stat(filename)
-		if err != nil || info.IsDir() {
-			L.RaiseError("sinq.request.attach: invalid file path '%s'", filename)
+		attachedPath := L.CheckString(1)
+		if filepath.IsAbs(attachedPath) {
+			L.RaiseError("req.attach: invalid file path '%s', should not be absolute", attachedPath)
 			return 0
 		}
 
-		filenameIn = filename
+		resolvedPath := filepath.Join(filepath.Dir(filename), attachedPath)
+
+		info, err := w.env.workspace.Stat(resolvedPath)
+		if err != nil || info.IsDir() {
+			L.RaiseError("req.attach: invalid file path '%s' (resolved as '%s')", attachedPath, resolvedPath)
+			return 0
+		}
+		filenameIn = resolvedPath
 		return 0
 	}, func(L *lua.LState) int {
-		filename := L.CheckString(1)
-
-		info, err := w.env.workspace.Stat(filepath.Dir(filename))
-		if err != nil || !info.IsDir() {
-			L.RaiseError("sinq.response.saveTo: invalid file path '%s'", filename)
+		savePath := L.CheckString(1)
+		if filepath.IsAbs(savePath) {
+			L.RaiseError("req.saveResponseTo: invalid file path '%s', should not be absolute", savePath)
 			return 0
 		}
 
-		filenameOut = filename
+		resolvedPath := filepath.Join(filepath.Dir(filename), savePath)
+
+		info, err := w.env.workspace.Stat(filepath.Dir(resolvedPath))
+		if err != nil || !info.IsDir() {
+			L.RaiseError("req.saveResponseTo: invalid file path '%s' (resolved path '%s' does not exist or is not a directory)", savePath, filepath.Dir(resolvedPath))
+			return 0
+		}
+		filenameOut = resolvedPath
 		return 0
 	})
 	defer w.lc.tearDownPreScript()
@@ -215,7 +225,7 @@ func (w *worker) requestCompleted(ctx context.Context, response *http.Response, 
 		var data []byte
 		data, err = w.captureBodyToLua(response.Body, maxBodySize)
 		if w.env.logger.Enabled(ctx, slog.LevelDebug) {
-			w.env.logger.Debug("Extracted response", append(w.loggingContext(ctx), "code", response.StatusCode, "headers", response.Header, "body", string(data))...)
+			w.env.logger.Debug("[Runner] Extracted response", append(w.loggingContext(ctx), "code", response.StatusCode, "headers", response.Header, "body", string(data))...)
 		}
 	}
 

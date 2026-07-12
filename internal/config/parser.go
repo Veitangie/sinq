@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,22 +21,23 @@ const (
 )
 
 var outFormats map[string]bool = map[string]bool{
-	"junit":   true,
-	"default": true,
+	"junit": true,
+	"std":   true,
 }
 
 var longToShort map[string]string = map[string]string{
-	"--workers":  "-w",
-	"--safe":     "-s",
-	"--insecure": "-i",
-	"--secrets":  "-S",
-	"--out":      "-o",
-	"--format":   "-f",
-	"--verbose":  "-V",
-	"--color":    "-c",
-	"--help":     "-h",
-	"--version":  "-v",
-	"--list":     "-l",
+	"--workers":   "-w",
+	"--safe":      "-s",
+	"--insecure":  "-i",
+	"--secrets":   "-S",
+	"--out":       "-o",
+	"--log-level": "-L",
+	"--format":    "-f",
+	"--verbose":   "-V",
+	"--color":     "-c",
+	"--help":      "-h",
+	"--version":   "-v",
+	"--list":      "-l",
 }
 
 type Parser struct {
@@ -89,6 +91,14 @@ func (p *Parser) getNext() string {
 	return ""
 }
 
+func (p *Parser) getNextValue(message string) (string, error) {
+	p.curIdx++
+	if p.curIdx >= 0 && p.curIdx < len(p.currentFlags) {
+		return p.currentFlags[p.curIdx], nil
+	}
+	return "", errors.New(message)
+}
+
 func (p *Parser) parseShortFlag() {
 	flag := p.getCurrent()
 
@@ -102,7 +112,7 @@ func (p *Parser) parseShortFlag() {
 			case 'v':
 				p.result.Version = true
 			case 'V':
-				p.result.Verbose = true
+				p.result.Reporter.Verbose = true
 			case 'h':
 				p.result.Help = true
 			case 'l':
@@ -122,34 +132,50 @@ func (p *Parser) parseShortFlag() {
 	case 'v':
 		p.result.Version = true
 	case 'V':
-		p.result.Verbose = true
+		p.result.Reporter.Verbose = true
 	case 'h':
 		p.result.Help = true
 	case 'l':
 		p.result.List = true
 	case 'w':
-		value, err := strconv.Atoi(p.getNext())
+		valueStr, err := p.getNextValue("No count passed for workers. Usage: --workers|-w 5")
 		if err != nil {
-			p.accumulateError(fmt.Errorf("Failed to parse workers: %v", err))
+			p.accumulateError(err)
+			return
+		}
+
+		value, err := strconv.Atoi(valueStr)
+		if err != nil {
+			p.accumulateError(fmt.Errorf("Failed to parse worker count: %v", err))
+			return
+		}
+		if value <= 0 {
+			p.accumulateError(fmt.Errorf("Invalid worker count: %d", value))
 			return
 		}
 		p.result.Workers = value
 	case 'S':
-		path := p.getNext()
-		if path == "" {
-			p.accumulateError(errors.New("No path passed for secrets. Usage: --secets|-S path/to/file"))
+		path, err := p.getNextValue("No path passed for secrets. Usage: --secrets|-S path/to/file")
+		if err != nil {
+			p.accumulateError(err)
 			return
 		}
 		p.result.Secrets = path
 	case 'o':
-		path := p.getNext()
-		if path == "" {
-			p.accumulateError(errors.New("No path passed for output file. Usage: --out|-o path/to/file"))
+		path, err := p.getNextValue("No path passed for output file. Usage: --out|-o path/to/file")
+		if err != nil {
+			p.accumulateError(err)
 			return
 		}
 		p.result.Out = path
+	case 'L':
+		p.parseLogLevel()
 	case 'f':
-		format := p.getNext()
+		format, err := p.getNextValue("No format passed for output. Usage: --format|-f junit")
+		if err != nil {
+			p.accumulateError(err)
+			return
+		}
 		if !outFormats[format] {
 
 			sb := strings.Builder{}
@@ -163,6 +189,8 @@ func (p *Parser) parseShortFlag() {
 			}
 
 			p.accumulateError(fmt.Errorf("Unknown output format: %s. Known options: %s", format, sb.String()))
+		} else {
+			p.result.Format = format
 		}
 	case 'c':
 		p.parseColorOption()
@@ -172,7 +200,12 @@ func (p *Parser) parseShortFlag() {
 }
 
 func (p *Parser) parseColorOption() {
-	value := p.getNext()
+	value, err := p.getNextValue("No color option passed for output. Usage: --color|-c always")
+	if err != nil {
+		p.accumulateError(err)
+		return
+	}
+
 	switch value {
 	case "never":
 		p.result.Reporter.Color = Never
@@ -182,6 +215,27 @@ func (p *Parser) parseColorOption() {
 		p.result.Reporter.Color = Auto
 	default:
 		p.accumulateError(fmt.Errorf("Unknown color option: %s", value))
+	}
+}
+
+func (p *Parser) parseLogLevel() {
+	value, err := p.getNextValue("No log level passed. Usage: --log-level|-L debug")
+	if err != nil {
+		p.accumulateError(err)
+		return
+	}
+
+	switch strings.ToLower(value) {
+	case "debug":
+		p.result.LogLevel = slog.LevelDebug
+	case "info":
+		p.result.LogLevel = slog.LevelInfo
+	case "warn":
+		p.result.LogLevel = slog.LevelWarn
+	case "error":
+		p.result.LogLevel = slog.LevelError
+	default:
+		p.accumulateError(fmt.Errorf("Unknown log level: %s", value))
 	}
 }
 

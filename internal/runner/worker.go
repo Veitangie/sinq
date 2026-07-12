@@ -95,7 +95,7 @@ func (w *worker) reportResult(ctx context.Context, scenarioTimer ResultTimer, sc
 		Status:         status,
 	}:
 	case <-ctx.Done():
-		w.env.logger.Debug("Failed to publish scenario result because of timeout/cancel", w.loggingContext(ctx)...)
+		w.env.logger.Debug("[Runner] Failed to publish scenario result because of timeout/cancel", w.loggingContext(ctx)...)
 	}
 }
 
@@ -122,11 +122,11 @@ Scenarios:
 	}
 }
 
-func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.ScenarioBlueprint, requestIdx int, client *http.Client, status *ResultStatus, result *RequestResult) (error, bool) {
+func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.ScenarioBlueprint, requestIdx int, client *http.Client, status *ResultStatus, result *RequestResult) (bool, error) {
 	if ctx.Err() != nil {
 		*status = Aborted
 		result.Status = Aborted
-		return errors.New("Context aborted"), false
+		return false, errors.New("Context aborted")
 	}
 
 	w.lc.setupRequestEnvironment(requestIdx)
@@ -145,24 +145,26 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 		client:            client,
 	}
 
+	defer processor.finalize()
+
 	if err := processor.runPre(); err != nil {
-		return err, false
+		return false, err
 	}
 
 	if err := processor.materialize(); err != nil {
-		return err, false
+		return false, err
 	}
 
 	if err := processor.parse(); err != nil {
-		return err, false
+		return false, err
 	}
 
 	if err := processor.run(); err != nil {
-		return err, false
+		return false, err
 	}
 
 	if err := processor.runAssert(); err != nil {
-		return err, false
+		return false, err
 	}
 
 	if len(w.assertionFailures) > 0 {
@@ -171,30 +173,29 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 		w.assertionFailures = make([]string, 0)
 
 		if scenarioBp.Config.FailFast {
-			return nil, false
+			return false, nil
 		}
 	}
 
 	if err := processor.runPost(); err != nil {
-		return err, false
+		return false, err
 	}
 
-	if err := processor.finalize(); err != nil {
-		return err, false
-	}
-
-	return nil, true
+	return true, nil
 }
 
 func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
-	w.env.logger.Debug("Starting scenario", w.loggingContext(ctx)...)
+	w.env.logger.Debug("[Runner] Starting scenario", w.loggingContext(ctx)...)
 	requestResults := make([]RequestResult, len(bundle.Requests))
+	for idx, req := range bundle.Requests {
+		requestResults[idx].Name = req.Filename
+	}
 	scenarioTimer := newTimer(w.env.clock)
 
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		w.errorCh <- err
-		w.env.logger.Warn("Failed to create cookiejar for scenario", w.loggingContextWithErr(ctx, err)...)
+		w.env.logger.Warn("[Runner] Failed to create cookiejar for scenario", w.loggingContextWithErr(ctx, err)...)
 		requestResults[0].ErrorMessage = "Failed to create cookie jar"
 		w.reportResult(ctx, scenarioTimer, bundle.getFullName(), Aborted, requestResults)
 		return
@@ -216,8 +217,8 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	defer func() {
 		w.env.workspace = nil
 		if r := recover(); r != nil {
-			w.env.logger.Warn("Panic during scenario run", w.loggingContext(ctx)...)
-			w.env.logger.Debug("More detailed info on panic", append(w.loggingContext(ctx), "panic", r)...)
+			w.env.logger.Warn("[Runner] Panic during scenario run", w.loggingContext(ctx)...)
+			w.env.logger.Debug("[Runner] More detailed info on panic", append(w.loggingContext(ctx), "panic", r)...)
 			w.reportResult(ctx, scenarioTimer, bundle.getFullName(), Error, requestResults)
 		}
 	}()
@@ -228,7 +229,7 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	err = w.setupScenarioEnvironment(ctx, bundle.env)
 	if err != nil {
 		w.errorCh <- err
-		w.env.logger.Warn("Failed to set up lua environment for scenario", w.loggingContextWithErr(ctx, err)...)
+		w.env.logger.Warn("[Runner] Failed to set up lua environment for scenario", w.loggingContextWithErr(ctx, err)...)
 		requestResults[0].ErrorMessage = "Failed to set up lua scenario"
 		w.reportResult(ctx, scenarioTimer, bundle.getFullName(), Aborted, requestResults)
 		return
@@ -240,10 +241,9 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	for shouldContinue {
 		oldRequestIdx := w.requestIdx
 		currentResult := &requestResults[oldRequestIdx]
-		currentResult.Name = bundle.Requests[oldRequestIdx].Filename
 		w.requestIdx++
 
-		err, shouldContinue = w.processRequest(
+		shouldContinue, err = w.processRequest(
 			context.WithValue(ctx, requestNameContext, bundle.Requests[oldRequestIdx].Filename),
 			&bundle.ScenarioBlueprint,
 			oldRequestIdx,
@@ -252,7 +252,7 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 			currentResult,
 		)
 		if err != nil {
-			w.env.logger.Debug("Request failed", w.loggingContextWithErr(ctx, err)...)
+			w.env.logger.Debug("[Runner] Request failed", w.loggingContextWithErr(ctx, err)...)
 		}
 		shouldContinue = shouldContinue && w.requestIdx < len(bundle.Requests)
 		if status == Success && (currentResult.Status == Failure || currentResult.Status == Aborted) {

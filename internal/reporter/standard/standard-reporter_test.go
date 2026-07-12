@@ -39,7 +39,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{"Scenario: Test Scenario", "Status: Success", "Req1", "Total tests: 1, successful: 1"},
+			wantOutput: []string{" ✓ Scenario: Test Scenario", "   ✓ Req1", " ✓ PASSED in 100ms | Scenarios: 1✓ 0✗ 0○ (1) | 1 requests sent"},
 		},
 		{
 			name: "Output with Color",
@@ -53,7 +53,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{Red, Reset, "ReqColor", "boom", "Total tests: 1, successful: 0"},
+			wantOutput: []string{Red + "✗" + Reset + " Scenario: Color Scenario", "   " + Red + "✗" + Reset + " ReqColor", "   - Error: boom", Red + "✗" + Reset + " FAILED in 100ms | Scenarios: 0" + Green + "✓" + Reset + " 1" + Red + "✗" + Reset + " 0" + Yellow + "○" + Reset + " (1) | 1 requests sent"},
 		},
 		{
 			name: "Verbose Timings and Assertions",
@@ -79,14 +79,14 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				},
 			},
 			wantOutput: []string{
-				"Pre script duration: 1ms",
-				"Materialization duration: 2ms",
-				"Parsing duration: 3ms",
-				"Execution duration: 4ms",
-				"Retry script duration: 5ms",
-				"Assert script duration: 6ms",
-				"Post script duration: 7ms",
-				"Failed assertions: assert(200) failed, body check failed",
+				"- Pre:         1ms",
+				"- Mat:         2ms",
+				"- Parse:       3ms",
+				"- Exec:        4ms",
+				"- Retry:       5ms",
+				"- Assert:      6ms",
+				"- Post:        7ms",
+				"- Failed assertions: assert(200) failed, body check failed",
 			},
 		},
 		{
@@ -101,7 +101,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{Yellow, "Aborted Scenario", "ReqA"},
+			wantOutput: []string{Yellow + "○" + Reset + " Scenario: Aborted Scenario", "   " + Yellow + "○" + Reset + " ReqA"},
 		},
 	}
 

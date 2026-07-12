@@ -125,15 +125,15 @@ func (lc *luaContext) setupPreScript(attach lua.LGFunction, saveTo lua.LGFunctio
 		"attach",
 		lc.NewFunction(attach),
 	)
-	lc.responseTable.RawSetString(
-		"saveTo",
+	lc.requestTable.RawSetString(
+		"saveResponseTo",
 		lc.NewFunction(saveTo),
 	)
 }
 
 func (lc *luaContext) tearDownPreScript() {
 	lc.requestTable.RawSetString("attach", lua.LNil)
-	lc.responseTable.RawSetString("saveTo", lua.LNil)
+	lc.requestTable.RawSetString("saveResponseTo", lua.LNil)
 }
 
 func (lc *luaContext) setupRetryScript() {

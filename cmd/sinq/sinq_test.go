@@ -106,7 +106,7 @@ $ASSERT{
 	args := []string{
 		"--color", "always",
 		"--workers", "6",
-		"--format", "default",
+		"--format", "std",
 		tmpDir,
 	}
 
@@ -175,7 +175,7 @@ $POST{
 
 	args := []string{
 		"--workers", "3",
-		"--format", "default",
+		"--format", "std",
 		tmpDir,
 	}
 
@@ -217,7 +217,7 @@ func TestSinq_EndToEnd_Stress(t *testing.T) {
 
 	args := []string{
 		"--workers", "1000",
-		"--format", "default",
+		"--format", "std",
 		tmpDir,
 	}
 

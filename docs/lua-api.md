@@ -86,8 +86,8 @@ The following APIs are dynamically injected and destroyed depending on the execu
 ### `$PRE` (Setup Phase)
 Executes before the HTTP request is materialized. Used for file I/O operations.
 * **`req.attach(filepath)`**: Replaces the request body with the contents of the specified file. *Note: Fails if a textual body is already defined in the `.sinq` file.*
-* **`res.saveTo(filepath)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
-> *Both of these functions expect the path to be relative to the filesystem root passed to sinq on startup.*
+* **`req.saveResponseTo(filepath)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
+> *Both of these functions expect the path to be relative to the current file. Passing in an absolute path will fail*
 
 ### `$RETRY` (Polling Phase)
 Executes after receiving a response. The script **must** return a number indicating how many milliseconds to wait before retrying, or a negative number to stop.
@@ -120,10 +120,10 @@ Executes after the retry loop finishes. Used to validate the final state of the 
       -- If both conditions are met, the report will show TWO failures for this request.
   }
   ```
-* **`sinq.assert.code(expectedHttpCode)`**: Fails if the actual status code does not match.
-* **`sinq.assert.equals(actual, expected)`**: Fails if `actual` does not strictly equal `expected`. Recursively compares nested tables.
-* **`sinq.assert.contains(string, substring)`**: Fails if the string does not contain the specified substring.
-* **`sinq.assert.isTrue(condition)`**: Fails if the condition resolves to `false` or `nil`.
+* **`sinq.assert.code(expectedHttpCode, message?)`**: Fails if the actual status code does not match.
+* **`sinq.assert.equals(actual, expected, message?)`**: Fails if `actual` does not strictly equal `expected`. Recursively compares nested tables.
+* **`sinq.assert.contains(string, substring, message?)`**: Fails if the string does not contain the specified substring.
+* **`sinq.assert.isTrue(condition, message?)`**: Fails if the condition resolves to `false` or `nil`.
 
 ### `$POST` (State Extraction Phase)
 Executes after a successful `$ASSERT` phase. Typically used to parse the final response payload and store relevant data in the global sandbox for subsequent requests. No special scoped APIs are injected here.
@@ -134,7 +134,7 @@ Executes after a successful `$ASSERT` phase. Typically used to parse the final r
 
 When an HTTP request completes, `sinq` parses the response and injects it into the `sinq.responses` table at the index corresponding to the request number. Lua is 1-indexed, meaning the response to the first request in your scenario is accessed via `sinq.responses[1]`.
 
-> **Note:** A response object only exists *after* the request has been executed. Accessing `sinq.responses[2]` or the alias `res` during the `$PRE` hook of the second request will return a table with a single method - `saveTo`.
+> **Note:** A response object only exists *after* the request has been executed. Accessing `sinq.responses[2]` or the alias `res` during the `$PRE` hook of the second request will return nil.
 
 ### Response Object Structure
 * `attempt` *(number)*: The current execution attempt (useful during `$RETRY`).
@@ -142,7 +142,7 @@ When an HTTP request completes, `sinq` parses the response and injects it into t
 * `oversized` *(boolean | nil)*: `true` if the payload exceeded the scenario's `max_body_size` limit and was safely truncated.
 
 ### Body Access Methods
-*Note: These are only available if `res.saveTo()` was NOT used in the `$PRE` hook.*
+*Note: These are only available if `req.saveResponseTo()` was NOT used in the `$PRE` hook.*
 
 * `bodyRaw` *(string)*: The raw string of the response payload.
 * `extractBodyJson()` *(function)*: Safely attempts to parse `bodyRaw` into a Lua table.
