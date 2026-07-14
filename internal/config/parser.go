@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,9 +28,9 @@ var outFormats map[string]bool = map[string]bool{
 
 var longToShort map[string]string = map[string]string{
 	"--workers":   "-w",
-	"--safe":      "-s",
 	"--insecure":  "-i",
-	"--secrets":   "-S",
+	"--secret":    "-s",
+	"--env":       "-e",
 	"--out":       "-o",
 	"--log-level": "-L",
 	"--format":    "-f",
@@ -38,6 +39,9 @@ var longToShort map[string]string = map[string]string{
 	"--help":      "-h",
 	"--version":   "-v",
 	"--list":      "-l",
+	"--tag":       "-t",
+	"--name":      "-n",
+	"--show":      "-S",
 }
 
 type Parser struct {
@@ -105,8 +109,6 @@ func (p *Parser) parseShortFlag() {
 	if len(flag) > 2 {
 		for _, b := range flag[1:] {
 			switch b {
-			case 's':
-				p.result.Safe = true
 			case 'i':
 				p.result.Insecure = true
 			case 'v':
@@ -125,8 +127,8 @@ func (p *Parser) parseShortFlag() {
 	}
 
 	switch flag[1] {
-	case 's':
-		p.result.Safe = true
+	case 'S':
+		p.parseShow()
 	case 'i':
 		p.result.Insecure = true
 	case 'v':
@@ -138,29 +140,11 @@ func (p *Parser) parseShortFlag() {
 	case 'l':
 		p.result.List = true
 	case 'w':
-		valueStr, err := p.getNextValue("No count passed for workers. Usage: --workers|-w 5")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			p.accumulateError(fmt.Errorf("Failed to parse worker count: %v", err))
-			return
-		}
-		if value <= 0 {
-			p.accumulateError(fmt.Errorf("Invalid worker count: %d", value))
-			return
-		}
-		p.result.Workers = value
-	case 'S':
-		path, err := p.getNextValue("No path passed for secrets. Usage: --secrets|-S path/to/file")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-		p.result.Secrets = path
+		p.parseWorkerCount()
+	case 's':
+		p.parseSecret()
+	case 'e':
+		p.parseEnv()
 	case 'o':
 		path, err := p.getNextValue("No path passed for output file. Usage: --out|-o path/to/file")
 		if err != nil {
@@ -171,32 +155,113 @@ func (p *Parser) parseShortFlag() {
 	case 'L':
 		p.parseLogLevel()
 	case 'f':
-		format, err := p.getNextValue("No format passed for output. Usage: --format|-f junit")
+		p.parseOutFormat()
+	case 'c':
+		p.parseColorOption()
+	case 't':
+		tag, err := p.getNextValue("No tag passed for filtering by tag. Usage: --tag|-t my-tag")
 		if err != nil {
 			p.accumulateError(err)
 			return
 		}
-		if !outFormats[format] {
 
-			sb := strings.Builder{}
-			hack := false
-			for known := range outFormats {
-				if hack {
-					sb.WriteString(", ")
-				}
-				sb.WriteString(known)
-				hack = true
-			}
-
-			p.accumulateError(fmt.Errorf("Unknown output format: %s. Known options: %s", format, sb.String()))
-		} else {
-			p.result.Format = format
+		p.result.TagsInclude = append(p.result.TagsInclude, tag)
+	case 'n':
+		nameRaw, err := p.getNextValue("No regex passed for filtering by name. Usage: --name|-n '^Custom Name$'")
+		if err != nil {
+			p.accumulateError(err)
+			return
 		}
-	case 'c':
-		p.parseColorOption()
+
+		nameRegex, err := regexp.Compile(nameRaw)
+		if err != nil {
+			p.accumulateError(fmt.Errorf("Failed to compile regex for filtering by name: %w", err))
+			return
+		}
+		if nameRegex == nil {
+			p.accumulateError(errors.New("Regex for filtering by name did not compile, but returned no errors"))
+			return
+		}
+
+		p.result.NamesInclude = append(p.result.NamesInclude, *nameRegex)
 	default:
 		p.accumulateError(fmt.Errorf("Unknown short flag: %c", flag[1]))
 	}
+}
+
+func (p *Parser) parseEnv() {
+	keyVal, err := p.getNextValue("No value passed for env value. Usage: --env|-e key=value")
+	if err != nil {
+		p.accumulateError(err)
+		return
+	}
+
+	keyValSlice := strings.SplitN(keyVal, "=", 2)
+	if len(keyValSlice) != 2 {
+		p.accumulateError(fmt.Errorf("Failed to parse env value %s, could not split by '='. Usage: --env|-e key=value", keyVal))
+		return
+	}
+
+	p.result.Treewalker.Env[keyValSlice[0]] = keyValSlice[1]
+}
+
+func (p *Parser) parseSecret() {
+	keyVal, err := p.getNextValue("No value passed for secret value. Usage: --secret|-S key=value")
+	if err != nil {
+		p.accumulateError(err)
+		return
+	}
+
+	keyValSlice := strings.SplitN(keyVal, "=", 2)
+	if len(keyValSlice) != 2 {
+		p.accumulateError(errors.New("Failed to parse secret value, could not split by '='. Usage: --secret|-S key=value"))
+		return
+	}
+
+	p.result.Treewalker.Secret[keyValSlice[0]] = keyValSlice[1]
+}
+
+func (p *Parser) parseOutFormat() {
+	format, err := p.getNextValue("No format passed for output. Usage: --format|-f junit")
+	if err != nil {
+		p.accumulateError(err)
+		return
+	}
+	if !outFormats[format] {
+
+		sb := strings.Builder{}
+		hack := false
+		for known := range outFormats {
+			if hack {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(known)
+			hack = true
+		}
+
+		p.accumulateError(fmt.Errorf("Unknown output format: %s. Known options: %s", format, sb.String()))
+	} else {
+		p.result.Format = format
+	}
+}
+
+func (p *Parser) parseWorkerCount() {
+	valueStr, err := p.getNextValue("No count passed for workers. Usage: --workers|-w 5")
+	if err != nil {
+		p.accumulateError(err)
+		return
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		p.accumulateError(fmt.Errorf("Failed to parse worker count: %v", err))
+		return
+	}
+	if value <= 0 {
+		p.accumulateError(fmt.Errorf("Invalid worker count: %d", value))
+		return
+	}
+	p.result.Workers = value
 }
 
 func (p *Parser) parseColorOption() {
@@ -239,6 +304,25 @@ func (p *Parser) parseLogLevel() {
 	}
 }
 
+func (p *Parser) parseShow() {
+	value, err := p.getNextValue("No show option passed. Usage: --show|-s all")
+	if err != nil {
+		p.accumulateError(err)
+		return
+	}
+
+	switch strings.ToLower(value) {
+	case "all":
+		p.result.Reporter.Show = All
+	case "no-skip":
+		p.result.Reporter.Show = NoSkip
+	case "failures":
+		p.result.Reporter.Show = Failures
+	default:
+		p.accumulateError(fmt.Errorf("Unknown show option: %s", value))
+	}
+}
+
 func (p *Parser) parseLongFlag() {
 	flag := p.getCurrent()
 
@@ -250,13 +334,58 @@ func (p *Parser) parseLongFlag() {
 
 		short := longToShort[flag]
 		if short == "" {
-			p.accumulateError(fmt.Errorf("Unknown option: %s", flag))
+			p.parseLongOnlyFlag()
 			return
 		}
 		p.setCurrent(short)
 	}
 
 	p.parseShortFlag()
+}
+
+func (p *Parser) parseLongOnlyFlag() {
+	flag := p.getCurrent()
+	switch flag {
+	case "--safe":
+		p.result.Safe = true
+	case "--skip-tag":
+		tag, err := p.getNextValue("No tag passed for filtering by tag. Usage: --skip-tag my-tag")
+		if err != nil {
+			p.accumulateError(err)
+			return
+		}
+
+		p.result.TagsExclude = append(p.result.TagsExclude, tag)
+	case "--skip-name":
+		nameRaw, err := p.getNextValue("No regex passed for filtering by name. Usage: --skip-name '^Custom Name$'")
+		if err != nil {
+			p.accumulateError(err)
+			return
+		}
+
+		nameRegex, err := regexp.Compile(nameRaw)
+		if err != nil {
+			p.accumulateError(fmt.Errorf("Failed to compile regex for filtering by name: %w", err))
+			return
+		}
+		if nameRegex == nil {
+			p.accumulateError(errors.New("Regex for filtering by name did not compile, but returned no errors"))
+			return
+		}
+
+		p.result.NamesExclude = append(p.result.NamesExclude, *nameRegex)
+	case "--dump-on-failure":
+		p.result.DumpOnFailure = true
+	case "--secrets-file":
+		path, err := p.getNextValue("No path passed for secrets. Usage: --secrets-file path/to/file")
+		if err != nil {
+			p.accumulateError(err)
+			return
+		}
+		p.result.Treewalker.SecretsFile = path
+	default:
+		p.accumulateError(fmt.Errorf("Unknown option: %s", flag))
+	}
 }
 
 func (p *Parser) parsePositional() {

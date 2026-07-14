@@ -211,7 +211,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 		"--workers", "10",
 		"--format", "std",
 		"--color", "always",
-		"--secrets", secretsPath,
+		"--secrets-file", secretsPath,
 		examplesDir,
 	}
 

@@ -19,12 +19,14 @@ const (
 	Red    = "\033[31m"
 	Green  = "\033[32m"
 	Yellow = "\033[33m"
+	Gray   = "\033[90m"
 )
 
 const (
 	checkmark = "✓"
 	cross     = "✗"
 	circle    = "○"
+	dash      = "-"
 )
 
 type StandardReporter struct {
@@ -44,11 +46,13 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 	markSuccess := checkmark
 	markFail := cross
 	markAborted := circle
+	markSkipped := dash
 
 	if r.cfg.Color != config.Never {
 		markSuccess = Green + markSuccess + Reset
 		markFail = Red + markFail + Reset
 		markAborted = Yellow + markAborted + Reset
+		markSkipped = Gray + markSkipped + Reset
 	}
 
 	totalScenarios := 0
@@ -59,8 +63,22 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 	successfulRequests := 0
 	for result := range source {
 		totalScenarios += 1
+		switch r.cfg.Show {
+		case config.NoSkip:
+			if result.Status == runner.Skipped {
+				continue
+			}
+		case config.Failures:
+			if result.Status != runner.Failure && result.Status != runner.Error {
+				continue
+			}
+		case config.All:
+		}
+
 		scenarioMark := markSuccess
 		switch result.Status {
+		case runner.Skipped:
+			scenarioMark = markSkipped
 		case runner.Aborted:
 			scenarioMark = markAborted
 		case runner.Success:
@@ -88,6 +106,8 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 			}
 			requestMark := markSuccess
 			switch request.Status {
+			case runner.Skipped:
+				requestMark = markSkipped
 			case runner.Aborted:
 				requestMark = markAborted
 			case runner.Success:
@@ -146,6 +166,18 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 			}
 			if err == nil && request.ErrorMessage != "" {
 				_, err = fmt.Fprintf(r.writer, "   - Error: %s\n", request.ErrorMessage)
+				if err != nil {
+					continue
+				}
+			}
+			if request.Request != "" {
+				_, err = fmt.Fprintf(r.writer, "Request:\n%s\n", request.Request)
+				if err != nil {
+					continue
+				}
+			}
+			if request.Response != "" {
+				_, err = fmt.Fprintf(r.writer, "Response:\n%s\n", request.Response)
 				if err != nil {
 					continue
 				}

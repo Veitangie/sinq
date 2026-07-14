@@ -11,6 +11,7 @@ import (
 
 	"github.com/Veitangie/sinq/internal/config"
 	"github.com/Veitangie/sinq/internal/scenario"
+	"github.com/Veitangie/sinq/internal/timer"
 	"go.uber.org/goleak"
 )
 
@@ -48,7 +49,9 @@ func TestRunner_GoroutineLeakage(t *testing.T) {
 		scenarios[i] = ScenarioBundle{scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{Name: "LeakTest"}}, nil}
 	}
 
-	resultCh, durationCh, errorCh := runner.RunScenarios(ctx, scenarios, nil)
+	totalTimer := timer.NewTimer(timer.DefaultClock{})
+	totalTimer.Start()
+	resultCh, durationCh, errorCh := runner.RunScenarios(ctx, scenarios, nil, &totalTimer)
 
 	for range 10 {
 		<-resultCh

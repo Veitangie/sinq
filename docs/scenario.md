@@ -40,3 +40,40 @@ Content-Type: text/plain
 
 User said: \$PRE{ this is not a script }
 ```
+
+## Scenario Configuration
+
+`sinq` uses JSON-formatted `.scenario` files along the scenario path to manage environments, timeouts, and other configurations.
+
+Default configuration that can be overridden in `.scenario` files:
+```json
+{
+  "name": "path/to/dir/of/last/file",
+  "description": "",
+  "env": { },
+  "req_timeout": "5s",
+  "script_timeout": "5s",
+  "timeout": "10m",
+  "fail_fast": true,
+  "max_retries": 10,
+  "max_redirects": 5,
+  "max_body_size": "1MB",
+  "env_matrix": [{ }],
+  "tags": [],
+}
+```
+
+* **`name`**: The name of the scenario. If this particular `.scenario` file is used in several scenarios - they will all have the same name.
+* **`description`**: Description of the scenario.
+* **`env`**: Object that will be parsed into `sinq.env` Lua table, which will then be accessible from all Lua scripts.
+* **`req_timeout`**: Timeout for any single request in the scenario.
+* **`script_timeout`**: Timeout for any single script run in the scenario.
+* **`timeout`**: Total timeout for the whole scenario.
+* **`fail_fast`**: When true, scenarios will not be ran if any of them fails to compile for some reason, and the scenarios stop at the first failed assertion.
+* **`max_retries`**: The maximum amount of times any request in the scenario can be retried upon retry script returning a valid non-negative number.
+* **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
+* **`max_body_size`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
+* **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](docs/env-matrix.md).
+* **`tags`**: Tags or labels assigned to scenarios containing this `.scenario` file. They get collected into one list for the resulting scenario.
+
+Everything defined in the `env` object can be accessed directly in your HTTP paths and headers using `${env.variableName}`, or inside your Lua scripts via the global `env` table.

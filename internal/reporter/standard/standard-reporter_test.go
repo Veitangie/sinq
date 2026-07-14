@@ -103,6 +103,73 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 			},
 			wantOutput: []string{Yellow + "○" + Reset + " Scenario: Aborted Scenario", "   " + Yellow + "○" + Reset + " ReqA"},
 		},
+		{
+			name: "Skipped Status Formatting",
+			cfg:  config.ReporterConfig{Color: config.Always, Verbose: false, Show: config.All},
+			results: []runner.ScenarioResult{
+				{
+					Name:   "Skipped Scenario",
+					Status: runner.Skipped,
+					RequestResults: []runner.RequestResult{
+						{Name: "ReqS", Status: runner.Skipped},
+					},
+				},
+			},
+			wantOutput: []string{Gray + "-" + Reset + " Scenario: Skipped Scenario", "   " + Gray + "-" + Reset + " ReqS"},
+		},
+		{
+			name: "Show NoSkip filters Skipped",
+			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.NoSkip},
+			results: []runner.ScenarioResult{
+				{
+					Name:   "Skipped Scenario",
+					Status: runner.Skipped,
+				},
+				{
+					Name:   "Success Scenario",
+					Status: runner.Success,
+				},
+			},
+			wantOutput: []string{" ✓ Scenario: Success Scenario"},
+		},
+		{
+			name: "Show Failures filters Success and Skipped",
+			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.Failures},
+			results: []runner.ScenarioResult{
+				{
+					Name:   "Skipped Scenario",
+					Status: runner.Skipped,
+				},
+				{
+					Name:   "Success Scenario",
+					Status: runner.Success,
+				},
+				{
+					Name:   "Failure Scenario",
+					Status: runner.Failure,
+				},
+			},
+			wantOutput: []string{" ✗ Scenario: Failure Scenario"},
+		},
+		{
+			name: "Dump On Failure fields",
+			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.All},
+			results: []runner.ScenarioResult{
+				{
+					Name:   "Dump Scenario",
+					Status: runner.Failure,
+					RequestResults: []runner.RequestResult{
+						{
+							Name:     "ReqDump",
+							Status:   runner.Failure,
+							Request:  "GET / HTTP/1.1",
+							Response: "HTTP/1.1 500 Internal Server Error",
+						},
+					},
+				},
+			},
+			wantOutput: []string{"Request:\nGET / HTTP/1.1\n", "Response:\nHTTP/1.1 500 Internal Server Error\n"},
+		},
 	}
 
 	for _, tt := range tests {

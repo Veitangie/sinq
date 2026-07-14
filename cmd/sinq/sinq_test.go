@@ -167,8 +167,6 @@ $ASSERT{
 	req3 := fmt.Sprintf(`GET %s/404
 
 $POST{
-	-- Accessing an index that doesn't exist, then calling a property on it
-	-- This will cause a hard Lua panic.
 	local bad_data = sinq.responses[999].body.does_not_exist
 }`, srv.URL)
 	_ = os.WriteFile(filepath.Join(panicDir, "panic.sinq"), []byte(req3), 0644)
@@ -185,6 +183,7 @@ $POST{
 		t.Fatalf("Chaos test exited with code 0! The runner swallowed fatal errors instead of failing the CI pipeline.")
 	}
 }
+
 func TestSinq_EndToEnd_Stress(t *testing.T) {
 	var requestCount atomic.Uint64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +241,7 @@ func TestSinq_CLI_BasicFlags(t *testing.T) {
 		{"Version Flag", []string{"--version"}, 0},
 		{"List Flag", []string{"--list"}, 0},
 		{"Invalid Flag", []string{"--this-does-not-exist"}, 1},
-		{"Missing Secrets Path", []string{"--secrets", "/path/to/nowhere.json", "."}, 1},
+		{"Missing Secrets Path", []string{"--secrets-file", "/path/to/nowhere.json", "."}, 1},
 	}
 
 	for _, tt := range tests {

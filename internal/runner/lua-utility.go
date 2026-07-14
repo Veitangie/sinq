@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Veitangie/sinq/internal/scenario"
@@ -213,27 +214,49 @@ func (w *worker) captureBodyToLua(body io.Reader, maxBodySize uint64) ([]byte, e
 	return data, nil
 }
 
-func (w *worker) requestCompleted(ctx context.Context, response *http.Response, filenameTo string, maxBodySize uint64, attempt int) error {
+func (w *worker) requestCompleted(ctx context.Context, response *http.Response, filenameTo string, maxBodySize uint64, attempt int) (string, error) {
 	defer response.Body.Close()
 
 	w.lc.RecordResponseMeta(attempt, response.StatusCode, response.Header)
 
 	var err error
+	data := []byte(filenameTo)
 	if filenameTo != "" {
 		err = w.captureBodyToFile(response.Body, filenameTo)
 	} else {
-		var data []byte
 		data, err = w.captureBodyToLua(response.Body, maxBodySize)
 		if w.env.logger.Enabled(ctx, slog.LevelDebug) {
 			w.env.logger.Debug("[Runner] Extracted response", append(w.loggingContext(ctx), "code", response.StatusCode, "headers", response.Header, "body", string(data))...)
 		}
 	}
 
-	return err
+	var result string
+	if w.env.cfg.DumpOnFailure {
+		sb := strings.Builder{}
+		sb.WriteString(response.Status)
+		sb.WriteString(response.Proto)
+		sb.WriteByte('\n')
+		for key, values := range response.Header {
+			sb.WriteString(key)
+			sb.Write([]byte(": "))
+			for idx, value := range values {
+				sb.WriteString(value)
+				if idx != len(values)-1 {
+					sb.Write([]byte(", "))
+				}
+			}
+			sb.WriteByte('\n')
+		}
+		sb.WriteByte('\n')
+		sb.Write(data)
+		result = sb.String()
+	}
+
+	return result, err
 }
 
 func (w *worker) setupScenarioEnvironment(ctx context.Context, env map[string]any) error {
-	if w.env.luaStateHardReset || w.lc == nil {
+	if w.env.cfg.Safe || w.lc == nil {
 		if w.lc != nil {
 			w.lc.Close()
 		}

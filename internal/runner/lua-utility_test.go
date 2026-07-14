@@ -179,7 +179,7 @@ func TestWorker_GiantPayload_HandledSafely(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewReader(garbage)),
 	}
 
-	err := w.requestCompleted(context.Background(), resp, "", 1<<10, 1)
+	_, err := w.requestCompleted(context.Background(), resp, "", 1<<10, 1)
 	if err != nil {
 		t.Fatalf("requestCompleted failed unexpectedly: %v", err)
 	}

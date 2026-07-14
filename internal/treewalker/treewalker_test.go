@@ -267,7 +267,7 @@ func TestTreewalker_ParseSecrets(t *testing.T) {
 	t.Run("Valid JSON", func(t *testing.T) {
 		secFile := filepath.Join(tmpDir, "valid.json")
 		_ = os.WriteFile(secFile, []byte(`{"TOKEN": "123"}`), 0644)
-		tw, _ := treewalker.NewTreewalker(config.Config{Secrets: secFile}, *slog.Default(), mockParseRequest, mockParseConfig)
+		tw, _ := treewalker.NewTreewalker(config.Config{Treewalker: config.TreewalkerConfig{SecretsFile: secFile}}, *slog.Default(), mockParseRequest, mockParseConfig)
 		secrets, err := tw.ParseSecrets()
 		if err != nil || secrets["TOKEN"] != "123" {
 			t.Errorf("Failed to parse valid secrets: %v", err)
@@ -277,7 +277,7 @@ func TestTreewalker_ParseSecrets(t *testing.T) {
 	t.Run("Invalid JSON", func(t *testing.T) {
 		secFile := filepath.Join(tmpDir, "invalid.json")
 		_ = os.WriteFile(secFile, []byte(`{"TOKEN": "123"`), 0644)
-		tw, _ := treewalker.NewTreewalker(config.Config{Secrets: secFile}, *slog.Default(), mockParseRequest, mockParseConfig)
+		tw, _ := treewalker.NewTreewalker(config.Config{Treewalker: config.TreewalkerConfig{SecretsFile: secFile}}, *slog.Default(), mockParseRequest, mockParseConfig)
 		_, err := tw.ParseSecrets()
 		if err == nil {
 			t.Error("Expected error for malformed JSON secrets file")
@@ -285,10 +285,46 @@ func TestTreewalker_ParseSecrets(t *testing.T) {
 	})
 
 	t.Run("Missing File", func(t *testing.T) {
-		tw, _ := treewalker.NewTreewalker(config.Config{Secrets: filepath.Join(tmpDir, "missing.json")}, *slog.Default(), mockParseRequest, mockParseConfig)
+		tw, _ := treewalker.NewTreewalker(config.Config{Treewalker: config.TreewalkerConfig{SecretsFile: filepath.Join(tmpDir, "missing.json")}}, *slog.Default(), mockParseRequest, mockParseConfig)
 		_, err := tw.ParseSecrets()
 		if err == nil {
 			t.Error("Expected error for non-existent secrets file")
+		}
+	})
+
+	t.Run("Inline Override File", func(t *testing.T) {
+		secFile := filepath.Join(tmpDir, "override.json")
+		_ = os.WriteFile(secFile, []byte(`{"TOKEN": "123", "KEEP": "456"}`), 0644)
+		tw, _ := treewalker.NewTreewalker(config.Config{Treewalker: config.TreewalkerConfig{
+			SecretsFile: secFile,
+			Secret: map[string]string{
+				"TOKEN": "789",
+				"NEW":   "000",
+			},
+		}}, *slog.Default(), mockParseRequest, mockParseConfig)
+		
+		secrets, err := tw.ParseSecrets()
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if secrets["TOKEN"] != "789" || secrets["KEEP"] != "456" || secrets["NEW"] != "000" {
+			t.Errorf("Failed to merge inline secrets: %v", secrets)
+		}
+	})
+
+	t.Run("Inline Only", func(t *testing.T) {
+		tw, _ := treewalker.NewTreewalker(config.Config{Treewalker: config.TreewalkerConfig{
+			Secret: map[string]string{
+				"TOKEN": "789",
+			},
+		}}, *slog.Default(), mockParseRequest, mockParseConfig)
+		
+		secrets, err := tw.ParseSecrets()
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if secrets["TOKEN"] != "789" {
+			t.Errorf("Failed to parse inline secrets: %v", secrets)
 		}
 	})
 }

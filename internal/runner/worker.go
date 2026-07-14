@@ -16,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Veitangie/sinq/internal/config"
 	"github.com/Veitangie/sinq/internal/scenario"
+	"github.com/Veitangie/sinq/internal/timer"
 )
 
 type Workspace interface {
@@ -39,13 +41,13 @@ func (t taskBundle) getFullName() string {
 }
 
 type workerEnv struct {
-	luaStateHardReset bool
-	secrets           map[string]any
-	logger            *slog.Logger
-	transport         http.RoundTripper
-	clock             Clock
-	compiler          cachedCompiler
-	workspace         Workspace
+	cfg       config.Config
+	secrets   map[string]any
+	logger    *slog.Logger
+	transport http.RoundTripper
+	clock     timer.Clock
+	compiler  cachedCompiler
+	workspace Workspace
 }
 
 type worker struct {
@@ -85,15 +87,10 @@ func (w *worker) loggingContextWithErr(ctx context.Context, err error) []any {
 	return append(w.loggingContext(ctx), "error", err)
 }
 
-func (w *worker) reportResult(ctx context.Context, scenarioTimer ResultTimer, scenarioName string, status ResultStatus, durations []RequestResult) {
+func (w *worker) reportResult(ctx context.Context, scenarioTimer timer.Timer, result ScenarioResult) {
+	result.TotalDuration = scenarioTimer.Time()
 	select {
-	case w.resCh <- ScenarioResult{
-		Name:           scenarioName,
-		StartedAt:      scenarioTimer.at,
-		TotalDuration:  scenarioTimer.Time(),
-		RequestResults: durations,
-		Status:         status,
-	}:
+	case w.resCh <- result:
 	case <-ctx.Done():
 		w.env.logger.Debug("[Runner] Failed to publish scenario result because of timeout/cancel", w.loggingContext(ctx)...)
 	}
@@ -131,7 +128,7 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 
 	w.lc.setupRequestEnvironment(requestIdx)
 
-	requestTimer := newTimer(w.env.clock)
+	requestTimer := timer.NewTimer(w.env.clock)
 	processor := RequestProcessor{
 		w:                 w,
 		ctx:               ctx,
@@ -141,7 +138,7 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 		status:            status,
 		result:            result,
 		requestTimer:      requestTimer,
-		totalRequestTimer: ResultTimer{},
+		totalRequestTimer: timer.NewTimer(w.env.clock),
 		client:            client,
 	}
 
@@ -175,6 +172,9 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 		if scenarioBp.Config.FailFast {
 			return false, nil
 		}
+	} else {
+		result.Request = ""
+		result.Response = ""
 	}
 
 	if err := processor.runPost(); err != nil {
@@ -190,14 +190,27 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	for idx, req := range bundle.Requests {
 		requestResults[idx].Name = req.Filename
 	}
-	scenarioTimer := newTimer(w.env.clock)
+	scenarioTimer := timer.NewTimer(w.env.clock)
+	result := ScenarioResult{
+		Name:           bundle.getFullName(),
+		Tags:           bundle.Config.TagsList,
+		StartedAt:      scenarioTimer.StartedAt(),
+		RequestResults: requestResults,
+		Status:         Skipped,
+	}
+
+	if !w.env.cfg.ShouldInclude(bundle.Config.Tags, bundle.Config.Name) {
+		w.reportResult(ctx, scenarioTimer, result)
+		return
+	}
 
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		w.errorCh <- err
 		w.env.logger.Warn("[Runner] Failed to create cookiejar for scenario", w.loggingContextWithErr(ctx, err)...)
 		requestResults[0].ErrorMessage = "Failed to create cookie jar"
-		w.reportResult(ctx, scenarioTimer, bundle.getFullName(), Aborted, requestResults)
+		result.Status = Error
+		w.reportResult(ctx, scenarioTimer, result)
 		return
 	}
 
@@ -219,7 +232,8 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 		if r := recover(); r != nil {
 			w.env.logger.Warn("[Runner] Panic during scenario run", w.loggingContext(ctx)...)
 			w.env.logger.Debug("[Runner] More detailed info on panic", append(w.loggingContext(ctx), "panic", r)...)
-			w.reportResult(ctx, scenarioTimer, bundle.getFullName(), Error, requestResults)
+			result.Status = Error
+			w.reportResult(ctx, scenarioTimer, result)
 		}
 	}()
 
@@ -231,10 +245,10 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 		w.errorCh <- err
 		w.env.logger.Warn("[Runner] Failed to set up lua environment for scenario", w.loggingContextWithErr(ctx, err)...)
 		requestResults[0].ErrorMessage = "Failed to set up lua scenario"
-		w.reportResult(ctx, scenarioTimer, bundle.getFullName(), Aborted, requestResults)
+		result.Status = Error
+		w.reportResult(ctx, scenarioTimer, result)
 		return
 	}
-	scenarioTimer.start()
 
 	status := Success
 	shouldContinue := w.requestIdx >= 0 && w.requestIdx < len(bundle.Requests)
@@ -260,7 +274,8 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 		}
 	}
 
-	w.reportResult(ctx, scenarioTimer, bundle.getFullName(), status, requestResults)
+	result.Status = status
+	w.reportResult(ctx, scenarioTimer, result)
 }
 
 func (w *worker) materializeRequest(ctx context.Context, req *scenario.RequestBlueprint, executionTimeout time.Duration) ([]byte, error) {

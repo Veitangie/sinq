@@ -12,34 +12,16 @@ import (
 	"strings"
 )
 
-type envMatrixHelper struct {
+type configHelper struct {
 	EnvMatrix []map[string]any `json:"env_matrix"`
+	Tags      []string         `json:"tags"`
 }
 
-func ParseConfig(target *ScenarioConfig, source io.Reader) error {
-	bytes, err := io.ReadAll(source)
+func parseAdditionalData(target *ScenarioConfig, bytes []byte) error {
+	helper := configHelper{}
+	err := json.Unmarshal(bytes, &helper)
 	if err != nil {
-		return fmt.Errorf("An error occurred when reading scenario config: %w", err)
-	}
-
-	oldSize := target.MaxBody
-	err = json.Unmarshal(bytes, target)
-	if err != nil {
-		return fmt.Errorf("An error occurred when parsing scenario config: %w", err)
-	}
-
-	if target.MaxBody != oldSize {
-		bodySize, err := parseSize(target.MaxBody)
-		if err != nil {
-			return fmt.Errorf("Failed to parse max body size: %w", err)
-		}
-		target.MaxBodySize = bodySize
-	}
-
-	helper := envMatrixHelper{}
-	err = json.Unmarshal(bytes, &helper)
-	if err != nil {
-		return fmt.Errorf("Failed to parse env matrix: %w", err)
+		return fmt.Errorf("Failed to parse scenario config: %w", err)
 	}
 
 	if len(helper.EnvMatrix) > 0 {
@@ -67,6 +49,40 @@ func ParseConfig(target *ScenarioConfig, source io.Reader) error {
 		}
 
 		target.EnvMatrix = append(target.EnvMatrix, allTypeSafe...)
+	}
+
+	if len(helper.Tags) > 0 {
+		for _, tag := range helper.Tags {
+			target.Tags[tag] = true
+		}
+	}
+
+	return nil
+}
+
+func ParseConfig(target *ScenarioConfig, source io.Reader) error {
+	bytes, err := io.ReadAll(source)
+	if err != nil {
+		return fmt.Errorf("An error occurred when reading scenario config: %w", err)
+	}
+
+	oldSize := target.MaxBody
+	err = json.Unmarshal(bytes, target)
+	if err != nil {
+		return fmt.Errorf("An error occurred when parsing scenario config: %w", err)
+	}
+
+	if target.MaxBody != oldSize {
+		bodySize, err := parseSize(target.MaxBody)
+		if err != nil {
+			return fmt.Errorf("Failed to parse max body size: %w", err)
+		}
+		target.MaxBodySize = bodySize
+	}
+
+	err = parseAdditionalData(target, bytes)
+	if err != nil {
+		return err
 	}
 
 	return nil

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/Veitangie/sinq/internal/reporter/standard"
 	"github.com/Veitangie/sinq/internal/runner"
 	"github.com/Veitangie/sinq/internal/scenario"
+	"github.com/Veitangie/sinq/internal/timer"
 	"github.com/Veitangie/sinq/internal/treewalker"
 )
 
@@ -35,6 +37,7 @@ func populateConfigInRuntime(cfg *config.Config) {
 func sinq(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	mainTimer := timer.NewTimer(timer.DefaultClock{})
 
 	cfgParser := config.NewParser()
 	cfgParser.Parse(args)
@@ -64,20 +67,19 @@ func sinq(args []string) int {
 	populateConfigInRuntime(&cfg)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	logger.Debug("[sinq] Initialization complete", "duration", mainTimer.Time())
 
 	walker, err := treewalker.NewTreewalker(cfg, *logger, scenario.ParseRequestBlueprint, scenario.ParseConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to construct treewalker: %s\n", err.Error())
 		return 1
 	}
+	discoveryTimer := timer.NewTimer(timer.DefaultClock{})
 
-	secrets := map[string]any{}
-	if cfg.Secrets != "" {
-		secrets, err = walker.ParseSecrets()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
-			return 1
-		}
+	secrets, err := walker.ParseSecrets()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+		return 1
 	}
 
 	allScenarios := []runner.ScenarioBundle{}
@@ -87,7 +89,8 @@ func sinq(args []string) int {
 			fmt.Fprintf(os.Stderr, "Failed to open filetree at %s: %s\n", path, err.Error())
 			continue
 		}
-		res, err := walker.ParseFiletree(ctx, fs)
+		newCtx := context.WithValue(ctx, treewalker.PathCtxKey, path)
+		res, err := walker.ParseFiletree(newCtx, fs)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: Failed to parse filetree from %s: %s\n", path, err.Error())
 			continue
@@ -97,18 +100,10 @@ func sinq(args []string) int {
 			allScenarios = append(allScenarios, runner.ScenarioBundle{ScenarioBlueprint: scenarioBlueprint, Workspace: fs})
 		}
 	}
+	logger.Debug("[sinq] Discovery complete", "duration", discoveryTimer.Time())
 
 	if cfg.List {
-		for _, scBp := range allScenarios {
-			fmt.Fprintf(os.Stdout, "- %s\n", scBp.Config.Name)
-			if scBp.Config.Description != "" {
-				fmt.Fprintf(os.Stdout, "Description: %s\n", scBp.Config.Description)
-			}
-
-			for idx, rqBp := range scBp.Requests {
-				fmt.Fprintf(os.Stdout, "  - %d: %s\n", idx+1, rqBp.Filename)
-			}
-		}
+		listScenarios(allScenarios, cfg)
 		return 0
 	}
 
@@ -116,6 +111,15 @@ func sinq(args []string) int {
 	if scenarioCount == 0 {
 		fmt.Fprintf(os.Stderr, "Error: No scenarios found\n")
 		return 1
+	}
+
+	if os.Getenv("CI") != "" {
+		if cfg.LogLevel == slog.LevelDebug {
+			fmt.Fprintf(os.Stderr, "WARNING: Running in a CI environment with --log-level debug. This risks leaking secrets in CI logs.\n")
+		}
+		if cfg.DumpOnFailure {
+			fmt.Fprintf(os.Stderr, "WARNING: Running in a CI environment with --dump-on-failure. This risks leaking secrets in CI logs if assertions fail.\n")
+		}
 	}
 
 	transport := &http.Transport{
@@ -138,7 +142,7 @@ func sinq(args []string) int {
 		return 1
 	}
 
-	resultCh, durationCh, errorCh := rn.RunScenarios(ctx, allScenarios, secrets)
+	resultCh, durationCh, errorCh := rn.RunScenarios(ctx, allScenarios, secrets, &mainTimer)
 
 	code := handleReporting(cfg, logger, resultCh, durationCh, scenarioCount)
 
@@ -147,6 +151,34 @@ func sinq(args []string) int {
 	}
 
 	return code
+}
+
+func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config) {
+	for _, scBp := range allScenarios {
+		if cfg.Reporter.Show == config.NoSkip && !cfg.ShouldInclude(scBp.Config.Tags, scBp.Config.Name) {
+			continue
+		}
+		matrixInfo := ""
+		comboCount := countOneScenario(scBp)
+		if comboCount > 1 {
+			matrixInfo = fmt.Sprintf(" (%d matrix combinations)", comboCount)
+		}
+		fmt.Fprintf(os.Stdout, "- %s%s\n", scBp.Config.Name, matrixInfo)
+		if scBp.Config.Description != "" {
+			fmt.Fprintf(os.Stdout, "  Description: %s\n", scBp.Config.Description)
+		}
+		if len(scBp.Config.Tags) != 0 {
+			allTags := make([]string, 0, len(scBp.Config.Tags))
+			for tag := range scBp.Config.Tags {
+				allTags = append(allTags, tag)
+			}
+			fmt.Fprintf(os.Stdout, "  Tags: [%s]\n", strings.Join(allTags, ", "))
+		}
+
+		for idx, rqBp := range scBp.Requests {
+			fmt.Fprintf(os.Stdout, "  - %d: %s\n", idx+1, rqBp.Filename)
+		}
+	}
 }
 
 func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan runner.ScenarioResult, durationCh <-chan time.Duration, scenarioCount int) int {
@@ -214,17 +246,21 @@ func createReporter(cfg config.Config, out *os.File) reporter.Reporter {
 }
 
 func countTotalScenarios(scenarios []runner.ScenarioBundle) int {
-	res := len(scenarios)
+	res := 0
 	for _, scBp := range scenarios {
-		mod := 1
-		for _, mat := range scBp.Config.EnvMatrix {
-			if len(mat) > 0 {
-				mod *= len(mat)
-			}
-		}
-		res += mod - 1
+		res += countOneScenario(scBp)
 	}
 	return res
+}
+
+func countOneScenario(scBp runner.ScenarioBundle) int {
+	mod := 1
+	for _, mat := range scBp.Config.EnvMatrix {
+		if len(mat) > 0 {
+			mod *= len(mat)
+		}
+	}
+	return mod
 }
 
 func ponderSinqMeaning() string {
@@ -238,20 +274,31 @@ const helpSuffix = `Usage: sinq [flags] [directories...]
 A concurrent HTTP functional and integration testing tool.
 
 Flags:
+  -v, --version          Print the current sinq version and exit
+  -h, --help             Print this help message and exit
   -w, --workers int      Number of concurrent workers (default 10)
-  -s, --safe             Instantiate a new Lua VM per request instead of resetting state
   -i, --insecure         Disable SSL/TLS certificate verification
-  -S, --secrets path     Path to the secrets JSON file
+  -s, --secret string    Key=value pair overrides for scenario secrets
+  -e, --env string       Key=value pair overrides for all scenario environments
   -o, --out path         Path to write the output file (prints to stdout if omitted)
   -L, --log-level string Log level to use: debug, info, warn or error (default "warn")
   -f, --format string    Output format: std or junit (default "std")
   -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps)
   -c, --color string     Terminal colors: always, never, auto (default "auto")
+  -S, --show string      Which results to show in the output: all, no-skip, failures (default "no-skip")
   -l, --list             Parse and list scenarios at specified directories
-  -h, --help             Print this help message and exit
-  -v, --version          Print the current sinq version and exit`
+  -t, --tag string       Execute only scenarios that have the tag
+  -n, --name string      Execute only scenarios which names match the regular expression
+  --secrets-file string  Path to JSON-formatted secrets file
+  --skip-tag string      Do not execute scenarios that have the tag
+  --skip-name string     Do not execute scenarios which names match the regular expression
+  --dump-on-failure      Print full request and response data on failed assertion.
+  --safe                 Instantiate a new Lua VM per request instead of resetting state
 
-const versionConstPart = `sinq v1.0.0-rc.4 - `
+For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
+Or read the manual: man 1 sinq`
+
+const versionConstPart = `sinq v1.0.0-rc.5 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",
@@ -260,4 +307,5 @@ var sinqMeaning []string = []string{
 	"A[s]ynchronous Test[in]g Tool[q]it",
 	"Sinq Is Now Qombinatorial",
 	"Slick, Independent, Novel, Quirky",
+	"Stateful Integrated by Network Quality Assurer",
 }

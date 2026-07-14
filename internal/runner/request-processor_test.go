@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Veitangie/sinq/internal/scenario"
+	"github.com/Veitangie/sinq/internal/timer"
 )
 
 func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
@@ -50,7 +51,7 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 		requestBp:    reqBp,
 		status:       &status,
 		result:       result,
-		requestTimer: newTimer(DefaultClock{}),
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
 		client:       srv.Client(),
 	}
 
@@ -123,7 +124,7 @@ func TestBug_ZeroByteUpload(t *testing.T) {
 		httpRequest:  req,
 		client:       server.Client(),
 		filenameFrom: "upload.txt",
-		requestTimer: newTimer(DefaultClock{}),
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
 		result:       &RequestResult{},
 		status:       new(ResultStatus),
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
@@ -180,7 +181,7 @@ func TestRequestProcessor_FailsIfBodyAndFileAttached(t *testing.T) {
 		w:            w,
 		materialized: []byte(rawRequest),
 		filenameFrom: "attached_file.txt",
-		requestTimer: newTimer(DefaultClock{}),
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
 		result:       &RequestResult{},
 		status:       new(ResultStatus),
 	}
@@ -230,7 +231,7 @@ func TestRequestProcessor_MaxRetriesExceeded(t *testing.T) {
 		requestBp:    reqBp,
 		status:       &status,
 		result:       result,
-		requestTimer: newTimer(DefaultClock{}),
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
 		client:       srv.Client(),
 	}
 
@@ -262,12 +263,12 @@ func TestRequestProcessor_BadTLS_FailsGracefully(t *testing.T) {
 	processor := &RequestProcessor{
 		ctx:          context.Background(),
 		w:            w,
-		client:       &http.Client{}, // Deliberately bypass test TLS verification
+		client:       &http.Client{},
 		requestBp:    reqBp,
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
 		status:       new(ResultStatus),
 		result:       &RequestResult{},
-		requestTimer: newTimer(DefaultClock{}),
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
 	}
 
 	_ = processor.materialize()
@@ -304,7 +305,7 @@ func TestRequestProcessor_EmptyBodyGet_NoChunkedEncoding(t *testing.T) {
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
 		status:       new(ResultStatus),
 		result:       &RequestResult{},
-		requestTimer: newTimer(DefaultClock{}),
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
 	}
 
 	_ = processor.materialize()

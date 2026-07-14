@@ -61,6 +61,17 @@ func (w *worker) runTask(task []string) {
 		scenarioConfig.Name = getDefaultScenarioNameFromPath(task[len(task)-1])
 	}
 
+	if len(scenarioConfig.Tags) > 0 {
+		scenarioConfig.TagsList = make([]string, 0, len(scenarioConfig.Tags))
+		for tag := range scenarioConfig.Tags {
+			scenarioConfig.TagsList = append(scenarioConfig.TagsList, tag)
+		}
+	}
+
+	for key, val := range w.t.cfg.Treewalker.Env {
+		scenarioConfig.Env[key] = val
+	}
+
 	res := scenario.ScenarioBlueprint{Requests: requestBlueprints, Config: &scenarioConfig}
 	w.resultCh <- res
 }

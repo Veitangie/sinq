@@ -6,6 +6,7 @@ package config
 import (
 	"log/slog"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -45,10 +46,10 @@ func TestParser_Parse(t *testing.T) {
 		},
 		{
 			name:  "Boolean Flags Chaining",
-			flags: []string{"-si"},
+			flags: []string{"-li"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
-				c.Safe = true
+				c.List = true
 				c.Insecure = true
 				return c
 			}(),
@@ -66,10 +67,10 @@ func TestParser_Parse(t *testing.T) {
 		},
 		{
 			name:  "Double Dash Positional Terminator",
-			flags: []string{"-s", "--", "-d", "--workers"},
+			flags: []string{"-l", "--", "-d", "--workers"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
-				c.Safe = true
+				c.List = true
 				c.Paths = []string{"-d", "--workers"}
 				return c
 			}(),
@@ -108,8 +109,8 @@ func TestParser_Parse(t *testing.T) {
 		},
 		{
 			name:       "Chained Boolean with Invalid Char",
-			flags:      []string{"-svX"},
-			wantConfig: func() Config { c := SaneDefaults(); c.Safe = true; c.Version = true; return c }(),
+			flags:      []string{"-lvX"},
+			wantConfig: func() Config { c := SaneDefaults(); c.List = true; c.Version = true; return c }(),
 			wantErrs:   1,
 		},
 		{
@@ -163,6 +164,178 @@ func TestParser_Parse(t *testing.T) {
 			flags:      []string{"-L", "custom"},
 			wantConfig: SaneDefaults(),
 			wantErrs:   1,
+		},
+		{
+			name:  "Show All (Long)",
+			flags: []string{"--show", "all"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Reporter.Show = All
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Show No-Skip (Short)",
+			flags: []string{"-S", "no-skip"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Reporter.Show = NoSkip
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Show Failures",
+			flags: []string{"--show", "failures"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Reporter.Show = Failures
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:       "Show Invalid",
+			flags:      []string{"--show", "invalid"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Show Missing Value",
+			flags:      []string{"-s"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:  "Tag Include (Short)",
+			flags: []string{"-t", "api"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.TagsInclude = []string{"api"}
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Tag Include Multiple (Long)",
+			flags: []string{"--tag", "api", "--tag", "ui"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.TagsInclude = []string{"api", "ui"}
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Name Include Regex",
+			flags: []string{"--name", "^Test"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.NamesInclude = append(c.NamesInclude, *regexp.MustCompile("^Test"))
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:       "Name Include Regex Invalid",
+			flags:      []string{"--name", "([invalid"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:  "Tag Exclude",
+			flags: []string{"--skip-tag", "slow"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.TagsExclude = []string{"slow"}
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Name Exclude Regex",
+			flags: []string{"--skip-name", "Fail$"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.NamesExclude = append(c.NamesExclude, *regexp.MustCompile("Fail$"))
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:       "Name Exclude Regex Invalid",
+			flags:      []string{"--skip-name", "([invalid"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:  "Dump On Failure",
+			flags: []string{"--dump-on-failure"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.DumpOnFailure = true
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Secret Inline (Short)",
+			flags: []string{"-s", "API_KEY=123", "-s", "TOKEN=abc"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Treewalker.Secret["API_KEY"] = "123"
+				c.Treewalker.Secret["TOKEN"] = "abc"
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Secret Inline Invalid (No Equal)",
+			flags: []string{"-s", "API_KEY123"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:  "Env Inline (Short)",
+			flags: []string{"-e", "HOST=localhost", "-e", "PORT=8080"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Treewalker.Env["HOST"] = "localhost"
+				c.Treewalker.Env["PORT"] = "8080"
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Env Inline (Long)",
+			flags: []string{"--env", "HOST=localhost=80"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Treewalker.Env["HOST"] = "localhost=80"
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Secrets File (Long)",
+			flags: []string{"--secrets-file", "path/to/secrets.json"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Treewalker.SecretsFile = "path/to/secrets.json"
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Safe Long Flag",
+			flags: []string{"--safe"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Safe = true
+				return c
+			}(),
+			wantErrs: 0,
 		},
 	}
 

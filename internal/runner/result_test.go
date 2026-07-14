@@ -6,6 +6,8 @@ package runner
 import (
 	"testing"
 	"time"
+
+	"github.com/Veitangie/sinq/internal/timer"
 )
 
 func TestResultStatus_String(t *testing.T) {
@@ -13,7 +15,8 @@ func TestResultStatus_String(t *testing.T) {
 		status ResultStatus
 		want   string
 	}{
-		{Aborted, "Aborted/Skipped"},
+		{Skipped, "Skipped"},
+		{Aborted, "Aborted"},
 		{Success, "Success"},
 		{Failure, "Failure"},
 		{Error, "Error"},
@@ -30,7 +33,7 @@ func TestResultStatus_String(t *testing.T) {
 }
 
 func TestResultTimer_Uninitialized(t *testing.T) {
-	var timer ResultTimer
+	var timer timer.Timer
 
 	if got := timer.Time(); got != time.Duration(0) {
 		t.Errorf("Expected 0 duration for uninitialized timer, got %v", got)
@@ -49,7 +52,7 @@ func TestResultTimer_Initialized(t *testing.T) {
 	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	clock := &mockClock{currentTime: baseTime}
 
-	timer := newTimer(clock)
+	timer := timer.NewTimer(clock)
 
 	clock.currentTime = baseTime.Add(5 * time.Second)
 

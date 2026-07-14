@@ -48,7 +48,7 @@ func TestWorker_RequestCompleted_Indexing(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewReader([]byte(`{"status": "ok"}`))),
 	}
 
-	err := w.requestCompleted(context.Background(), resp, "", 1<<20, 1)
+	_, err := w.requestCompleted(context.Background(), resp, "", 1<<20, 1)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestWorker_RequestCompleted_JSONArrayBlindspot(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewReader([]byte(`[{"id": 1}, {"id": 2}]`))),
 	}
 
-	err := w.requestCompleted(context.Background(), resp, "", 1<<20, 1)
+	_, err := w.requestCompleted(context.Background(), resp, "", 1<<20, 1)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

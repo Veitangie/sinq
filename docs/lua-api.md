@@ -11,14 +11,14 @@ To ensure thread safety and prevent side-effect leaks between concurrent scenari
 These variables and functions are available globally in **all** script blocks.
 
 ### `env`
-A table containing the environment variables configured for the current scenario. Modifications made to this table from a user script persist for the lifetime of the scenario.
+A table containing the environment variables configured for the current scenario merged with all the values passed via the `-e` / `--env` flags. Modifications made to this table from a user script persist for the lifetime of the scenario.
 ```lua
 -- Example usage in a script or inline string interpolation
 local host = env.BASE_URL
 ```
 
 ### `secrets`
-A table containing sensitive values passed to `sinq` via the `-S` / `--secrets` CLI flag.
+A table containing sensitive values passed to `sinq` via the `-s` / `--secret` / `--secrets-file` CLI flags.
 
 ### `req` and `res` (Current Request Context)
 Shorthands for the *current* request and response being processed. 

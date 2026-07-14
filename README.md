@@ -334,7 +334,8 @@ Default configuration that can be overridden in `.scenario` files:
   "max_retries": 10,
   "max_redirects": 5,
   "max_body_size": "1MB",
-  "env_matrix": [{ }]
+  "env_matrix": [{ }],
+  "tags": [],
 }
 ```
 
@@ -349,16 +350,15 @@ Default configuration that can be overridden in `.scenario` files:
 * **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
 * **`max_body_size`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
 * **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](docs/env-matrix.md).
-
-Everything defined in the `env` object can be accessed directly in your HTTP paths and headers using `${env.variableName}`, or inside your Lua scripts via the global `env` table.
+* **`tags`**: Tags or labels assigned to scenarios containing this `.scenario` file. They get collected into one list for the resulting scenario.
 
 ---
 
 ## Secrets & Security
 
-Secrets are loaded from a JSON file provided through `--secrets`.
+Secrets are loaded from a JSON file provided through `--secrets-file` and overrides passed with `--secret|-s` flag (for multiple overrides use the flag multiple times).
 
-To reduce the risk of accidental exposure, some error messages intentionally omit sensitive values. Verbose mode (`--verbose`) may include additional debugging information and **should be used carefully in CI environments where logs are retained**.
+To reduce the risk of accidental exposure, some error messages intentionally omit possibly sensitive data. Verbose mode (`--verbose`) as well as `--log-level debug` and `--dump-on-failure` may include additional debugging information and **should be used carefully in CI environments where logs are retained**.
 
 ---
 
@@ -366,8 +366,8 @@ To reduce the risk of accidental exposure, some error messages intentionally omi
 
 By default, `sinq` prioritizes performance by reusing and resetting Lua Virtual Machines (`LState`) between scenarios instead of destroying and recreating them from scratch. While intentional global variables (like `AUTH_TOKEN`) are passed safely through scenario request chains and discarded at the end of every scenario, mutating core Lua libraries can theoretically pollute the VM worker for the next scenario that picks it up.
 
-**The `--safe` (`-s`) Flag:**
-If you suspect state leakage across concurrent scenarios is causing flaky tests, use the `-s` flag. This forces `sinq` to instantiate a brand new, pristine Lua VM for every single request. It guarantees total isolation but incurs a performance and memory allocation penalty.
+**The `--safe` Flag:**
+If you suspect state leakage across concurrent scenarios is causing flaky tests, use the `--safe` flag. This forces `sinq` to instantiate a brand new Lua VM for every single request. It guarantees isolation but incurs a performance and memory allocation penalty.
 
 **How to avoid needing `--safe`:**
 1. **Scope your variables:** Use `local myVar = ...` for temporary data. Only assign to global variables (or `_G`) when you explicitly need to pass data to the next `.sinq` file in the scenario chain.
@@ -393,18 +393,26 @@ sinq -iV ./tests/local
 ### Options
 
 ```text
+  -v, --version          Print the current sinq version and exit
+  -h, --help             Print this help message and exit
   -w, --workers int      Number of concurrent workers (default 10)
-  -s, --safe             Instantiate a new Lua VM per request instead of resetting state
   -i, --insecure         Disable SSL/TLS certificate verification
-  -S, --secrets path     Path to the secrets JSON file
+  -s, --secret string    Key=value pair overrides for scenario secrets
+  -e, --env string       Key=value pair overrides for all scenario environments
   -o, --out path         Path to write the output file (prints to stdout if omitted)
   -L, --log-level string Log level to use: debug, info, warn or error (default "warn")
   -f, --format string    Output format: std or junit (default "std")
   -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps)
   -c, --color string     Terminal colors: always, never, auto (default "auto")
+  -S, --show string      Which results to show in the output: all, no-skip, failures (default "no-skip")
   -l, --list             Parse and list scenarios at specified directories
-  -h, --help             Print this help message and exit
-  -v, --version          Print the current sinq version and exit
+  -t, --tag string       Execute only scenarios that have the tag
+  -n, --name string      Execute only scenarios which names match the regular expression
+  --secrets-file string  Path to JSON-formatted secrets file
+  --skip-tag string      Do not execute scenarios that have the tag
+  --skip-name string     Do not execute scenarios which names match the regular expression
+  --dump-on-failure      Print full request and response data on failed assertion.
+  --safe                 Instantiate a new Lua VM per request instead of resetting state
 ```
 
 ---

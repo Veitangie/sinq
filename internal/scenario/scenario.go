@@ -71,6 +71,8 @@ func (bp RequestBlueprint) String() string {
 type ScenarioConfig struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Tags        map[string]bool `json:"-"`
+	TagsList    []string        `json:"-"`
 
 	Env map[string]any `json:"env"`
 
@@ -82,7 +84,7 @@ type ScenarioConfig struct {
 	MaxRetries    int      `json:"max_retries"`
 	MaxBody       string   `json:"max_body"`
 	MaxBodySize   DataSize
-	EnvMatrix     []map[string]map[string]any
+	EnvMatrix     []map[string]map[string]any `json:"-"`
 }
 
 type DataSize struct {
@@ -138,6 +140,7 @@ type Duration struct {
 
 func SaneDefaultConfig() ScenarioConfig {
 	return ScenarioConfig{
+		Tags:          make(map[string]bool),
 		ReqTimeout:    Duration{5 * time.Second},
 		ScriptTimeout: Duration{5 * time.Second},
 		Timeout:       Duration{10 * time.Minute},

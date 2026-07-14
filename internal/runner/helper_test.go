@@ -14,6 +14,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/Veitangie/sinq/internal/timer"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -50,7 +51,7 @@ func setupTestWorker(t *testing.T, ctx context.Context) *worker {
 
 	env := workerEnv{
 		logger:    slog.Default(),
-		clock:     DefaultClock{},
+		clock:     timer.DefaultClock{},
 		transport: http.DefaultTransport,
 		compiler: cachedCompiler{
 			scriptCacheLock: sharedLock,

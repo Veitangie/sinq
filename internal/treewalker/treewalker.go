@@ -20,6 +20,13 @@ import (
 	"github.com/Veitangie/sinq/internal/config"
 	"github.com/Veitangie/sinq/internal/natsort"
 	"github.com/Veitangie/sinq/internal/scenario"
+	"github.com/Veitangie/sinq/internal/timer"
+)
+
+type TreewalkerCtxKey string
+
+const (
+	PathCtxKey TreewalkerCtxKey = "path"
 )
 
 type ParseRequestFunc func(io.Reader, string) (*scenario.RequestBlueprint, error)
@@ -53,7 +60,7 @@ func (t *Treewalker) exploreFS(ctx context.Context, cancelCtx context.CancelCaus
 
 	entries, err := fs.ReadDir(fileSystem, directoryName)
 	if err != nil {
-		t.logger.Error("An error occurred while exploring the file system", "error", err, "directory", directoryName)
+		t.logger.Error("[Treewalker] An error occurred while exploring the file system", "error", err, "directory", directoryName)
 		err = fmt.Errorf("Error on path: %s: %w", directoryName, err)
 		select {
 		case errorCh <- err:
@@ -113,6 +120,7 @@ func (t *Treewalker) startExploration(ctx context.Context, cancelCtx context.Can
 }
 
 func (t *Treewalker) ParseFiletree(ctx context.Context, fileSystem fs.FS) ([]scenario.ScenarioBlueprint, error) {
+	totalTimer := timer.NewTimer(timer.DefaultClock{})
 	errorCh := make(chan error, t.cfg.Workers)
 
 	cancellableCtx, cancelCtx := context.WithCancelCause(ctx)
@@ -153,26 +161,33 @@ func (t *Treewalker) ParseFiletree(ctx context.Context, fileSystem fs.FS) ([]sce
 	if ctxErr := context.Cause(cancellableCtx); ctxErr != nil {
 		err = errors.Join(err, ctxErr)
 	}
+	t.logger.Debug("[Treewalker] Finished discovery", "path", ctx.Value(PathCtxKey), "startedAt", totalTimer.StartedAt(), "duration", totalTimer.Time())
 	return res, err
 }
 
 func (t *Treewalker) ParseSecrets() (map[string]any, error) {
-	bytes, err := os.ReadFile(t.cfg.Secrets)
-	if err != nil {
-		t.logger.Debug("Failed to read file to parse secrets", "error", err)
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("Secrets file %s does not exist", t.cfg.Secrets)
+	secrets := make(map[string]any, 0)
+	if len(t.cfg.Treewalker.SecretsFile) > 0 {
+		bytes, err := os.ReadFile(t.cfg.Treewalker.SecretsFile)
+		if err != nil {
+			t.logger.Debug("[Treewalker] Failed to read file to parse secrets", "error", err)
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("Secrets file %s does not exist", t.cfg.Treewalker.SecretsFile)
+			}
+			return nil, errors.New("Failed to read secrets")
 		}
-		return nil, errors.New("Failed to read secrets")
+
+		if len(bytes) > 0 {
+			err = json.Unmarshal(bytes, &secrets)
+			if err != nil {
+				t.logger.Debug("[Treewalker] Failed to unmarshal secrets", "error", err)
+				return nil, errors.New("Failed to unmarshal secrets")
+			}
+		}
 	}
 
-	secrets := make(map[string]any, 0)
-	if len(bytes) > 0 {
-		err = json.Unmarshal(bytes, &secrets)
-		if err != nil {
-			t.logger.Debug("Failed to unmarshal secrets", "error", err)
-			return nil, errors.New("Failed to unmarshal secrets")
-		}
+	for key, val := range t.cfg.Treewalker.Secret {
+		secrets[key] = val
 	}
 
 	return secrets, nil

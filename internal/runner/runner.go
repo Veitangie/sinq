@@ -13,6 +13,7 @@ import (
 
 	"github.com/Veitangie/sinq/internal/config"
 	"github.com/Veitangie/sinq/internal/scenario"
+	"github.com/Veitangie/sinq/internal/timer"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -21,7 +22,7 @@ type Runner struct {
 	ctx       context.Context
 	transport http.RoundTripper
 	logger    slog.Logger
-	clock     Clock
+	clock     timer.Clock
 }
 
 type ScenarioBundle struct {
@@ -66,7 +67,7 @@ func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle
 	return taskCh
 }
 
-func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, secrets map[string]any) (<-chan ScenarioResult, <-chan time.Duration, <-chan error) {
+func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, secrets map[string]any, totalTimer *timer.Timer) (<-chan ScenarioResult, <-chan time.Duration, <-chan error) {
 
 	taskCh := r.startDataSource(ctx, scenarios)
 	errorCh := make(chan error, r.cfg.Workers)
@@ -78,8 +79,6 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 	sharedLock := sync.RWMutex{}
 
 	go func() {
-		timer := newTimer(r.clock)
-		timer.start()
 		defer func() {
 			close(errorCh)
 			close(resultCh)
@@ -92,12 +91,12 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 		}
 
 		env := workerEnv{
-			secrets:           secrets,
-			luaStateHardReset: r.cfg.Safe,
-			logger:            &r.logger,
-			transport:         r.transport,
-			clock:             r.clock,
-			compiler:          compiler,
+			cfg:       r.cfg,
+			secrets:   secrets,
+			logger:    &r.logger,
+			transport: r.transport,
+			clock:     r.clock,
+			compiler:  compiler,
 		}
 
 		for idx := range r.cfg.Workers {
@@ -119,13 +118,13 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 			}()
 		}
 		wg.Wait()
-		durationCh <- timer.Time()
+		durationCh <- totalTimer.Time()
 	}()
 
 	return resultCh, durationCh, errorCh
 }
 
-func NewRunner(cfg config.Config, ctx context.Context, transport http.RoundTripper, logger slog.Logger, clock Clock) (*Runner, error) {
+func NewRunner(cfg config.Config, ctx context.Context, transport http.RoundTripper, logger slog.Logger, clock timer.Clock) (*Runner, error) {
 	if transport == nil {
 		return nil, errors.New("Cannot construct scenario runner: http transport is nil")
 	}
@@ -135,7 +134,7 @@ func NewRunner(cfg config.Config, ctx context.Context, transport http.RoundTripp
 	}
 
 	if clock == nil {
-		clock = DefaultClock{}
+		clock = timer.DefaultClock{}
 	}
 
 	return &Runner{cfg, ctx, transport, logger, clock}, nil
