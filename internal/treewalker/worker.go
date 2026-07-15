@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -122,6 +123,8 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 	if cachedScenarioConfig, isFound := readCache(filePath, w.scenarioConfigCache, w.scenarioConfigCacheLock); isFound {
 		*scenarioConfig = cachedScenarioConfig
 		scenarioConfig.Env = maps.Clone(cachedScenarioConfig.Env)
+		scenarioConfig.Tags = maps.Clone(cachedScenarioConfig.Tags)
+		scenarioConfig.TagsList = slices.Clone(cachedScenarioConfig.TagsList)
 		return
 	}
 
@@ -141,6 +144,8 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 
 	newConfig := *scenarioConfig
 	newConfig.Env = maps.Clone(scenarioConfig.Env)
+	newConfig.Tags = maps.Clone(scenarioConfig.Tags)
+	newConfig.TagsList = slices.Clone(scenarioConfig.TagsList)
 	updateCache(filePath, newConfig, w.scenarioConfigCache, w.scenarioConfigCacheLock)
 }
 

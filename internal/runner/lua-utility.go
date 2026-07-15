@@ -7,8 +7,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -43,8 +41,9 @@ func (w *worker) runEffectfulScript(token scenario.Token, extract extractPayload
 	return w.safeExecute(token, extract, filename, executionTimeout)
 }
 
-func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (string, string, error) {
+func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (string, string, bool, error) {
 	var filenameIn, filenameOut string
+	var singleFlight bool
 
 	w.lc.setupPreScript(func(L *lua.LState) int {
 		attachedPath := L.CheckString(1)
@@ -78,12 +77,18 @@ func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, 
 		}
 		filenameOut = resolvedPath
 		return 0
-	})
+	},
+		func(L *lua.LState) int {
+			flag := L.CheckBool(1)
+			singleFlight = flag
+			return 0
+		},
+	)
 	defer w.lc.tearDownPreScript()
 
 	err := w.runEffectfulScript(token, extract, filename, executionTimeout)
 
-	return filenameIn, filenameOut, err
+	return filenameIn, filenameOut, singleFlight, err
 }
 
 func (w *worker) runRetryScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (int64, error) {
@@ -180,63 +185,34 @@ func (w *worker) executeAndExtractValue(token scenario.Token, extract extractPay
 	return value, nil
 }
 
-func (w *worker) captureBodyToFile(body io.Reader, filenameTo string) error {
+func (w *worker) captureBodyToFile(body io.Reader, filenameTo string) (int64, error) {
 	file, err := w.env.workspace.Create(filenameTo)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer file.Close()
 
-	written, err := io.Copy(file, body)
-	if err != nil {
-		return err
-	}
-
-	w.lc.RecordResponseFile(written)
-	return nil
+	return io.Copy(file, body)
 }
 
-func (w *worker) captureBodyToLua(body io.Reader, maxBodySize uint64) ([]byte, error) {
-	limited := io.LimitReader(body, int64(maxBodySize)+1)
-	data, err := io.ReadAll(limited)
-	if err != nil {
-		return data, err
-	}
-
-	oversized := false
-	if uint64(len(data)) > maxBodySize {
-		data = data[:len(data)-1]
-		io.Copy(io.Discard, body)
-		oversized = true
-	}
-
-	w.lc.RecordResponseBody(data, oversized)
-	return data, nil
-}
-
-func (w *worker) requestCompleted(ctx context.Context, response *http.Response, filenameTo string, maxBodySize uint64, attempt int) (string, error) {
-	defer response.Body.Close()
-
-	w.lc.RecordResponseMeta(attempt, response.StatusCode, response.Header)
+func (w *worker) requestCompleted(response intermediate) (string, error) {
+	w.lc.RecordResponseMeta(response.attempt, response.statusCode, response.headers)
 
 	var err error
-	data := []byte(filenameTo)
-	if filenameTo != "" {
-		err = w.captureBodyToFile(response.Body, filenameTo)
+	data := []byte(response.filenameTo)
+	if response.filenameTo != "" {
+		w.lc.RecordResponseFile(response.size)
 	} else {
-		data, err = w.captureBodyToLua(response.Body, maxBodySize)
-		if w.env.logger.Enabled(ctx, slog.LevelDebug) {
-			w.env.logger.Debug("[Runner] Extracted response", append(w.loggingContext(ctx), "code", response.StatusCode, "headers", response.Header, "body", string(data))...)
-		}
+		w.lc.RecordResponseBody(response.body, response.oversized)
 	}
 
 	var result string
 	if w.env.cfg.DumpOnFailure {
 		sb := strings.Builder{}
-		sb.WriteString(response.Status)
-		sb.WriteString(response.Proto)
+		sb.WriteString(response.status)
+		sb.WriteString(response.proto)
 		sb.WriteByte('\n')
-		for key, values := range response.Header {
+		for key, values := range response.headers {
 			sb.WriteString(key)
 			sb.Write([]byte(": "))
 			for idx, value := range values {

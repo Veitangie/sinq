@@ -6,6 +6,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"hash/maphash"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/Veitangie/sinq/internal/scenario"
 	"github.com/Veitangie/sinq/internal/timer"
 	lua "github.com/yuin/gopher-lua"
+	"golang.org/x/sync/singleflight"
 )
 
 type Runner struct {
@@ -74,9 +76,12 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 	resultCh := make(chan ScenarioResult, r.cfg.Workers)
 	durationCh := make(chan time.Duration, 1)
 	wg := sync.WaitGroup{}
+	sg := singleflight.Group{}
 
 	sharedCache := map[scriptKey]*lua.FunctionProto{}
 	sharedLock := sync.RWMutex{}
+
+	sharedSeed := maphash.MakeSeed()
 
 	go func() {
 		defer func() {
@@ -90,13 +95,17 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 			scriptCache:     sharedCache,
 		}
 
+		hasher := maphash.Hash{}
+		hasher.SetSeed(sharedSeed)
 		env := workerEnv{
-			cfg:       r.cfg,
-			secrets:   secrets,
-			logger:    &r.logger,
-			transport: r.transport,
-			clock:     r.clock,
-			compiler:  compiler,
+			cfg:          r.cfg,
+			secrets:      secrets,
+			logger:       &r.logger,
+			transport:    r.transport,
+			clock:        r.clock,
+			compiler:     compiler,
+			singleFlight: &sg,
+			hasher:       hasher,
 		}
 
 		for idx := range r.cfg.Workers {

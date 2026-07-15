@@ -1,0 +1,5 @@
+GET ${env.BASE_URL}/heavy-computation/opt-out
+
+$ASSERT{
+    sinq.assert.code(200, "Expected 200")
+}

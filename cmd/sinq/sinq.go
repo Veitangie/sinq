@@ -298,7 +298,7 @@ Flags:
 For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
 Or read the manual: man 1 sinq`
 
-const versionConstPart = `sinq v1.0.0-rc.5 - `
+const versionConstPart = `sinq v1.0.0-rc.6 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",

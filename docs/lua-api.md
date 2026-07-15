@@ -87,7 +87,8 @@ The following APIs are dynamically injected and destroyed depending on the execu
 Executes before the HTTP request is materialized. Used for file I/O operations.
 * **`req.attach(filepath)`**: Replaces the request body with the contents of the specified file. *Note: Fails if a textual body is already defined in the `.sinq` file.*
 * **`req.saveResponseTo(filepath)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
-> *Both of these functions expect the path to be relative to the current file. Passing in an absolute path will fail*
+* **`req.singleFlight(bool)`**: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo)
+> *Both of the file functions expect the path to be relative to the current file. Passing in an absolute path will fail*
 
 ### `$RETRY` (Polling Phase)
 Executes after receiving a response. The script **must** return a number indicating how many milliseconds to wait before retrying, or a negative number to stop.

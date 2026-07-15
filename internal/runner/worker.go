@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 	"github.com/Veitangie/sinq/internal/config"
 	"github.com/Veitangie/sinq/internal/scenario"
 	"github.com/Veitangie/sinq/internal/timer"
+	"golang.org/x/sync/singleflight"
 )
 
 type Workspace interface {
@@ -41,13 +43,15 @@ func (t taskBundle) getFullName() string {
 }
 
 type workerEnv struct {
-	cfg       config.Config
-	secrets   map[string]any
-	logger    *slog.Logger
-	transport http.RoundTripper
-	clock     timer.Clock
-	compiler  cachedCompiler
-	workspace Workspace
+	cfg          config.Config
+	secrets      map[string]any
+	logger       *slog.Logger
+	transport    http.RoundTripper
+	clock        timer.Clock
+	compiler     cachedCompiler
+	workspace    Workspace
+	singleFlight *singleflight.Group
+	hasher       maphash.Hash
 }
 
 type worker struct {
@@ -152,11 +156,7 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 		return false, err
 	}
 
-	if err := processor.parse(); err != nil {
-		return false, err
-	}
-
-	if err := processor.run(); err != nil {
+	if err := processor.doRequest(); err != nil {
 		return false, err
 	}
 

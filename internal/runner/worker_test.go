@@ -4,9 +4,7 @@
 package runner
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -42,13 +40,13 @@ func TestWorker_RequestCompleted_Indexing(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.lc.setupRequestEnvironment(0)
 
-	resp := &http.Response{
-		StatusCode: 200,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(bytes.NewReader([]byte(`{"status": "ok"}`))),
+	resp := intermediate{
+		statusCode: 200,
+		headers:    make(http.Header),
+		body:       []byte(`{"status": "ok"}`),
 	}
 
-	_, err := w.requestCompleted(context.Background(), resp, "", 1<<20, 1)
+	_, err := w.requestCompleted(resp)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -70,13 +68,13 @@ func TestWorker_RequestCompleted_JSONArrayBlindspot(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.lc.setupRequestEnvironment(0)
 
-	resp := &http.Response{
-		StatusCode: 200,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(bytes.NewReader([]byte(`[{"id": 1}, {"id": 2}]`))),
+	resp := intermediate{
+		statusCode: 200,
+		headers:    make(http.Header),
+		body:       []byte(`[{"id": 1}, {"id": 2}]`),
 	}
 
-	_, err := w.requestCompleted(context.Background(), resp, "", 1<<20, 1)
+	_, err := w.requestCompleted(resp)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

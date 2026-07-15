@@ -168,35 +168,6 @@ func TestWorker_LuaInfiniteLoop_AbortsOnTimeout(t *testing.T) {
 	}
 }
 
-func TestWorker_GiantPayload_HandledSafely(t *testing.T) {
-	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
-
-	garbage := bytes.Repeat([]byte("A"), 10*1024*1024)
-	resp := &http.Response{
-		StatusCode: 200,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(bytes.NewReader(garbage)),
-	}
-
-	_, err := w.requestCompleted(context.Background(), resp, "", 1<<10, 1)
-	if err != nil {
-		t.Fatalf("requestCompleted failed unexpectedly: %v", err)
-	}
-
-	err = w.lc.DoString(`
-		local req = sinq.responses[1]
-		if req == nil then error("response missing") end
-		
-		if req.oversized ~= true then
-			error("Engine survived, but failed to flag the giant payload as 'oversized' in the Lua table!")
-		end
-	`)
-	if err != nil {
-		t.Fatalf("Giant payload assertion failed: %v", err)
-	}
-}
-
 func TestWorker_LuaBuiltinFailures(t *testing.T) {
 	w := setupTestWorker(t, nil)
 
@@ -263,7 +234,7 @@ func TestWorker_CaptureBodyToFile_Error(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.env.workspace = &errCreateWorkspace{mockWorkspace{FS: fstest.MapFS{}}}
 
-	err := w.captureBodyToFile(bytes.NewReader([]byte("test")), "out.txt")
+	_, err := w.captureBodyToFile(bytes.NewReader([]byte("test")), "out.txt")
 	if err == nil {
 		t.Error("Expected error when file writing fails")
 	}
@@ -283,5 +254,50 @@ func TestWorker_ExecuteAndExtractValue_RuntimeError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot perform add operation") {
 		t.Errorf("Expected arithmetic error, got: %v", err)
+	}
+}
+
+func TestLuaContext_PreScriptAPI_Lifecycle(t *testing.T) {
+	w := setupTestWorker(t, nil)
+	w.lc.setupRequestEnvironment(0) // initializes req table
+
+	// Assert pre-script APIs are initially nil
+	if w.lc.requestTable.RawGetString("attach") != lua.LNil {
+		t.Error("Expected req.attach to be nil before setup")
+	}
+	if w.lc.requestTable.RawGetString("saveResponseTo") != lua.LNil {
+		t.Error("Expected req.saveResponseTo to be nil before setup")
+	}
+	if w.lc.requestTable.RawGetString("singleFlight") != lua.LNil {
+		t.Error("Expected req.singleFlight to be nil before setup")
+	}
+
+	// Setup APIs
+	dummyFunc := func(L *lua.LState) int { return 0 }
+	w.lc.setupPreScript(dummyFunc, dummyFunc, dummyFunc)
+
+	// Assert they are injected
+	if w.lc.requestTable.RawGetString("attach").Type() != lua.LTFunction {
+		t.Error("Expected req.attach to be a function after setup")
+	}
+	if w.lc.requestTable.RawGetString("saveResponseTo").Type() != lua.LTFunction {
+		t.Error("Expected req.saveResponseTo to be a function after setup")
+	}
+	if w.lc.requestTable.RawGetString("singleFlight").Type() != lua.LTFunction {
+		t.Error("Expected req.singleFlight to be a function after setup")
+	}
+
+	// Teardown
+	w.lc.tearDownPreScript()
+
+	// Assert they are cleaned up
+	if w.lc.requestTable.RawGetString("attach") != lua.LNil {
+		t.Error("Expected req.attach to be nil after teardown")
+	}
+	if w.lc.requestTable.RawGetString("saveResponseTo") != lua.LNil {
+		t.Error("Expected req.saveResponseTo to be nil after teardown")
+	}
+	if w.lc.requestTable.RawGetString("singleFlight") != lua.LNil {
+		t.Error("Expected req.singleFlight to be nil after teardown")
 	}
 }

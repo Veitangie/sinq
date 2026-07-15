@@ -151,6 +151,9 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **req.saveResponseTo(filepath)**
 : Stream upcoming response directly to disk.
 
+**req.singleFlight(bool)**
+: Turn on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo)
+
 ### $RETRY Scope API
 
 **sinq.retry.stop**

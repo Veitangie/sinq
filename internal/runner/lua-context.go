@@ -120,7 +120,7 @@ func (lc *luaContext) RecordResponseBody(data []byte, oversized bool) {
 	lc.responseTable.RawSetString("json", lc.NewClosure(luapi.ExtractBodyJsonUnsafe, lc.responseTable))
 }
 
-func (lc *luaContext) setupPreScript(attach lua.LGFunction, saveTo lua.LGFunction) {
+func (lc *luaContext) setupPreScript(attach lua.LGFunction, saveTo lua.LGFunction, singleFlight lua.LGFunction) {
 	lc.requestTable.RawSetString(
 		"attach",
 		lc.NewFunction(attach),
@@ -129,11 +129,16 @@ func (lc *luaContext) setupPreScript(attach lua.LGFunction, saveTo lua.LGFunctio
 		"saveResponseTo",
 		lc.NewFunction(saveTo),
 	)
+	lc.requestTable.RawSetString(
+		"singleFlight",
+		lc.NewFunction(singleFlight),
+	)
 }
 
 func (lc *luaContext) tearDownPreScript() {
 	lc.requestTable.RawSetString("attach", lua.LNil)
 	lc.requestTable.RawSetString("saveResponseTo", lua.LNil)
+	lc.requestTable.RawSetString("singleFlight", lua.LNil)
 }
 
 func (lc *luaContext) setupRetryScript() {

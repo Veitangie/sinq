@@ -156,6 +156,55 @@ func TestTreewalker_CachePoisoning_Concurrency(t *testing.T) {
 	}
 }
 
+func TestTreewalker_TagsCachePoisoning_Concurrency(t *testing.T) {
+	memFS := fstest.MapFS{
+		"root/config.scenario": {Data: []byte(`{"tags": ["BASE"]}`)},
+
+		"root/branch1/req.sinq":        {Data: []byte("REQ1")},
+		"root/branch1/config.scenario": {Data: []byte(`{"tags": ["ONE"]}`)},
+
+		"root/branch2/req.sinq":        {Data: []byte("REQ2")},
+		"root/branch2/config.scenario": {Data: []byte(`{"tags": ["TWO"]}`)},
+	}
+
+	cfg := config.Config{
+		Workers: 4,
+	}
+
+	for i := 0; i < 20; i++ {
+		walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, scenario.ParseConfig)
+		blueprints, err := walker.ParseFiletree(context.Background(), memFS)
+		if err != nil {
+			t.Fatalf("Run %d: Parse failed: %v", i, err)
+		}
+
+		for _, bp := range blueprints {
+			if _, ok := bp.Config.Tags["BASE"]; !ok {
+				t.Fatalf("Run %d: Common tag lost or corrupted", i)
+			}
+
+			lastReq := bp.Requests[len(bp.Requests)-1]
+			reqContent := string(lastReq.ExtractPayload(lastReq.Content[0]))
+			if reqContent == "REQ1" {
+				if _, ok := bp.Config.Tags["ONE"]; !ok {
+					t.Fatalf("Run %d: Branch 1 corrupted! Expected tag ONE", i)
+				}
+				if _, ok := bp.Config.Tags["TWO"]; ok {
+					t.Fatalf("Run %d: Branch 1 leaked from Branch 2! Found tag TWO", i)
+				}
+			}
+			if reqContent == "REQ2" {
+				if _, ok := bp.Config.Tags["TWO"]; !ok {
+					t.Fatalf("Run %d: Branch 2 corrupted! Expected tag TWO", i)
+				}
+				if _, ok := bp.Config.Tags["ONE"]; ok {
+					t.Fatalf("Run %d: Branch 2 leaked from Branch 1! Found tag ONE", i)
+				}
+			}
+		}
+	}
+}
+
 func TestTreewalker_Ordering(t *testing.T) {
 	// root/
 	//  ├── z_setup_B.sinq       (Parent: Should be 2nd)

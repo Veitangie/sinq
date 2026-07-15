@@ -23,6 +23,8 @@ import (
 func Test_ExamplesDirectory(t *testing.T) {
 	var mu sync.Mutex
 	pollCount := 0
+	singleFlightCount := 0
+	optOutCount := 0
 
 	uploadBytes := make([]byte, 1024)
 	rand.Read(uploadBytes)
@@ -151,6 +153,20 @@ func Test_ExamplesDirectory(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			}
 
+		case r.URL.Path == "/heavy-computation/opt-in" && r.Method == "GET":
+			mu.Lock()
+			singleFlightCount++
+			mu.Unlock()
+			time.Sleep(100 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+
+		case r.URL.Path == "/heavy-computation/opt-out" && r.Method == "GET":
+			mu.Lock()
+			optOutCount++
+			mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+
 		case r.URL.Path == "/unreachable":
 			t.Errorf("The /unreachable endpoint was hit! sinq.finishScenario() failed to abort the sequence.")
 			w.WriteHeader(http.StatusBadRequest)
@@ -185,7 +201,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 		"env": map[string]string{
 			"BASE_URL": srv.URL,
 		},
-		"req_timeout": "50ms",
+		"req_timeout": "200ms",
 	}
 	configBytes, _ := json.MarshalIndent(configData, "", "  ")
 
@@ -208,7 +224,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 	defer os.Remove(secretsPath)
 
 	args := []string{
-		"--workers", "10",
+		"--workers", "24",
 		"--format", "std",
 		"--color", "always",
 		"--secrets-file", secretsPath,
@@ -230,5 +246,13 @@ func Test_ExamplesDirectory(t *testing.T) {
 
 	if !bytes.Equal(receivedData, downloadBytes) {
 		t.Fatalf("Received file content does not match the download bytes")
+	}
+
+	if singleFlightCount != 1 {
+		t.Fatalf("Expected exactly 1 request to /heavy-computation/opt-in due to singleflight deduplication, got %d", singleFlightCount)
+	}
+
+	if optOutCount != 10 {
+		t.Fatalf("Expected 10 requests to /heavy-computation/opt-out because singleflight was not used, got %d", optOutCount)
 	}
 }

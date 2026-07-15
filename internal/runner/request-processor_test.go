@@ -5,16 +5,21 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/Veitangie/sinq/internal/scenario"
 	"github.com/Veitangie/sinq/internal/timer"
+	"golang.org/x/sync/singleflight"
+	"hash/maphash"
 )
 
 func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
@@ -60,7 +65,8 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 
 	done := make(chan error)
 	go func() {
-		done <- processor.run()
+		_, err := processor.run()
+		done <- err
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -85,7 +91,7 @@ func TestBug_SaveToLeak(t *testing.T) {
 
 	dummyExtract := func(scenario.Token) []byte { return []byte("") }
 
-	_, _, err := w.runPreScript(scenario.Token{}, dummyExtract, "test.sinq", 1*time.Second)
+	_, _, _, err := w.runPreScript(scenario.Token{}, dummyExtract, "test.sinq", 1*time.Second)
 	if err != nil {
 		t.Fatalf("runPreScript failed: %v", err)
 	}
@@ -130,10 +136,11 @@ func TestBug_ZeroByteUpload(t *testing.T) {
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
 	}
 
-	err := processor.send()
+	resp, err := processor.send()
 	if err != nil {
 		t.Fatalf("send() failed: %v", err)
 	}
+	defer resp.Body.Close()
 
 	if len(receivedBody) == 0 {
 		t.Errorf("BUG EXPOSED: Server received 0 bytes! ContentLength was 0, so the attached file was ignored.")
@@ -160,7 +167,7 @@ func TestWorker_AttachInvalidFileFastFails(t *testing.T) {
 	extract := func(scenario.Token) []byte { return script }
 	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
 
-	_, _, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+	_, _, _, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
 
 	if err == nil {
 		t.Fatal("Expected runPreScript to fail on missing file, but it succeeded")
@@ -238,7 +245,7 @@ func TestRequestProcessor_MaxRetriesExceeded(t *testing.T) {
 	_ = processor.materialize()
 	_ = processor.parse()
 
-	err = processor.run()
+	_, err = processor.run()
 
 	if err == nil || err.Error() != "Too many retries" {
 		t.Fatalf("Expected 'Too many retries' error, got: %v", err)
@@ -273,8 +280,7 @@ func TestRequestProcessor_BadTLS_FailsGracefully(t *testing.T) {
 
 	_ = processor.materialize()
 	_ = processor.parse()
-	err := processor.send()
-
+	err := processor.doRequest()
 	if err == nil {
 		t.Fatal("Expected TLS handshake error, but request succeeded!")
 	}
@@ -310,14 +316,201 @@ func TestRequestProcessor_EmptyBodyGet_NoChunkedEncoding(t *testing.T) {
 
 	_ = processor.materialize()
 	_ = processor.parse()
-	err := processor.send()
+	resp, err := processor.send()
 	if err != nil {
 		t.Fatalf("send() failed: %v", err)
 	}
+	defer resp.Body.Close()
 
 	for _, te := range receivedTransferEncoding {
 		if te == "chunked" {
 			t.Fatalf("BUG EXPOSED: GET request with no body sent with Transfer-Encoding: chunked!")
 		}
+	}
+}
+
+func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
+	var count int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&count, 1)
+		time.Sleep(50 * time.Millisecond)
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	w := setupTestWorker(t, nil)
+	w.lc.setupRequestEnvironment(0)
+	
+	// Create shared singleflight group and shared seed just like Runner does
+	sg := &singleflight.Group{}
+	w.env.singleFlight = sg
+	seed := maphash.MakeSeed()
+
+	rawSinq := "GET " + srv.URL + "\n\n"
+	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			
+			// Worker sets up its own hasher internally, simulating what Runner passes by value
+			hasher := maphash.Hash{}
+			hasher.SetSeed(seed)
+
+			wLocal := setupTestWorker(t, nil)
+			wLocal.lc.setupRequestEnvironment(0)
+			wLocal.env.singleFlight = sg
+			wLocal.env.hasher = hasher
+			
+			processor := &RequestProcessor{
+				ctx:          context.Background(),
+				w:            wLocal,
+				client:       srv.Client(),
+				requestBp:    reqBp,
+				scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
+				status:       new(ResultStatus),
+				result:       &RequestResult{},
+				requestTimer: timer.NewTimer(timer.DefaultClock{}),
+				singleFlight: true, // Enable SingleFlight
+			}
+
+			_ = processor.materialize()
+			_ = processor.parse()
+			err := processor.doRequest()
+			if err != nil {
+				t.Errorf("doRequest() failed: %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if atomic.LoadInt32(&count) != 1 {
+		t.Errorf("Expected server to be hit exactly 1 time, but was hit %d times", count)
+	}
+}
+
+func TestRequestProcessor_SingleFlight_DistinctRequests(t *testing.T) {
+	var count int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&count, 1)
+		time.Sleep(50 * time.Millisecond)
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	w := setupTestWorker(t, nil)
+	w.lc.setupRequestEnvironment(0)
+	
+	sg := &singleflight.Group{}
+	w.env.singleFlight = sg
+	seed := maphash.MakeSeed()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			hasher := maphash.Hash{}
+			hasher.SetSeed(seed)
+
+			wLocal := setupTestWorker(t, nil)
+			wLocal.lc.setupRequestEnvironment(0)
+			wLocal.env.singleFlight = sg
+			wLocal.env.hasher = hasher
+
+			// Create DISTINCT requests by adding a unique header
+			rawSinq := "GET " + srv.URL + "\n" + "X-Unique-ID: " + fmt.Sprint(idx) + "\n\n"
+			reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+			
+			processor := &RequestProcessor{
+				ctx:          context.Background(),
+				w:            wLocal,
+				client:       srv.Client(),
+				requestBp:    reqBp,
+				scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
+				status:       new(ResultStatus),
+				result:       &RequestResult{},
+				requestTimer: timer.NewTimer(timer.DefaultClock{}),
+				singleFlight: true,
+			}
+
+			_ = processor.materialize()
+			_ = processor.parse()
+			err := processor.doRequest()
+			if err != nil {
+				t.Errorf("doRequest() failed: %v", err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	if atomic.LoadInt32(&count) != 10 {
+		t.Errorf("Expected server to be hit exactly 10 times, but was hit %d times", count)
+	}
+}
+
+func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
+	var count int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&count, 1)
+		time.Sleep(50 * time.Millisecond)
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	w := setupTestWorker(t, nil)
+	w.lc.setupRequestEnvironment(0)
+	
+	sg := &singleflight.Group{}
+	w.env.singleFlight = sg
+	seed := maphash.MakeSeed()
+
+	rawSinq := "GET " + srv.URL + "\n\n"
+	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			hasher := maphash.Hash{}
+			hasher.SetSeed(seed)
+
+			wLocal := setupTestWorker(t, nil)
+			wLocal.lc.setupRequestEnvironment(0)
+			wLocal.env.singleFlight = sg
+			wLocal.env.hasher = hasher
+
+			processor := &RequestProcessor{
+				ctx:          context.Background(),
+				w:            wLocal,
+				client:       srv.Client(),
+				requestBp:    reqBp,
+				scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
+				status:       new(ResultStatus),
+				result:       &RequestResult{},
+				requestTimer: timer.NewTimer(timer.DefaultClock{}),
+				singleFlight: false, // NO SINGLEFLIGHT
+			}
+
+			_ = processor.materialize()
+			_ = processor.parse()
+			err := processor.doRequest()
+			if err != nil {
+				t.Errorf("doRequest() failed: %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if atomic.LoadInt32(&count) != 10 {
+		t.Errorf("Expected server to be hit exactly 10 times, but was hit %d times", count)
 	}
 }

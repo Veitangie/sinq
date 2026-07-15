@@ -1,0 +1,17 @@
+{
+  "env_matrix": [
+    {
+      "1": { "instance": "1" },
+      "2": { "instance": "2" },
+      "3": { "instance": "3" },
+      "4": { "instance": "4" },
+      "5": { "instance": "5" },
+      "6": { "instance": "6" },
+      "7": { "instance": "7" },
+      "8": { "instance": "8" },
+      "9": { "instance": "9" },
+      "10": { "instance": "10" }
+    }
+  ],
+  "tags": ["FEATURE_SHOWCASE", "SINGLE_FLIGHT"]
+}
