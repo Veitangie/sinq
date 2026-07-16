@@ -45,6 +45,7 @@ func (t taskBundle) getFullName() string {
 type workerEnv struct {
 	cfg          config.Config
 	secrets      map[string]any
+	luaPath      string
 	logger       *slog.Logger
 	transport    http.RoundTripper
 	clock        timer.Clock
@@ -233,6 +234,7 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 			w.env.logger.Warn("[Runner] Panic during scenario run", w.loggingContext(ctx)...)
 			w.env.logger.Debug("[Runner] More detailed info on panic", append(w.loggingContext(ctx), "panic", r)...)
 			result.Status = Error
+			w.lc.SetContext(ctx)
 			w.reportResult(ctx, scenarioTimer, result)
 		}
 	}()

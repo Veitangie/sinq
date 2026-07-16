@@ -23,7 +23,7 @@ import (
 func Test_ExamplesDirectory(t *testing.T) {
 	var mu sync.Mutex
 	pollCount := 0
-	singleFlightCount := 0
+	cache := 0
 	optOutCount := 0
 
 	uploadBytes := make([]byte, 1024)
@@ -155,7 +155,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 
 		case r.URL.Path == "/heavy-computation/opt-in" && r.Method == "GET":
 			mu.Lock()
-			singleFlightCount++
+			cache++
 			mu.Unlock()
 			time.Sleep(100 * time.Millisecond)
 			w.WriteHeader(http.StatusOK)
@@ -228,6 +228,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 		"--format", "std",
 		"--color", "always",
 		"--secrets-file", secretsPath,
+		"--plugins", filepath.Join(examplesDir, "plugins"),
 		examplesDir,
 	}
 
@@ -248,8 +249,8 @@ func Test_ExamplesDirectory(t *testing.T) {
 		t.Fatalf("Received file content does not match the download bytes")
 	}
 
-	if singleFlightCount != 1 {
-		t.Fatalf("Expected exactly 1 request to /heavy-computation/opt-in due to singleflight deduplication, got %d", singleFlightCount)
+	if cache != 1 {
+		t.Fatalf("Expected exactly 1 request to /heavy-computation/opt-in due to singleflight deduplication, got %d", cache)
 	}
 
 	if optOutCount != 10 {

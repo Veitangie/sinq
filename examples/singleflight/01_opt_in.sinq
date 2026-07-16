@@ -1,6 +1,6 @@
 GET ${env.BASE_URL}/heavy-computation/opt-in
 
-$PRE{ req.singleFlight(true) }
+$PRE{ req.cache(true) }
 
 $ASSERT{
     sinq.assert.code(200, "Expected 200")

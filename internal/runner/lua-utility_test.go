@@ -259,45 +259,40 @@ func TestWorker_ExecuteAndExtractValue_RuntimeError(t *testing.T) {
 
 func TestLuaContext_PreScriptAPI_Lifecycle(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0) // initializes req table
+	w.lc.setupRequestEnvironment(0)
 
-	// Assert pre-script APIs are initially nil
 	if w.lc.requestTable.RawGetString("attach") != lua.LNil {
 		t.Error("Expected req.attach to be nil before setup")
 	}
 	if w.lc.requestTable.RawGetString("saveResponseTo") != lua.LNil {
 		t.Error("Expected req.saveResponseTo to be nil before setup")
 	}
-	if w.lc.requestTable.RawGetString("singleFlight") != lua.LNil {
-		t.Error("Expected req.singleFlight to be nil before setup")
+	if w.lc.requestTable.RawGetString("cache") != lua.LNil {
+		t.Error("Expected req.cache to be nil before setup")
 	}
 
-	// Setup APIs
 	dummyFunc := func(L *lua.LState) int { return 0 }
 	w.lc.setupPreScript(dummyFunc, dummyFunc, dummyFunc)
 
-	// Assert they are injected
 	if w.lc.requestTable.RawGetString("attach").Type() != lua.LTFunction {
 		t.Error("Expected req.attach to be a function after setup")
 	}
 	if w.lc.requestTable.RawGetString("saveResponseTo").Type() != lua.LTFunction {
 		t.Error("Expected req.saveResponseTo to be a function after setup")
 	}
-	if w.lc.requestTable.RawGetString("singleFlight").Type() != lua.LTFunction {
-		t.Error("Expected req.singleFlight to be a function after setup")
+	if w.lc.requestTable.RawGetString("cache").Type() != lua.LTFunction {
+		t.Error("Expected req.cache to be a function after setup")
 	}
 
-	// Teardown
 	w.lc.tearDownPreScript()
 
-	// Assert they are cleaned up
 	if w.lc.requestTable.RawGetString("attach") != lua.LNil {
 		t.Error("Expected req.attach to be nil after teardown")
 	}
 	if w.lc.requestTable.RawGetString("saveResponseTo") != lua.LNil {
 		t.Error("Expected req.saveResponseTo to be nil after teardown")
 	}
-	if w.lc.requestTable.RawGetString("singleFlight") != lua.LNil {
-		t.Error("Expected req.singleFlight to be nil after teardown")
+	if w.lc.requestTable.RawGetString("cache") != lua.LNil {
+		t.Error("Expected req.cache to be nil after teardown")
 	}
 }

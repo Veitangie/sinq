@@ -194,7 +194,7 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 		finalMark := markSuccess
 		statusText := "PASSED"
 
-		if successfulScenarios != totalScenarios {
+		if successfulScenarios != ranScenarios {
 			finalMark = markFail
 			statusText = "FAILED"
 		}

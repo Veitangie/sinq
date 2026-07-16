@@ -10,7 +10,7 @@ sinq - The Spanish Inquisition
 
 ## DESCRIPTION
 
-**sinq** is a concurrent HTTP functional and integration testing tool. It treats your filesystem as a workflow definition, executing sequences of requests to walk through different workflow scenarios. It natively parses environment matrices to allow for combinatorial/matrix/parametrized testing, executes requests concurrently, and evaluates embedded Lua scripts for state management. Every leaf directory becomes an isolated execution scenario with its own state, configuration, and request chain.
+**sinq** is a concurrent HTTP functional and integration testing tool. It treats your filesystem as a workflow definition, executing sequences of requests to walk through different workflow scenarios. Every leaf directory becomes an isolated execution scenario with its own state, configuration, and request chain. The environment matrix mechanism allows for combinatorial/matrix/parametrized testing, reusing the same workflow for different datasets.
 
 ## CONCEPTS
 ### Scenarios and Treewalker
@@ -19,7 +19,7 @@ The basic unit of execution for `sinq` is a scenario. `sinq` uses a directory-tr
 ### Concurrency
 In `sinq`, the absolute unit of concurrency is the Scenario, not the Request. Requests within each scenario are strictly guaranteed to execute sequentially, while multiple scenarios execute simultaneously in a worker pool.
 
-### File Format & Scripts
+## FILE FORMAT
 
 A `.sinq` file is a standard HTTP request with optional embedded Lua scripts:
 ```
@@ -46,11 +46,11 @@ Lifecycle scripts have reserved names, and are executed at different times durin
 
 * `$POST`: Executes after assertions. Used to extract data from the response and save it to the global sandbox.
 
-### Configuration & Inheritance
+## CONFIGURATION
 
-`sinq` uses JSON-formatted `.scenario` files along the scenario path to manage environments, timeouts, and other configurations. When a leaf directory inherits a `.scenario` file from a parent, the configurations are deep merged (the only exclusion being the `env_matrix` lists, which all get combined into one big list), with the deeper (child) configuration taking precedence. Unmentioned default values are preserved, while explicitly declared keys override their parent counterparts. 
+`sinq` uses JSON-formatted `.scenario` files along the scenario path to manage environments, timeouts, and other configurations. When a leaf directory inherits a `.scenario` file from a parent, the configurations are deep merged (the only exclusion being the `env_matrix` and `tag` lists, which all get combined into flat lists), with the deeper (child) configuration taking precedence. Unmentioned default values are preserved. 
 
-Available keys include `name`, `description`, `env`, `req_timeout`, `script_timeout`, `timeout`, `fail_fast`, `max_retries`, `max_redirects`, `max_body_size`, `env_matrix` and `tags`. The `env` object is parsed into a global Lua table and can be accessed directly in any Lua script. `env_matrix` is accumulated from all the `.scenario` files in the scenario. Every entry should be a json object, every key being a label for a particular dataset, and the value for the key being another object. Then, treating every entry as a matrix or axis, `sinq` creates a Cartesian product of all of them, and the scenario is ran multiple times for every unique resulting combination, the combinations being deep merged with the `env` data.
+Available keys include `name`, `description`, `env`, `req_timeout`, `script_timeout`, `timeout`, `fail_fast`, `max_retries`, `max_redirects`, `max_body_size`, `env_matrix` and `tags`. The `env` object is parsed into a global Lua table and can be accessed directly in any Lua script. `env_matrix` is accumulated from all the `.scenario` files in the scenario. Every entry should be a json object, every key being a label for a particular dataset, and the value for the key being another object. Then, treating every entry as a matrix or axis, `sinq` creates a Cartesian product of all of them, and the scenario is run multiple times for every unique resulting combination, the combinations being deep merged with the `env` data.
 
 ## OPTIONS
 
@@ -99,6 +99,9 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **-n**, **--name** *string*
 : Execute only scenarios which names match the regular expression
 
+**-u**, **--unrestricted**
+: Load lua "os" and "io" modules for scripts
+
 **--secrets-file** *path*
 : Path to JSON-formatted secrets file
 
@@ -108,11 +111,30 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **--skip-name** *string*
 : Do not execute scenarios which names match the regular expression
 
+**--plugins** *string*
+: Paths to lua plugin directory entries, joined with ';'
+
 **--dump-on-failure**
-: Print full request and response data on failed assertion.
+: Print full request and response data on failed assertion
 
 **--safe**
 : Instantiate a new Lua VM per request instead of resetting state.
+
+## ENVIRONMENTAL VARIABLES
+
+`sinq` reads the following environment variables:
+
+**SINQ_LUA_PATH**
+: Defines a list of directories that `sinq` will look for plugins in, joined with ';'. Is ignored if **--plugins** flag is used
+
+**HTTP_PROXY**
+: Defines the proxy to use for http requests
+
+**HTTPS_PROXY**
+: Defines the proxy to use for https requests
+
+**NO_PROXY**
+: If set, no proxy is used
 
 ## LUA API REFERENCE
 ### Global Variables
@@ -151,7 +173,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **req.saveResponseTo(filepath)**
 : Stream upcoming response directly to disk.
 
-**req.singleFlight(bool)**
+**req.cache(bool)**
 : Turn on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo)
 
 ### $RETRY Scope API

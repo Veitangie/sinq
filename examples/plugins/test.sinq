@@ -1,0 +1,6 @@
+POST ${env.BASE_URL}/system/login
+
+$ASSERT {
+    local plugin = require("my_plugin")
+    plugin.assertStatus(200)
+}

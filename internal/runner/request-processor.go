@@ -50,7 +50,7 @@ type RequestProcessor struct {
 	client            *http.Client
 	filenameFrom      string
 	filenameTo        string
-	singleFlight      bool
+	cache             bool
 	sentRequest       bool
 }
 
@@ -66,7 +66,7 @@ func (p *RequestProcessor) handleError(err error) error {
 func (p *RequestProcessor) runPre() error {
 	p.w.env.logger.Debug("[Runner] Worker running pre script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.Start()
-	filenameFrom, filenameTo, singleFlight, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
+	filenameFrom, filenameTo, cache, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.result.Pre = p.requestTimer.Time()
 	p.totalRequestTimer = p.requestTimer
 	p.result.StartedAt = p.requestTimer.StartedAt()
@@ -77,7 +77,7 @@ func (p *RequestProcessor) runPre() error {
 
 	p.filenameFrom = filenameFrom
 	p.filenameTo = filenameTo
-	p.singleFlight = singleFlight
+	p.cache = cache
 	return p.handleError(err)
 }
 
@@ -104,7 +104,7 @@ func (p *RequestProcessor) materialize() error {
 func (p *RequestProcessor) doRequest() error {
 	var result *intermediate
 	var err error
-	if p.singleFlight {
+	if p.cache {
 
 		p.w.env.hasher.Write(p.materialized)
 		p.w.env.hasher.WriteString(p.filenameFrom)
@@ -112,9 +112,15 @@ func (p *RequestProcessor) doRequest() error {
 		key := p.w.env.hasher.Sum64()
 		p.w.env.hasher.Reset()
 
-		var anyResult any
-		anyResult, err, _ = p.w.env.singleFlight.Do(strconv.FormatUint(key, 16), p.run)
-		result, _ = anyResult.(*intermediate)
+		select {
+		case res := <-p.w.env.singleFlight.DoChan(strconv.FormatUint(key, 16), p.run):
+			err = res.Err
+			result = res.Val.(*intermediate)
+		case <-p.ctx.Done():
+			*p.status = Aborted
+			p.result.Status = Aborted
+			err = errors.New("Context aborted while waiting for request to complete")
+		}
 	} else {
 		var anyResult any
 		anyResult, err = p.run()
@@ -122,7 +128,7 @@ func (p *RequestProcessor) doRequest() error {
 	}
 
 	if err != nil {
-		return err
+		return p.handleError(err)
 	}
 
 	if !p.sentRequest {
@@ -131,7 +137,7 @@ func (p *RequestProcessor) doRequest() error {
 		p.result.Response = responseStr
 		if err != nil {
 			p.w.env.logger.Debug("[Runner] Failed to capture response", p.w.loggingContextWithErr(p.ctx, err)...)
-			return err
+			return p.handleError(err)
 		}
 	}
 	return nil
@@ -180,8 +186,13 @@ func (p *RequestProcessor) send() (*http.Response, error) {
 
 		p.httpRequest.ContentLength = -1
 		p.httpRequest.Body = file
+		p.httpRequest.GetBody = func() (io.ReadCloser, error) { return p.w.env.workspace.Open(p.filenameFrom) }
+
 	} else if len(p.requestBody) != 0 && p.httpRequest.ContentLength != 0 {
+
 		p.httpRequest.Body = io.NopCloser(bytes.NewReader(p.requestBody))
+		p.httpRequest.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(p.requestBody)), nil }
+
 	} else {
 		p.httpRequest.Body = nil
 	}
@@ -306,6 +317,7 @@ func (p *RequestProcessor) run() (any, error) {
 			case <-p.ctx.Done():
 				timer.Stop()
 				*p.status = Aborted
+				p.result.Status = Aborted
 				return nil, errors.New("Context aborted while waiting for retry")
 			}
 		}

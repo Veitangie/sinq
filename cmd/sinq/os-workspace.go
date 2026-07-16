@@ -11,6 +11,7 @@ import (
 	"github.com/Veitangie/sinq/internal/runner"
 )
 
+const PERM_RWX fs.FileMode = 0777
 const PERM_RW fs.FileMode = 0666
 const O_CRWRTR int = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 

@@ -7,6 +7,10 @@ builds:
     binary: sinq
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
     goos:
       - linux
       - windows
@@ -39,7 +43,7 @@ nfpms:
       - rpm
     contents:
       - src: sinq.1
-        dst: /usr/share/man/man1/sinq.1.gz
+        dst: /usr/share/man/man1/sinq.1
         file_info:
           mode: 0644
 

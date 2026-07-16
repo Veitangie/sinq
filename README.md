@@ -268,7 +268,7 @@ There are two categories of scripts within a `.sinq` file:
 * **`$PRE` (Setup & File I/O):** Executes immediately when a worker picks up the request, before it is materialized. This is the **only** scope where you can modify the filesystem interactions for the request. Current request body payload is inaccessible here.
     * `req.attach("path/file.txt")` — Replaces the request body with the contents of a file. (Fails if a body is already defined in the request).
     * `req.saveResponseTo("path/download.bin")` — Streams the incoming response body directly to disk, bypassing the Lua memory buffer.
-    * `req.singleFlight(true)` — If `true` the request will be cached in memory to prevent repeated network calls with the same data. **filenames passed to `attach` and `saveResponseTo` are also considered request data**
+    * `req.cache(true)` — If `true` the request will be cached in memory to prevent repeated network calls with the same data. **filenames passed to `attach` and `saveResponseTo` are also considered request data**
 
 * **`$RETRY` (Retry Policies):** Executes immediately after receiving the HTTP response. **This is the only lifecycle script that must return a value.** It must return a Lua number representing milliseconds to wait before retrying, or a negative number to stop retrying.
     * Scope-Exclusive API: `sinq.retry.when()`, `sinq.retry.whenExponential()`, `sinq.retry.withJitter()`.
@@ -334,7 +334,7 @@ Default configuration that can be overridden in `.scenario` files:
   "fail_fast": true,
   "max_retries": 10,
   "max_redirects": 5,
-  "max_body_size": "1MB",
+  "max_body_size": "1MiB",
   "env_matrix": [{ }],
   "tags": [],
 }
@@ -409,10 +409,12 @@ sinq -iV ./tests/local
   -l, --list             Parse and list scenarios at specified directories
   -t, --tag string       Execute only scenarios that have the tag
   -n, --name string      Execute only scenarios which names match the regular expression
+  -u, --unrestricted     Load lua "os" and "io" modules for scripts
   --secrets-file string  Path to JSON-formatted secrets file
   --skip-tag string      Do not execute scenarios that have the tag
   --skip-name string     Do not execute scenarios which names match the regular expression
-  --dump-on-failure      Print full request and response data on failed assertion.
+  --plugins string       Paths to lua plugin directory entries, joined with ';'
+  --dump-on-failure      Print full request and response data on failed assertion
   --safe                 Instantiate a new Lua VM per request instead of resetting state
 ```
 

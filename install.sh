@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set -euo pipefail
 
 REPO="Veitangie/sinq"
 INSTALL_DIR="/usr/local/bin"
@@ -61,7 +61,7 @@ if ! curl -sL "$CHECKSUMS_URL" -o "$TMP_CHECKSUMS"; then
 fi
 
 echo "Verifying checksum..."
-EXPECTED_CHECKSUM=$(grep "$ARCHIVE_NAME" "$TMP_CHECKSUMS" | awk '{print $1}')
+EXPECTED_CHECKSUM=$(grep "$ARCHIVE_NAME" "$TMP_CHECKSUMS" | awk '{print $1}' || true)
 if [ -z "$EXPECTED_CHECKSUM" ]; then
     echo "Error: Checksum for $ARCHIVE_NAME not found in checksums.txt"
     exit 1
@@ -96,8 +96,17 @@ chmod +x "$TMP_DIR/$BINARY_NAME"
 if [ -w "$INSTALL_DIR" ]; then
     mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
 else
+    if [ "$(id -u)" -eq 0 ]; then
+        echo "Error: Cannot write to $INSTALL_DIR even as root. Check mount permissions."
+        exit 1
+    fi
     echo "Elevated permissions required to write to $INSTALL_DIR. Prompting for sudo..."
-    sudo mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+    if [ -t 0 ]; then
+        sudo mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+    else
+        echo "Error: Cannot prompt for sudo in a non-interactive shell. Please run this script as root (e.g. via sudo)."
+        exit 1
+    fi
 fi
 
 echo "Successfully installed $BINARY_NAME $TARGET_VERSION!"

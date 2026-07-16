@@ -9,6 +9,8 @@ import (
 	"hash/maphash"
 	"log/slog"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +71,22 @@ func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle
 	return taskCh
 }
 
+func (r *Runner) getLuaPath() string {
+	lua.LuaLDir = ""
+	lua.LuaPath = ""
+	lua.LuaPathDefault = ""
+	pathBuilder := strings.Builder{}
+	for idx, path := range r.cfg.LuaPaths {
+		pathBuilder.WriteString(filepath.Join(path, "?.lua"))
+		pathBuilder.WriteByte(';')
+		pathBuilder.WriteString(filepath.Join(path, "?", "init.lua"))
+		if idx < len(r.cfg.LuaPaths)-1 {
+			pathBuilder.WriteByte(';')
+		}
+	}
+	return pathBuilder.String()
+}
+
 func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, secrets map[string]any, totalTimer *timer.Timer) (<-chan ScenarioResult, <-chan time.Duration, <-chan error) {
 
 	taskCh := r.startDataSource(ctx, scenarios)
@@ -82,6 +100,7 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 	sharedLock := sync.RWMutex{}
 
 	sharedSeed := maphash.MakeSeed()
+	luaPath := r.getLuaPath()
 
 	go func() {
 		defer func() {
@@ -100,6 +119,7 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 		env := workerEnv{
 			cfg:          r.cfg,
 			secrets:      secrets,
+			luaPath:      luaPath,
 			logger:       &r.logger,
 			transport:    r.transport,
 			clock:        r.clock,

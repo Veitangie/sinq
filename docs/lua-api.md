@@ -87,7 +87,7 @@ The following APIs are dynamically injected and destroyed depending on the execu
 Executes before the HTTP request is materialized. Used for file I/O operations.
 * **`req.attach(filepath)`**: Replaces the request body with the contents of the specified file. *Note: Fails if a textual body is already defined in the `.sinq` file.*
 * **`req.saveResponseTo(filepath)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
-* **`req.singleFlight(bool)`**: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo)
+* **`req.cache(bool)`**: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo)
 > *Both of the file functions expect the path to be relative to the current file. Passing in an absolute path will fail*
 
 ### `$RETRY` (Polling Phase)
@@ -202,8 +202,13 @@ Built-in constants to make time-based logic highly readable, especially during `
 
 ---
 
-## 7. Standard Library Integrity
+## 7. Libraries
 
-By default, `sinq` reuses the Lua `LState` to maximize performance. Do not mutate core Lua functions (e.g., overwriting `table.insert` or `string.sub`). 
+`sinq` does not load two of common core Lua libraries - `io` and `os` by default. This is done in order to prevent `.sinq` scripts from becoming a safety concern when ran without due diligence. To enable these libraries in Lua scripts use `--unrestricted` flag, and only run trusted scripts with this flag.
 
-If a test suite requires core library mutation, you must run `sinq` with the `--safe` (`-s`) flag to force a hard VM reset on every request. Also, you should probably reconsider if whatever you're doing **really** requires core library mutation.
+`sinq` allows users to import external Lua packages. For them to be accessible via the `require("package")` calls, path to the directory containing the files for the package should be passed to `sinq` via the environment variable `SINQ_LUA_PATH` or via the `--plugins` flag. If both present, the flag takes precedence. The path is expected to consist of plain paths to the directories joined with `;`. Several `--plugins` flags can be passed on startup, which will result in an aggregated list of all paths within them.
+
+### State Isolation
+By default, `sinq` reuses the Lua `LState` to maximize performance. Do not mutate core Lua functions (e.g., overwriting `table.insert` or `string.sub`) or imported package data.
+
+If a test suite requires core or external library mutation, you must run `sinq` with the `--safe` (`-s`) flag to force a hard VM reset on every request. Also, you should probably reconsider if whatever you're doing **really** requires core library mutation.

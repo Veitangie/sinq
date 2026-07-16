@@ -133,6 +133,21 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 			wantOutput: []string{" ✓ Scenario: Success Scenario"},
 		},
 		{
+			name: "Success with skipped scenario prints PASSED",
+			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false},
+			results: []runner.ScenarioResult{
+				{
+					Name:   "Skipped Scenario",
+					Status: runner.Skipped,
+				},
+				{
+					Name:   "Success Scenario",
+					Status: runner.Success,
+				},
+			},
+			wantOutput: []string{" ✓ PASSED in 100ms | Scenarios: 1✓ 0✗ 1○ (2) | 0 requests sent"},
+		},
+		{
 			name: "Show Failures filters Success and Skipped",
 			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.Failures},
 			results: []runner.ScenarioResult{

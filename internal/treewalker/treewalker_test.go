@@ -205,6 +205,56 @@ func TestTreewalker_TagsCachePoisoning_Concurrency(t *testing.T) {
 	}
 }
 
+func TestTreewalker_EnvMatrixCachePoisoning_Concurrency(t *testing.T) {
+	memFS := fstest.MapFS{
+		"root/config.scenario": {Data: []byte(`{"env_matrix": [{"base": {"x": 1}}, {"base2": {"x": 2}}, {"base3": {"x": 3}}, {"base4": {"x": 4}}, {"base5": {"x": 5}}]}`)},
+
+		"root/branch1/req.sinq":        {Data: []byte("REQ1")},
+		"root/branch1/config.scenario": {Data: []byte(`{"env_matrix": [{"br1": {"x": 2}}]}`)},
+
+		"root/branch2/req.sinq":        {Data: []byte("REQ2")},
+		"root/branch2/config.scenario": {Data: []byte(`{"env_matrix": [{"br2": {"x": 3}}]}`)},
+	}
+
+	cfg := config.Config{Workers: 4}
+
+	for i := 0; i < 20; i++ {
+		walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, scenario.ParseConfig)
+		blueprints, err := walker.ParseFiletree(context.Background(), memFS)
+		if err != nil {
+			t.Fatalf("Run %d: Parse failed: %v", i, err)
+		}
+
+		for _, bp := range blueprints {
+			if len(bp.Config.EnvMatrix) < 6 {
+				t.Fatalf("Run %d: Missing base or branch matrix", i)
+			}
+			if _, ok := bp.Config.EnvMatrix[0]["base"]; !ok {
+				t.Fatalf("Run %d: Base matrix corrupted", i)
+			}
+			lastReq := bp.Requests[len(bp.Requests)-1]
+			reqContent := string(lastReq.ExtractPayload(lastReq.Content[0]))
+			t.Logf("Run %d, branch %s EnvMatrix[5]: %v", i, reqContent, bp.Config.EnvMatrix[5])
+			if reqContent == "REQ1" {
+				if _, ok := bp.Config.EnvMatrix[5]["br1"]; !ok {
+					t.Fatalf("Run %d: Branch 1 corrupted! Expected matrix br1", i)
+				}
+				if _, ok := bp.Config.EnvMatrix[5]["br2"]; ok {
+					t.Fatalf("Run %d: Branch 1 leaked from Branch 2! Found matrix br2", i)
+				}
+			}
+			if reqContent == "REQ2" {
+				if _, ok := bp.Config.EnvMatrix[5]["br2"]; !ok {
+					t.Fatalf("Run %d: Branch 2 corrupted! Expected matrix br2", i)
+				}
+				if _, ok := bp.Config.EnvMatrix[5]["br1"]; ok {
+					t.Fatalf("Run %d: Branch 2 leaked from Branch 1! Found matrix br1", i)
+				}
+			}
+		}
+	}
+}
+
 func TestTreewalker_Ordering(t *testing.T) {
 	// root/
 	//  ├── z_setup_B.sinq       (Parent: Should be 2nd)

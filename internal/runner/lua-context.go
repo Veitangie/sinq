@@ -23,8 +23,25 @@ type luaContext struct {
 	responseTable     *lua.LTable
 }
 
-func newLuaContext() *luaContext {
-	lc := luaContext{LState: *lua.NewState()}
+func newLuaContext(unrestricted bool, luaPath string) *luaContext {
+	var lc luaContext
+	if unrestricted {
+		lc = luaContext{LState: *lua.NewState()}
+	} else {
+		lc = luaContext{LState: *lua.NewState(lua.Options{SkipOpenLibs: true})}
+		lua.OpenBase(&lc.LState)
+		lua.OpenChannel(&lc.LState)
+		lua.OpenCoroutine(&lc.LState)
+		lua.OpenDebug(&lc.LState)
+		lua.OpenMath(&lc.LState)
+		lua.OpenPackage(&lc.LState)
+		lua.OpenString(&lc.LState)
+		lua.OpenTable(&lc.LState)
+	}
+
+	if module, ok := lc.GetGlobal("package").(*lua.LTable); ok {
+		lc.SetField(module, "path", lua.LString(luaPath))
+	}
 
 	lc.sandbox = lc.NewTable()
 	sandboxMeta := lc.NewTable()
@@ -120,7 +137,7 @@ func (lc *luaContext) RecordResponseBody(data []byte, oversized bool) {
 	lc.responseTable.RawSetString("json", lc.NewClosure(luapi.ExtractBodyJsonUnsafe, lc.responseTable))
 }
 
-func (lc *luaContext) setupPreScript(attach lua.LGFunction, saveTo lua.LGFunction, singleFlight lua.LGFunction) {
+func (lc *luaContext) setupPreScript(attach lua.LGFunction, saveTo lua.LGFunction, cache lua.LGFunction) {
 	lc.requestTable.RawSetString(
 		"attach",
 		lc.NewFunction(attach),
@@ -130,15 +147,15 @@ func (lc *luaContext) setupPreScript(attach lua.LGFunction, saveTo lua.LGFunctio
 		lc.NewFunction(saveTo),
 	)
 	lc.requestTable.RawSetString(
-		"singleFlight",
-		lc.NewFunction(singleFlight),
+		"cache",
+		lc.NewFunction(cache),
 	)
 }
 
 func (lc *luaContext) tearDownPreScript() {
 	lc.requestTable.RawSetString("attach", lua.LNil)
 	lc.requestTable.RawSetString("saveResponseTo", lua.LNil)
-	lc.requestTable.RawSetString("singleFlight", lua.LNil)
+	lc.requestTable.RawSetString("cache", lua.LNil)
 }
 
 func (lc *luaContext) setupRetryScript() {

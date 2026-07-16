@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/Veitangie/sinq/internal/config"
@@ -229,5 +230,26 @@ func TestRunner_StartDataSource_NoMatrix(t *testing.T) {
 	}
 	if task.env["key"] != "value" {
 		t.Errorf("Env map was corrupted in standard execution")
+	}
+}
+
+func TestRunner_GetLuaPath(t *testing.T) {
+	cfg := config.SaneDefaults()
+	cfg.LuaPaths = []string{"/custom/plugin/path", "./local/plugins"}
+
+	runner := &Runner{cfg: cfg}
+	got := runner.getLuaPath()
+
+	p1Base := "/custom/plugin/path"
+	p2Base := "local/plugins"
+
+	expectedCrossPlatform := "" +
+		filepath.Join(p1Base, "?.lua") + ";" +
+		filepath.Join(p1Base, "?", "init.lua") + ";" +
+		filepath.Join(p2Base, "?.lua") + ";" +
+		filepath.Join(p2Base, "?", "init.lua")
+
+	if got != expectedCrossPlatform {
+		t.Errorf("getLuaPath() = %q, want %q", got, expectedCrossPlatform)
 	}
 }

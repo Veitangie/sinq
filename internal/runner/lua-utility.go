@@ -43,7 +43,7 @@ func (w *worker) runEffectfulScript(token scenario.Token, extract extractPayload
 
 func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (string, string, bool, error) {
 	var filenameIn, filenameOut string
-	var singleFlight bool
+	var cache bool
 
 	w.lc.setupPreScript(func(L *lua.LState) int {
 		attachedPath := L.CheckString(1)
@@ -80,7 +80,7 @@ func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, 
 	},
 		func(L *lua.LState) int {
 			flag := L.CheckBool(1)
-			singleFlight = flag
+			cache = flag
 			return 0
 		},
 	)
@@ -88,7 +88,7 @@ func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, 
 
 	err := w.runEffectfulScript(token, extract, filename, executionTimeout)
 
-	return filenameIn, filenameOut, singleFlight, err
+	return filenameIn, filenameOut, cache, err
 }
 
 func (w *worker) runRetryScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (int64, error) {
@@ -204,12 +204,14 @@ func (w *worker) requestCompleted(response intermediate) (string, error) {
 		w.lc.RecordResponseFile(response.size)
 	} else {
 		w.lc.RecordResponseBody(response.body, response.oversized)
+		data = response.body
 	}
 
 	var result string
 	if w.env.cfg.DumpOnFailure {
 		sb := strings.Builder{}
 		sb.WriteString(response.status)
+		sb.WriteByte(' ')
 		sb.WriteString(response.proto)
 		sb.WriteByte('\n')
 		for key, values := range response.headers {
@@ -236,7 +238,7 @@ func (w *worker) setupScenarioEnvironment(ctx context.Context, env map[string]an
 		if w.lc != nil {
 			w.lc.Close()
 		}
-		w.lc = newLuaContext()
+		w.lc = newLuaContext(w.env.cfg.Unrestricted, w.env.luaPath)
 	}
 
 	w.lc.SetContext(ctx)

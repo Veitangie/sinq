@@ -4,7 +4,7 @@ The `env_matrix` configuration allows a single scenario definition to be execute
 
 ## Definition and Cartesian Product
 
-The `env_matrix` property in a `config.scenario` file takes an array of objects. Each object represents an axis in the matrix. The keys in these objects serve as labels, and their values are the environment variable overrides/additions applied to that specific branch of the execution. The objects must either be empty (`{}`) or have all their top-level keys correspond to objects.
+The `env_matrix` property in a `.scenario` file takes an array of objects. Each object represents an axis in the matrix. The keys in these objects serve as labels, and their values are the environment variable overrides/additions applied to that specific branch of the execution. The objects must either be empty (`{}`) or have all their top-level keys correspond to objects.
 
 **`config.scenario`:**
 ```json

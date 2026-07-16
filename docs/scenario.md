@@ -25,7 +25,7 @@ The syntax `${env.BASE_URL}` is syntactic sugar. When the parser encounters a `$
 
 Under the hood, `sinq` takes the contents of that script, prepends the `return` keyword, and executes it in the Lua VM. 
 * `${ env.BASE_URL }` effectively becomes `$Unnamed_1{ return env.BASE_URL }`.
-* If a script does not explicitly return a value, `sinq` will attempt to execute it normally, and if that yields no result, it falls back to recompiling it with a `return` statement. For complex multiline interpolation, it is always faster to write `return my_value` explicitly.
+* If a script does not explicitly return a value, `sinq` will attempt to execute it normally, and if that yields a compilation error, it falls back to recompiling it with a `return` statement. For complex multiline interpolation, it is always faster to write `return my_value` explicitly.
 * **If both attempts fail, the error of the first (unmodified) run is shown**
 
 ### AST Caching
@@ -57,7 +57,7 @@ Default configuration that can be overridden in `.scenario` files:
   "fail_fast": true,
   "max_retries": 10,
   "max_redirects": 5,
-  "max_body_size": "1MB",
+  "max_body_size": "1MiB",
   "env_matrix": [{ }],
   "tags": [],
 }

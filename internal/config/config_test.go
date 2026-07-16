@@ -87,6 +87,16 @@ func TestConfig_ShouldInclude(t *testing.T) {
 			},
 			scenarioTags: map[string]bool{"ui": true},
 			scenarioName: "UI Login",
+			want:         false,
+		},
+		{
+			name: "Multiple includes, both match (AND)",
+			config: Config{
+				TagsInclude:  []string{"api", "ui"},
+				NamesInclude: []regexp.Regexp{*regexp.MustCompile("^Core")},
+			},
+			scenarioTags: map[string]bool{"ui": true},
+			scenarioName: "Core Login",
 			want:         true,
 		},
 		{

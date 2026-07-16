@@ -337,6 +337,89 @@ func TestParser_Parse(t *testing.T) {
 			}(),
 			wantErrs: 0,
 		},
+		{
+			name:  "Plugins Flag",
+			flags: []string{"--plugins", "path/to/plugins;path/to/more"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.LuaPaths = []string{"path/to/plugins", "path/to/more"}
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Unrestricted Mode (Short)",
+			flags: []string{"-u"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Unrestricted = true
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Unrestricted Mode (Long)",
+			flags: []string{"--unrestricted"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Unrestricted = true
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:       "Env Missing Value (Short)",
+			flags:      []string{"-e"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Env Missing Equals",
+			flags:      []string{"-e", "MY_KEY"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Env Empty Key",
+			flags:      []string{"-e", "=123"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Secret Missing Equals",
+			flags:      []string{"-s", "MY_SECRET"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Secret Empty Key",
+			flags:      []string{"-s", "=abc"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Log Level Missing Value",
+			flags:      []string{"-L"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Color Missing Value",
+			flags:      []string{"-c"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Unknown Boolean Chained",
+			flags:      []string{"-viX"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Version = true
+				c.Insecure = true
+				return c
+			}(),
+			wantErrs:   1,
+		},
 	}
 
 	for _, tt := range tests {

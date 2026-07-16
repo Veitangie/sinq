@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,9 +30,17 @@ import (
 	"github.com/Veitangie/sinq/internal/treewalker"
 )
 
+const sinqLuaPath = "SINQ_LUA_PATH"
+
 func populateConfigInRuntime(cfg *config.Config) {
+	if len(cfg.LuaPaths) == 0 {
+		if path, ok := os.LookupEnv(sinqLuaPath); ok {
+			cfg.LuaPaths = strings.Split(path, ";")
+		}
+	}
+
 	if len(cfg.Paths) == 0 {
-		cfg.Paths = append(cfg.Paths, "./")
+		cfg.Paths = append(cfg.Paths, ".")
 	}
 }
 
@@ -89,6 +99,13 @@ func sinq(args []string) int {
 			fmt.Fprintf(os.Stderr, "Failed to open filetree at %s: %s\n", path, err.Error())
 			continue
 		}
+		defer func(path string) {
+			err := fs.root.Close()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close filetree at %s: %s\n", path, err.Error())
+			}
+		}(path)
+
 		newCtx := context.WithValue(ctx, treewalker.PathCtxKey, path)
 		res, err := walker.ParseFiletree(newCtx, fs)
 		if err != nil {
@@ -144,11 +161,7 @@ func sinq(args []string) int {
 
 	resultCh, durationCh, errorCh := rn.RunScenarios(ctx, allScenarios, secrets, &mainTimer)
 
-	code := handleReporting(cfg, logger, resultCh, durationCh, scenarioCount)
-
-	for err := range errorCh {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
-	}
+	code := handleReporting(cfg, logger, resultCh, durationCh, errorCh, scenarioCount)
 
 	return code
 }
@@ -181,7 +194,7 @@ func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config) {
 	}
 }
 
-func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan runner.ScenarioResult, durationCh <-chan time.Duration, scenarioCount int) int {
+func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan runner.ScenarioResult, durationCh <-chan time.Duration, errorCh <-chan error, scenarioCount int) int {
 
 	resultReporter := result.NewResultReporter()
 
@@ -192,7 +205,15 @@ func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan run
 			logger.Warn("[sinq] Failed to attach reporter", "error", err)
 		}
 
-		file, err := os.OpenFile(cfg.Out, O_CRWRTR, PERM_RW)
+		var file *os.File
+
+		if dirPath := filepath.Base(cfg.Out); dirPath != "" {
+			err = os.MkdirAll(dirPath, PERM_RWX)
+			if err == nil {
+				file, err = os.OpenFile(cfg.Out, O_CRWRTR, PERM_RW)
+			}
+		}
+
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: Failed to open output file: %s\n", err.Error())
 		} else {
@@ -215,10 +236,25 @@ func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan run
 		}
 	}
 
-	err := report.Report(resultCh, durationCh, scenarioCount)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to report results: %s\n", err.Error())
-	}
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		err := report.Report(resultCh, durationCh, scenarioCount)
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Failed to report results: %s\n", err.Error())
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for err := range errorCh {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+		}
+	}()
+
+	wg.Wait()
 
 	if resultReporter.Success() {
 		return 0
@@ -289,16 +325,18 @@ Flags:
   -l, --list             Parse and list scenarios at specified directories
   -t, --tag string       Execute only scenarios that have the tag
   -n, --name string      Execute only scenarios which names match the regular expression
+  -u, --unrestricted     Load lua "os" and "io" modules for scripts
   --secrets-file string  Path to JSON-formatted secrets file
   --skip-tag string      Do not execute scenarios that have the tag
   --skip-name string     Do not execute scenarios which names match the regular expression
-  --dump-on-failure      Print full request and response data on failed assertion.
+  --plugins string       Paths to lua plugin directory entries, joined with ';'
+  --dump-on-failure      Print full request and response data on failed assertion
   --safe                 Instantiate a new Lua VM per request instead of resetting state
 
 For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
 Or read the manual: man 1 sinq`
 
-const versionConstPart = `sinq v1.0.0-rc.6 - `
+const versionConstPart = `sinq v1.0.0-rc.7 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",

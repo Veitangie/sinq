@@ -80,6 +80,9 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 		if *processor.status != Aborted {
 			t.Errorf("Expected processor status to be Aborted, got %v", *processor.status)
 		}
+		if processor.result.Status != Aborted {
+			t.Errorf("Expected request result status to be Aborted, got %v", processor.result.Status)
+		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("RequestProcessor ignored context cancellation and deadlocked in retry loop")
 	}
@@ -340,8 +343,7 @@ func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
 
 	w := setupTestWorker(t, nil)
 	w.lc.setupRequestEnvironment(0)
-	
-	// Create shared singleflight group and shared seed just like Runner does
+
 	sg := &singleflight.Group{}
 	w.env.singleFlight = sg
 	seed := maphash.MakeSeed()
@@ -350,12 +352,9 @@ func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
 	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			
-			// Worker sets up its own hasher internally, simulating what Runner passes by value
+	for range 10 {
+		wg.Go(func() {
+
 			hasher := maphash.Hash{}
 			hasher.SetSeed(seed)
 
@@ -363,7 +362,7 @@ func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
 			wLocal.lc.setupRequestEnvironment(0)
 			wLocal.env.singleFlight = sg
 			wLocal.env.hasher = hasher
-			
+
 			processor := &RequestProcessor{
 				ctx:          context.Background(),
 				w:            wLocal,
@@ -373,7 +372,7 @@ func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
 				status:       new(ResultStatus),
 				result:       &RequestResult{},
 				requestTimer: timer.NewTimer(timer.DefaultClock{}),
-				singleFlight: true, // Enable SingleFlight
+				cache:        true,
 			}
 
 			_ = processor.materialize()
@@ -382,7 +381,7 @@ func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
 			if err != nil {
 				t.Errorf("doRequest() failed: %v", err)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -403,13 +402,13 @@ func TestRequestProcessor_SingleFlight_DistinctRequests(t *testing.T) {
 
 	w := setupTestWorker(t, nil)
 	w.lc.setupRequestEnvironment(0)
-	
+
 	sg := &singleflight.Group{}
 	w.env.singleFlight = sg
 	seed := maphash.MakeSeed()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -422,10 +421,9 @@ func TestRequestProcessor_SingleFlight_DistinctRequests(t *testing.T) {
 			wLocal.env.singleFlight = sg
 			wLocal.env.hasher = hasher
 
-			// Create DISTINCT requests by adding a unique header
 			rawSinq := "GET " + srv.URL + "\n" + "X-Unique-ID: " + fmt.Sprint(idx) + "\n\n"
 			reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
-			
+
 			processor := &RequestProcessor{
 				ctx:          context.Background(),
 				w:            wLocal,
@@ -435,7 +433,7 @@ func TestRequestProcessor_SingleFlight_DistinctRequests(t *testing.T) {
 				status:       new(ResultStatus),
 				result:       &RequestResult{},
 				requestTimer: timer.NewTimer(timer.DefaultClock{}),
-				singleFlight: true,
+				cache:        true,
 			}
 
 			_ = processor.materialize()
@@ -465,7 +463,7 @@ func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
 
 	w := setupTestWorker(t, nil)
 	w.lc.setupRequestEnvironment(0)
-	
+
 	sg := &singleflight.Group{}
 	w.env.singleFlight = sg
 	seed := maphash.MakeSeed()
@@ -474,10 +472,8 @@ func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
 	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 
 			hasher := maphash.Hash{}
 			hasher.SetSeed(seed)
@@ -496,7 +492,7 @@ func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
 				status:       new(ResultStatus),
 				result:       &RequestResult{},
 				requestTimer: timer.NewTimer(timer.DefaultClock{}),
-				singleFlight: false, // NO SINGLEFLIGHT
+				cache:        false,
 			}
 
 			_ = processor.materialize()
@@ -505,7 +501,7 @@ func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
 			if err != nil {
 				t.Errorf("doRequest() failed: %v", err)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -514,3 +510,134 @@ func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
 		t.Errorf("Expected server to be hit exactly 10 times, but was hit %d times", count)
 	}
 }
+
+func TestRequestProcessor_AssertAndPostScripts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	w := setupTestWorker(t, nil)
+	w.lc.setupRequestEnvironment(0)
+
+	rawSinq := "GET " + srv.URL + "\n$ASSERT{\nsinq.assert.code(200)\n}\n$POST{\nenv.postRan = true\n}"
+	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "hooks.sinq")
+
+	processor := &RequestProcessor{
+		ctx:          context.Background(),
+		w:            w,
+		client:       srv.Client(),
+		requestBp:    reqBp,
+		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{ScriptTimeout: scenario.Duration{Duration: 5 * time.Second}, MaxBodySize: scenario.DataSize{ByteAmount: 1024}}},
+		status:       new(ResultStatus),
+		result:       &RequestResult{},
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
+	}
+	processor.totalRequestTimer = timer.NewTimer(timer.DefaultClock{})
+
+	_ = processor.materialize()
+	_, err := processor.run()
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	err = processor.runAssert()
+	if err != nil {
+		t.Fatalf("runAssert failed: %v", err)
+	}
+
+	err = processor.runPost()
+	if err != nil {
+		t.Fatalf("runPost failed: %v", err)
+	}
+
+	processor.finalize()
+}
+
+func TestRequestProcessor_OversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("this is a very long body that exceeds 10 bytes"))
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	w := setupTestWorker(t, nil)
+	w.lc.setupRequestEnvironment(0)
+
+	rawSinq := "GET " + srv.URL + "\n"
+	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+
+	processor := &RequestProcessor{
+		ctx:          context.Background(),
+		w:            w,
+		client:       srv.Client(),
+		requestBp:    reqBp,
+		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: scenario.DataSize{ByteAmount: 10}}},
+		status:       new(ResultStatus),
+		result:       &RequestResult{},
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
+	}
+
+	_ = processor.materialize()
+	resultAny, err := processor.run()
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	result := resultAny.(*intermediate)
+	if !result.oversized {
+		t.Errorf("Expected oversized flag to be true")
+	}
+	if len(result.body) > 10 {
+		t.Errorf("Expected body to be truncated to 10 bytes, got %d", len(result.body))
+	}
+}
+
+func TestRequestProcessor_SaveResponseToFile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("saved payload"))
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	w := setupTestWorker(t, nil)
+	w.lc.setupRequestEnvironment(0)
+
+	mockFS := fstest.MapFS{}
+	w.env.workspace = &mockWorkspace{FS: mockFS}
+
+	rawSinq := "GET " + srv.URL + "\n$PRE{\nreq.saveResponseTo('output.txt')\n}"
+	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+
+	processor := &RequestProcessor{
+		ctx:          context.Background(),
+		w:            w,
+		client:       srv.Client(),
+		requestBp:    reqBp,
+		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{ScriptTimeout: scenario.Duration{Duration: 5 * time.Second}, MaxBodySize: scenario.DataSize{ByteAmount: 1024}}},
+		status:       new(ResultStatus),
+		result:       &RequestResult{},
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
+	}
+	processor.totalRequestTimer = timer.NewTimer(timer.DefaultClock{})
+
+	err := processor.runPre()
+	if err != nil {
+		t.Fatalf("runPre failed: %v", err)
+	}
+
+	_ = processor.materialize()
+	resultAny, err := processor.run()
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	result := resultAny.(*intermediate)
+	if result.size != int64(len("saved payload")) {
+		t.Errorf("Expected saved size to be %d, got %d", len("saved payload"), result.size)
+	}
+	if result.filenameTo != "output.txt" {
+		t.Errorf("Expected filenameTo to be output.txt, got %s", result.filenameTo)
+	}
+}
+

@@ -179,3 +179,37 @@ func TestWorker_SandboxLeak_GlobalG(t *testing.T) {
 		t.Fatalf("BUG EXPOSED: _G leaks across scenarios! %v", err)
 	}
 }
+
+func TestWorker_Unrestricted_FileAccess(t *testing.T) {
+	w := setupTestWorker(t, nil)
+	w.env.cfg.Unrestricted = true
+	w.lc = newLuaContext(w.env.cfg.Unrestricted, "")
+
+	err := w.lc.DoString(`
+		if type(os) ~= "table" then
+			error("os table missing in unrestricted mode")
+		end
+		if type(io) ~= "table" then
+			error("io table missing in unrestricted mode")
+		end
+	`)
+	if err != nil {
+		t.Fatalf("Unrestricted mode failed: %v", err)
+	}
+}
+
+func TestWorker_Restricted_NoFileAccess(t *testing.T) {
+	w := setupTestWorker(t, nil)
+	
+	err := w.lc.DoString(`
+		if os ~= nil then
+			error("os table should be nil in restricted mode")
+		end
+		if io ~= nil then
+			error("io table should be nil in restricted mode")
+		end
+	`)
+	if err != nil {
+		t.Fatalf("Restricted mode failed: %v", err)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -78,11 +79,11 @@ func (w *worker) runTask(task []string) {
 }
 
 func getDefaultScenarioNameFromPath(lastFilePath string) string {
-	idx := strings.LastIndex(lastFilePath, "/")
-	if idx < 0 || idx > len(lastFilePath) {
+	name := filepath.Base(lastFilePath)
+	if name == "." {
 		return lastFilePath
 	}
-	return strings.Clone(lastFilePath[0:idx])
+	return name
 }
 
 func (t *Treewalker) runWorkers(ctx context.Context, fileSystem fs.FS, taskCh <-chan []string, errorCh chan<- error) (*sync.WaitGroup, chan scenario.ScenarioBlueprint) {
@@ -123,6 +124,7 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 	if cachedScenarioConfig, isFound := readCache(filePath, w.scenarioConfigCache, w.scenarioConfigCacheLock); isFound {
 		*scenarioConfig = cachedScenarioConfig
 		scenarioConfig.Env = maps.Clone(cachedScenarioConfig.Env)
+		scenarioConfig.EnvMatrix = slices.Clone(cachedScenarioConfig.EnvMatrix)
 		scenarioConfig.Tags = maps.Clone(cachedScenarioConfig.Tags)
 		scenarioConfig.TagsList = slices.Clone(cachedScenarioConfig.TagsList)
 		return
@@ -140,10 +142,12 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 	if err != nil {
 		w.t.logger.Error("[Treewalker] Error occurred while parsing file", "error", err, "filePath", filePath)
 		w.errorCh <- fmt.Errorf("Error occurred while parsing file %s: %w", filePath, err)
+		return
 	}
 
 	newConfig := *scenarioConfig
 	newConfig.Env = maps.Clone(scenarioConfig.Env)
+	newConfig.EnvMatrix = slices.Clone(scenarioConfig.EnvMatrix)
 	newConfig.Tags = maps.Clone(scenarioConfig.Tags)
 	newConfig.TagsList = slices.Clone(scenarioConfig.TagsList)
 	updateCache(filePath, newConfig, w.scenarioConfigCache, w.scenarioConfigCacheLock)

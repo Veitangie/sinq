@@ -27,21 +27,22 @@ var outFormats map[string]bool = map[string]bool{
 }
 
 var longToShort map[string]string = map[string]string{
-	"--workers":   "-w",
-	"--insecure":  "-i",
-	"--secret":    "-s",
-	"--env":       "-e",
-	"--out":       "-o",
-	"--log-level": "-L",
-	"--format":    "-f",
-	"--verbose":   "-V",
-	"--color":     "-c",
-	"--help":      "-h",
-	"--version":   "-v",
-	"--list":      "-l",
-	"--tag":       "-t",
-	"--name":      "-n",
-	"--show":      "-S",
+	"--workers":      "-w",
+	"--insecure":     "-i",
+	"--secret":       "-s",
+	"--env":          "-e",
+	"--out":          "-o",
+	"--log-level":    "-L",
+	"--format":       "-f",
+	"--verbose":      "-V",
+	"--color":        "-c",
+	"--help":         "-h",
+	"--version":      "-v",
+	"--list":         "-l",
+	"--tag":          "-t",
+	"--name":         "-n",
+	"--show":         "-S",
+	"--unrestricted": "-u",
 }
 
 type Parser struct {
@@ -119,6 +120,8 @@ func (p *Parser) parseShortFlag() {
 				p.result.Help = true
 			case 'l':
 				p.result.List = true
+			case 'u':
+				p.result.Unrestricted = true
 			default:
 				p.accumulateError(fmt.Errorf("Unknown boolean flag: %c", b))
 			}
@@ -139,6 +142,8 @@ func (p *Parser) parseShortFlag() {
 		p.result.Help = true
 	case 'l':
 		p.result.List = true
+	case 'u':
+		p.result.Unrestricted = true
 	case 'w':
 		p.parseWorkerCount()
 	case 's':
@@ -202,11 +207,16 @@ func (p *Parser) parseEnv() {
 		return
 	}
 
+	if keyValSlice[0] == "" {
+		p.accumulateError(errors.New("Empty key passed to env. Usage: --env|-e key=value"))
+		return
+	}
+
 	p.result.Treewalker.Env[keyValSlice[0]] = keyValSlice[1]
 }
 
 func (p *Parser) parseSecret() {
-	keyVal, err := p.getNextValue("No value passed for secret value. Usage: --secret|-S key=value")
+	keyVal, err := p.getNextValue("No value passed for secret value. Usage: --secret|-s key=value")
 	if err != nil {
 		p.accumulateError(err)
 		return
@@ -214,7 +224,12 @@ func (p *Parser) parseSecret() {
 
 	keyValSlice := strings.SplitN(keyVal, "=", 2)
 	if len(keyValSlice) != 2 {
-		p.accumulateError(errors.New("Failed to parse secret value, could not split by '='. Usage: --secret|-S key=value"))
+		p.accumulateError(errors.New("Failed to parse secret value, could not split by '='. Usage: --secret|-s key=value"))
+		return
+	}
+
+	if keyValSlice[0] == "" {
+		p.accumulateError(errors.New("Empty key passed to secret. Usage: --secret|-s key=value"))
 		return
 	}
 
@@ -271,7 +286,7 @@ func (p *Parser) parseColorOption() {
 		return
 	}
 
-	switch value {
+	switch strings.ToLower(value) {
 	case "never":
 		p.result.Reporter.Color = Never
 	case "always":
@@ -383,6 +398,13 @@ func (p *Parser) parseLongOnlyFlag() {
 			return
 		}
 		p.result.Treewalker.SecretsFile = path
+	case "--plugins":
+		path, err := p.getNextValue("No path passed for lua plugins. Usage: --plugins path/to/dir")
+		if err != nil {
+			p.accumulateError(err)
+			return
+		}
+		p.result.LuaPaths = append(p.result.LuaPaths, strings.Split(path, ";")...)
 	default:
 		p.accumulateError(fmt.Errorf("Unknown option: %s", flag))
 	}

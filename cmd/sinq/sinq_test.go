@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Veitangie/sinq/internal/config"
 )
 
 func TestSinq_EndToEnd_ComplexAsyncPolling(t *testing.T) {
@@ -156,7 +158,7 @@ func TestSinq_EndToEnd_Chaos(t *testing.T) {
 
 $ASSERT{
 	if sinq.responses[1].code == 500 then
-		sinq.test.fail("Caught the expected 500, failing the test mathematically.")
+		sinq.assert.fail("Caught the expected 500, failing the test mathematically.")
 	end
 }`, srv.URL)
 	_ = os.WriteFile(filepath.Join(assertDir, "crash.sinq"), []byte(req2), 0644)
@@ -286,5 +288,71 @@ func TestSinq_CLI_OutputFormatters(t *testing.T) {
 
 	if _, err := os.Stat(outFilePath); os.IsNotExist(err) {
 		t.Fatalf("Expected --out flag to create file at %s, but it was not found", outFilePath)
+	}
+}
+
+func TestSinq_CLI_ListScenarios(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	_ = os.WriteFile(filepath.Join(tmpDir, "config.scenario"), []byte(`{"tags": ["api"], "env_matrix": [{"key1": {"a": "1"}}, {"key2": {"b": "2"}}]}`), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "01_test.sinq"), []byte("GET http://example.com"), 0644)
+
+	// Will match due to 'api' tag
+	args1 := []string{"--list", "--tag", "api", tmpDir}
+	// Will skip due to non-matching tag
+	args2 := []string{"--list", "--tag", "nonexistent", tmpDir}
+
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	devNull, _ := os.Open(os.DevNull)
+	os.Stdout, os.Stderr = devNull, devNull
+	defer func() {
+		os.Stdout, os.Stderr = oldStdout, oldStderr
+		devNull.Close()
+	}()
+
+	if got := sinq(args1); got != 0 {
+		t.Errorf("sinq(--list --tag api) exited with %d; want 0", got)
+	}
+
+	if got := sinq(args2); got != 0 {
+		t.Errorf("sinq(--list --tag nonexistent) exited with %d; want 0", got)
+	}
+}
+
+func TestSinq_CLI_HandleReporting_Failure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+
+	req := fmt.Sprintf("GET %s\n$ASSERT{ sinq.assert.code(200) }", srv.URL)
+	_ = os.WriteFile(filepath.Join(tmpDir, "fail.sinq"), []byte(req), 0644)
+
+	args := []string{
+		"--workers", "1",
+		"--format", "std",
+		tmpDir,
+	}
+
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	devNull, _ := os.Open(os.DevNull)
+	os.Stdout, os.Stderr = devNull, devNull
+	defer func() {
+		os.Stdout, os.Stderr = oldStdout, oldStderr
+		devNull.Close()
+	}()
+
+	if got := sinq(args); got != 1 {
+		t.Errorf("sinq() with failing test exited with %d; want 1", got)
+	}
+}
+
+func TestSinq_CLI_CreateReporter_InvalidFormat(t *testing.T) {
+	cfg := config.Config{Format: "unknown"}
+	reporter := createReporter(cfg, os.Stdout)
+	if reporter == nil {
+		t.Errorf("Expected createReporter to fallback to standard reporter, got nil")
 	}
 }

@@ -16,10 +16,12 @@ type Config struct {
 	Help          bool
 	List          bool
 	DumpOnFailure bool
+	Unrestricted  bool
 
 	LogLevel   slog.Level
 	Format     string
 	Out        string
+	LuaPaths   []string
 	Paths      []string
 	Treewalker TreewalkerConfig
 	Reporter   ReporterConfig
@@ -41,17 +43,18 @@ func (c Config) ShouldInclude(tags map[string]bool, name string) bool {
 			return false
 		}
 	}
+	isInTags := len(c.TagsInclude) == 0
 	for _, tag := range c.TagsInclude {
 		if _, found := tags[tag]; found {
-			return true
+			isInTags = true
 		}
 	}
 	for _, regex := range c.NamesInclude {
 		if match := regex.FindStringIndex(name); len(match) != 0 {
-			return true
+			return isInTags
 		}
 	}
-	return len(c.TagsInclude) == 0 && len(c.NamesInclude) == 0
+	return isInTags && len(c.NamesInclude) == 0
 }
 
 type TreewalkerConfig struct {
@@ -92,9 +95,11 @@ func SaneDefaults() Config {
 		Help:          false,
 		List:          false,
 		DumpOnFailure: false,
+		Unrestricted:  false,
 		LogLevel:      slog.LevelWarn,
 		Format:        "std",
 		Out:           "",
+		LuaPaths:      []string{},
 		Paths:         []string{},
 		Treewalker: TreewalkerConfig{
 			Strict:      true,
