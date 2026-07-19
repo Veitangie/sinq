@@ -63,17 +63,6 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 	successfulRequests := 0
 	for result := range source {
 		totalScenarios += 1
-		switch r.cfg.Show {
-		case config.NoSkip:
-			if result.Status == runner.Skipped {
-				continue
-			}
-		case config.Failures:
-			if result.Status != runner.Failure && result.Status != runner.Error {
-				continue
-			}
-		case config.All:
-		}
 
 		scenarioMark := markSuccess
 		switch result.Status {
@@ -87,6 +76,27 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 		default:
 			scenarioMark = markFail
 			ranScenarios += 1
+		}
+
+		switch r.cfg.Show {
+		case config.NoSkip:
+			if result.Status == runner.Skipped {
+				continue
+			}
+		case config.Failures:
+			if result.Status != runner.Failure && result.Status != runner.Error {
+				for _, request := range result.RequestResults {
+					if request.Status != runner.Skipped {
+						ranRequests += 1
+					}
+
+					if request.Status == runner.Success {
+						successfulRequests += 1
+					}
+				}
+				continue
+			}
+		case config.All:
 		}
 
 		scenarioTackOn := ""
@@ -110,6 +120,7 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 				requestMark = markSkipped
 			case runner.Aborted:
 				requestMark = markAborted
+				ranRequests += 1
 			case runner.Success:
 				successfulRequests += 1
 				ranRequests += 1

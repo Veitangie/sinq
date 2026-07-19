@@ -355,4 +355,4 @@ The `sinq.fake` table exposes deterministic fake data generators. All generators
 ### State Isolation
 By default, `sinq` reuses the Lua `LState` to maximize performance. Do not mutate core Lua functions (e.g., overwriting `table.insert` or `string.sub`) or imported package data.
 
-If a test suite requires core or external library mutation, you must run `sinq` with the `--safe` (`-s`) flag to force a hard VM reset on every request. Also, you should probably reconsider if whatever you're doing **really** requires core library mutation.
+If a test suite requires core or external library mutation, you must run `sinq` with the `--safe` (`-s`) flag to force a hard VM reset on every request. Also, you should probably reconsider if whatever you're doing **really** requires core library mutation. **Note, that passing modified state between scenarios via library mutation is considered UB, and may change in any future release**
