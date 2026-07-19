@@ -4,13 +4,56 @@
 package luapi
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	lua "github.com/yuin/gopher-lua"
 )
+
+const ISO8601FormatMs = "2006-01-02T15:04:05.000Z07:00"
+
+func FromLuaValue(value lua.LValue, visited map[*lua.LTable]bool) any {
+	switch typedValue := value.(type) {
+	case *lua.LNilType:
+		return nil
+	case lua.LBool:
+		return bool(typedValue)
+	case lua.LNumber:
+		return float64(typedValue)
+	case lua.LString:
+		return string(typedValue)
+	case *lua.LTable:
+		if visited[typedValue] {
+			return nil
+		}
+		visited[typedValue] = true
+		defer delete(visited, typedValue)
+
+		if size := typedValue.Len(); size > 0 {
+			res := make([]any, 0, size)
+			typedValue.ForEach(func(key, value lua.LValue) {
+				if len(res) == size {
+					return
+				}
+				res = append(res, FromLuaValue(value, visited))
+			})
+			return res
+		}
+
+		res := make(map[string]any)
+		typedValue.ForEach(func(key, value lua.LValue) {
+			if stringKey, ok := key.(lua.LString); ok {
+				res[string(stringKey)] = FromLuaValue(value, visited)
+			}
+		})
+		return res
+	case *lua.LUserData:
+		return typedValue.Value
+	}
+	return nil
+}
 
 func ToLuaValue(value any, ls *lua.LState) lua.LValue {
 	if value == nil {
@@ -68,19 +111,20 @@ func ToLuaValue(value any, ls *lua.LState) lua.LValue {
 	}
 }
 
-func ExtractBodyJson(ls *lua.LState) int {
-	res, err := extractBodyJsonCore(ls)
-	ls.Push(res)
+func (lc *LuaContext) ExtractBodyJson(ls *lua.LState) int {
+	res, err := lc.extractBodyJsonCore(ls)
 	if err != nil {
+		ls.Push(lua.LNil)
 		ls.Push(lua.LString(err.Error()))
 	} else {
+		ls.Push(res)
 		ls.Push(lua.LNil)
 	}
 	return 2
 }
 
-func ExtractBodyJsonUnsafe(ls *lua.LState) int {
-	res, err := extractBodyJsonCore(ls)
+func (lc *LuaContext) ExtractBodyJsonUnsafe(ls *lua.LState) int {
+	res, err := lc.extractBodyJsonCore(ls)
 	if err != nil {
 		ls.Error(lua.LString(err.Error()), 1)
 		return 0
@@ -89,29 +133,58 @@ func ExtractBodyJsonUnsafe(ls *lua.LState) int {
 	return 1
 }
 
-func extractBodyJsonCore(ls *lua.LState) (lua.LValue, error) {
-	if request, ok := ls.Get(lua.UpvalueIndex(1)).(*lua.LTable); ok {
-		if cached := request.RawGetString("bodyJson"); cached != lua.LNil {
+func (lc *LuaContext) extractBodyJsonCore(ls *lua.LState) (lua.LValue, error) {
+	if response, ok := ls.Get(lua.UpvalueIndex(1)).(*lua.LTable); ok {
+		if cached := response.RawGetString("bodyJson"); cached != lua.LNil {
 			return cached, nil
 		}
 
-		bodyRaw, ok := request.RawGetString("bodyRaw").(lua.LString)
+		bodyRaw, ok := response.RawGetString("bodyRaw").(lua.LString)
 		if !ok {
 			return lua.LNil, errors.New("Failed to extract body as json: bodyRaw not found or not a string")
 		}
 
-		var bodyJson any
-		err := json.Unmarshal([]byte(bodyRaw), &bodyJson)
+		bodyLua, err := lc.parser.Parse(string(bodyRaw))
+
 		if err != nil {
 			return lua.LNil, fmt.Errorf("Failed to extract body as json: %s", err.Error())
 		}
 
-		bodyLua := ToLuaValue(bodyJson, ls)
-		request.RawSetString("bodyJson", bodyLua)
+		response.RawSetString("bodyJson", bodyLua)
 
 		return bodyLua, nil
 	}
 
 	return lua.LNil, errors.New("Failed to extract body as json: no request table found")
 
+}
+
+func (lc *LuaContext) Now(ls *lua.LState) int {
+	ls.Push(lua.LNumber(lc.clock.Now().UnixMilli()))
+	return 1
+}
+
+func TimeFromString(ls *lua.LState) int {
+	source := ls.CheckString(1)
+	format := ls.OptString(2, ISO8601FormatMs)
+
+	resTime, err := time.Parse(format, source)
+	if err != nil {
+		ls.Push(lua.LNil)
+		ls.Push(lua.LString(err.Error()))
+	} else {
+		ls.Push(lua.LNumber(resTime.UnixMilli()))
+		ls.Push(lua.LNil)
+	}
+
+	return 2
+}
+
+func TimeToString(ls *lua.LState) int {
+	source := ls.CheckInt64(1)
+	format := ls.OptString(2, ISO8601FormatMs)
+
+	ls.Push(lua.LString(time.UnixMilli(source).UTC().Format(format)))
+
+	return 1
 }

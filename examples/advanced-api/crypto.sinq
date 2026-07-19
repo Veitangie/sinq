@@ -1,0 +1,16 @@
+POST ${env.BASE_URL}/advanced/crypto
+X-Signature: ${env.signature}
+X-Base64-Signature: ${env.b64_sig}
+
+some data
+
+$PRE{
+    local payload = "some data\n\n"
+    local secret = secrets.CRYPTO_SECRET
+    env.signature = sinq.crypto.hmac(payload, "sha256", secret)
+    env.b64_sig = sinq.crypto.base64Encode(env.signature)
+}
+
+$ASSERT{
+    sinq.assert.code(200)
+}

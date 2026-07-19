@@ -257,42 +257,88 @@ func TestWorker_ExecuteAndExtractValue_RuntimeError(t *testing.T) {
 	}
 }
 
-func TestLuaContext_PreScriptAPI_Lifecycle(t *testing.T) {
+func TestWorker_FinishScenario(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.maxRequestIdx = 5
+	w.requestIdx = 1
 
-	if w.lc.requestTable.RawGetString("attach") != lua.LNil {
-		t.Error("Expected req.attach to be nil before setup")
-	}
-	if w.lc.requestTable.RawGetString("saveResponseTo") != lua.LNil {
-		t.Error("Expected req.saveResponseTo to be nil before setup")
-	}
-	if w.lc.requestTable.RawGetString("cache") != lua.LNil {
-		t.Error("Expected req.cache to be nil before setup")
+	w.lc.Push(w.lc.NewClosure(w.finishScenario))
+	err := w.lc.PCall(0, 0, nil)
+	if err != nil {
+		t.Fatalf("finishScenario failed: %v", err)
 	}
 
-	dummyFunc := func(L *lua.LState) int { return 0 }
-	w.lc.setupPreScript(dummyFunc, dummyFunc, dummyFunc)
+	if w.requestIdx != 6 {
+		t.Errorf("Expected requestIdx to be maxRequestIdx + 1, got %d", w.requestIdx)
+	}
+}
 
-	if w.lc.requestTable.RawGetString("attach").Type() != lua.LTFunction {
-		t.Error("Expected req.attach to be a function after setup")
+func TestWorker_CompareFiles(t *testing.T) {
+	w := setupTestWorker(t, nil)
+
+	mockFS := fstest.MapFS{
+		"req.txt":   &fstest.MapFile{Data: []byte("match")},
+		"other.txt": &fstest.MapFile{Data: []byte("match")},
+		"diff.txt":  &fstest.MapFile{Data: []byte("different")},
 	}
-	if w.lc.requestTable.RawGetString("saveResponseTo").Type() != lua.LTFunction {
-		t.Error("Expected req.saveResponseTo to be a function after setup")
-	}
-	if w.lc.requestTable.RawGetString("cache").Type() != lua.LTFunction {
-		t.Error("Expected req.cache to be a function after setup")
+	w.env.workspace = &mockWorkspace{FS: mockFS}
+
+	tests := []struct {
+		name        string
+		saveTo      string
+		otherFile   string
+		expectError string
+	}{
+		{"Empty SaveTo", "", "other.txt", "not saved to file"},
+		{"Missing SaveTo", "missing.txt", "other.txt", "failed to open saved response"},
+		{"Missing OtherFile", "req.txt", "missing.txt", "failed to open file"},
+		{"Match", "req.txt", "other.txt", ""},
+		{"Diff", "req.txt", "diff.txt", ""},
 	}
 
-	w.lc.tearDownPreScript()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fn := w.compareFiles("script.sinq", tt.saveTo)
+			w.lc.Push(w.lc.NewClosure(fn))
+			w.lc.Push(lua.LString(tt.otherFile))
+			err := w.lc.PCall(1, 0, nil)
 
-	if w.lc.requestTable.RawGetString("attach") != lua.LNil {
-		t.Error("Expected req.attach to be nil after teardown")
+			if tt.expectError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.expectError) {
+					t.Errorf("Expected error containing %q, got %v", tt.expectError, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if tt.name == "Diff" {
+					if len(w.assertionFailures) == 0 {
+						t.Errorf("Expected assertion failure for Diff, got none")
+					}
+				}
+			}
+		})
 	}
-	if w.lc.requestTable.RawGetString("saveResponseTo") != lua.LNil {
-		t.Error("Expected req.saveResponseTo to be nil after teardown")
+}
+
+func TestWorker_RequestCompleted(t *testing.T) {
+	w := setupTestWorker(t, nil)
+	w.lc.SetupRequestEnvironment(0)
+
+	resp := intermediate{
+		statusCode: 400,
+		headers:    http.Header{"X-Test": []string{"Val"}},
+		body:       []byte("body"),
+		filenameTo: "saved.txt",
+		size:       4,
 	}
-	if w.lc.requestTable.RawGetString("cache") != lua.LNil {
-		t.Error("Expected req.cache to be nil after teardown")
+
+	w.env.cfg.DumpOnFailure = true
+	resStr, err := w.requestCompleted(resp)
+	if err != nil {
+		t.Fatalf("Unexpected err: %v", err)
+	}
+	if !strings.Contains(resStr, "X-Test: Val") {
+		t.Errorf("Expected dump to contain X-Test: Val, got: %s", resStr)
 	}
 }

@@ -1,0 +1,21 @@
+POST ${env.BASE_URL}/advanced/faker
+Content-Type: application/json
+
+$PRE{
+    sinq.fake.setSeed(42)
+    userId = sinq.fake.uuid()
+    userEmail = sinq.fake.email()
+    userCompany = sinq.fake.company()
+    luckyNumber = sinq.fake.int(1, 100)
+}
+
+{
+    "id": "${userId}",
+    "email": "${userEmail}",
+    "company": "${userCompany}",
+    "lucky_number": ${luckyNumber}
+}
+
+$ASSERT{
+    sinq.assert.code(200)
+}

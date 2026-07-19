@@ -1,0 +1,21 @@
+POST ${env.BASE_URL}/advanced/jwt
+Authorization: Bearer ${env.jwt_token}
+
+$PRE{
+    local claims = {
+        sub = "user-123",
+        role = "admin"
+    }
+    local secret = secrets.JWT_SECRET
+    env.jwt_token = sinq.jwt.sign(claims, secret, "hs256")
+}
+
+$ASSERT{
+    sinq.assert.code(200)
+    
+    local resp_body = res.json()
+    assert(resp_body.status == "verified", "Expected verified status")
+
+    local decoded = sinq.jwt.verify(env.jwt_token, secrets.JWT_SECRET)
+    assert(decoded.claims.sub == "user-123", "sub match")
+}

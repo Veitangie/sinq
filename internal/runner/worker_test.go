@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Veitangie/sinq/internal/luapi"
 	"github.com/Veitangie/sinq/internal/scenario"
+	"github.com/Veitangie/sinq/internal/timer"
 )
 
 func TestWorker_ExecuteAndExtractValue_CacheTrap(t *testing.T) {
@@ -38,7 +40,7 @@ func TestWorker_ExecuteAndExtractValue_CacheTrap(t *testing.T) {
 
 func TestWorker_RequestCompleted_Indexing(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	resp := intermediate{
 		statusCode: 200,
@@ -66,7 +68,7 @@ func TestWorker_RequestCompleted_Indexing(t *testing.T) {
 
 func TestWorker_RequestCompleted_JSONArrayBlindspot(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	resp := intermediate{
 		statusCode: 200,
@@ -183,7 +185,7 @@ func TestWorker_SandboxLeak_GlobalG(t *testing.T) {
 func TestWorker_Unrestricted_FileAccess(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.env.cfg.Unrestricted = true
-	w.lc = newLuaContext(w.env.cfg.Unrestricted, "")
+	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, w.env.cfg.Unrestricted, "")
 
 	err := w.lc.DoString(`
 		if type(os) ~= "table" then
@@ -200,7 +202,7 @@ func TestWorker_Unrestricted_FileAccess(t *testing.T) {
 
 func TestWorker_Restricted_NoFileAccess(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	
+
 	err := w.lc.DoString(`
 		if os ~= nil then
 			error("os table should be nil in restricted mode")

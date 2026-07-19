@@ -5,7 +5,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +22,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func Test_ExamplesDirectory(t *testing.T) {
@@ -167,6 +173,73 @@ func Test_ExamplesDirectory(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 			w.WriteHeader(http.StatusOK)
 
+		case r.URL.Path == "/advanced/crypto" && r.Method == "POST":
+			sig := r.Header.Get("X-Signature")
+			b64Sig := r.Header.Get("X-Base64-Signature")
+			if sig == "" || b64Sig == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			mac := hmac.New(sha256.New, []byte("my-secret"))
+			mac.Write(body)
+			expectedSig := hex.EncodeToString(mac.Sum(nil))
+			if sig != expectedSig {
+				t.Logf("sig mismatch: got %s, expected %s, body: %q", sig, expectedSig, string(body))
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			expectedB64Sig := base64.StdEncoding.EncodeToString([]byte(expectedSig))
+			if b64Sig != expectedB64Sig {
+				t.Logf("b64 mismatch: got %s, expected %s", b64Sig, expectedB64Sig)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+
+		case r.URL.Path == "/advanced/jwt" && r.Method == "POST":
+			auth := r.Header.Get("Authorization")
+			if !strings.HasPrefix(auth, "Bearer ") {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			tokenStr := strings.TrimPrefix(auth, "Bearer ")
+			token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
+				return []byte("jwt-secret"), nil
+			})
+			if err != nil || !token.Valid {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"status": "verified"}`)
+
+		case r.URL.Path == "/advanced/time" && r.Method == "GET":
+			time.Sleep(10 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+
+		case r.URL.Path == "/advanced/faker" && r.Method == "POST":
+			var body struct {
+				ID          string `json:"id"`
+				Email       string `json:"email"`
+				Company     string `json:"company"`
+				LuckyNumber int    `json:"lucky_number"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			t.Logf("FAKER BODY RECEIVED: %#v", body)
+
+			if body.ID != "2f6279af-b981-416f-b728-036314a9c57a" ||
+				body.Email != "acceptable+spirit@icloud.com" ||
+				body.Company != "Singapore Afraid, LLC" ||
+				body.LuckyNumber != 37 {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+
 		case r.URL.Path == "/unreachable":
 			t.Errorf("The /unreachable endpoint was hit! sinq.finishScenario() failed to abort the sequence.")
 			w.WriteHeader(http.StatusBadRequest)
@@ -196,6 +269,13 @@ func Test_ExamplesDirectory(t *testing.T) {
 	}
 	defer os.Remove(uploadFilePath)
 
+	expectedFilePath := filepath.Join(assetsDir, "expected_file")
+	err = os.WriteFile(expectedFilePath, downloadBytes, 0644)
+	if err != nil {
+		t.Fatalf("Failed to write expected file: %v", err)
+	}
+	defer os.Remove(expectedFilePath)
+
 	configPath := filepath.Join(examplesDir, "config.scenario")
 	configData := map[string]any{
 		"env": map[string]string{
@@ -214,6 +294,8 @@ func Test_ExamplesDirectory(t *testing.T) {
 	secretsPath := filepath.Join(examplesDir, "secrets.json")
 	secretsData := map[string]string{
 		"OMNI_COIN_API_KEY": "super-secret-omni-coin-key",
+		"CRYPTO_SECRET":     "my-secret",
+		"JWT_SECRET":        "jwt-secret",
 	}
 	secretsBytes, _ := json.MarshalIndent(secretsData, "", "  ")
 
@@ -224,7 +306,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 	defer os.Remove(secretsPath)
 
 	args := []string{
-		"--workers", "24",
+		"--workers", "25",
 		"--format", "std",
 		"--color", "always",
 		"--secrets-file", secretsPath,

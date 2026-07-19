@@ -1,0 +1,11 @@
+GET ${env.BASE_URL}/advanced/time
+
+$PRE{
+    env.t1 = sinq.time.now()
+}
+
+$ASSERT{
+    sinq.assert.code(200)
+    local t2 = sinq.time.now()
+    assert(t2 > env.t1, "Time should move forward")
+}

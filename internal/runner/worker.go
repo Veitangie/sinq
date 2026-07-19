@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Veitangie/sinq/internal/config"
+	"github.com/Veitangie/sinq/internal/luapi"
 	"github.com/Veitangie/sinq/internal/scenario"
 	"github.com/Veitangie/sinq/internal/timer"
 	"golang.org/x/sync/singleflight"
@@ -63,7 +64,7 @@ type worker struct {
 	resCh             chan<- ScenarioResult
 	requestIdx        int
 	maxRequestIdx     int
-	lc                *luaContext
+	lc                *luapi.LuaContext
 	assertionFailures []string
 }
 
@@ -131,7 +132,7 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 		return false, errors.New("Context aborted")
 	}
 
-	w.lc.setupRequestEnvironment(requestIdx)
+	w.lc.SetupRequestEnvironment(requestIdx)
 
 	requestTimer := timer.NewTimer(w.env.clock)
 	processor := RequestProcessor{
@@ -151,6 +152,11 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 
 	if err := processor.runPre(); err != nil {
 		return false, err
+	}
+
+	if processor.skip {
+		result.Status = Aborted
+		return true, nil
 	}
 
 	if err := processor.materialize(); err != nil {

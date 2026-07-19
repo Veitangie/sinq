@@ -110,10 +110,13 @@ func (t *Treewalker) exploreFS(ctx context.Context, cancelCtx context.CancelCaus
 	}
 }
 
-func (t *Treewalker) startExploration(ctx context.Context, cancelCtx context.CancelCauseFunc, fileSystem fs.FS, errorCh chan<- error) <-chan []string {
+func (t *Treewalker) startExploration(ctx context.Context, cancelCtx context.CancelCauseFunc, fileSystem fs.FS, errorCh chan<- error, wg *sync.WaitGroup) <-chan []string {
 	taskCh := make(chan []string, t.cfg.Workers)
 	go func() {
-		defer close(taskCh)
+		defer func() {
+			close(taskCh)
+			wg.Done()
+		}()
 		t.exploreFS(ctx, cancelCtx, ".", fileSystem, taskCh, errorCh, []string{})
 	}()
 	return taskCh
@@ -124,12 +127,12 @@ func (t *Treewalker) ParseFiletree(ctx context.Context, fileSystem fs.FS) ([]sce
 	errorCh := make(chan error, t.cfg.Workers)
 
 	cancellableCtx, cancelCtx := context.WithCancelCause(ctx)
-	taskCh := t.startExploration(cancellableCtx, cancelCtx, fileSystem, errorCh)
+	coordinatorWG := sync.WaitGroup{}
+	coordinatorWG.Add(3)
+
+	taskCh := t.startExploration(cancellableCtx, cancelCtx, fileSystem, errorCh, &coordinatorWG)
 
 	workersWG, resultCh := t.runWorkers(cancellableCtx, fileSystem, taskCh, errorCh)
-
-	coordinatorWG := sync.WaitGroup{}
-	coordinatorWG.Add(2)
 
 	go func() {
 		defer close(errorCh)

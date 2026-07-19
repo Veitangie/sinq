@@ -207,7 +207,7 @@ func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan run
 
 		var file *os.File
 
-		if dirPath := filepath.Base(cfg.Out); dirPath != "" {
+		if dirPath := filepath.Dir(cfg.Out); dirPath != "" {
 			err = os.MkdirAll(dirPath, PERM_RWX)
 			if err == nil {
 				file, err = os.OpenFile(cfg.Out, O_CRWRTR, PERM_RW)
@@ -319,7 +319,7 @@ Flags:
   -o, --out path         Path to write the output file (prints to stdout if omitted)
   -L, --log-level string Log level to use: debug, info, warn or error (default "warn")
   -f, --format string    Output format: std or junit (default "std")
-  -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps)
+  -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps, only affects "std" format)
   -c, --color string     Terminal colors: always, never, auto (default "auto")
   -S, --show string      Which results to show in the output: all, no-skip, failures (default "no-skip")
   -l, --list             Parse and list scenarios at specified directories
@@ -336,7 +336,7 @@ Flags:
 For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
 Or read the manual: man 1 sinq`
 
-const versionConstPart = `sinq v1.0.0-rc.7 - `
+const versionConstPart = `sinq v1.0.0-rc.8 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",

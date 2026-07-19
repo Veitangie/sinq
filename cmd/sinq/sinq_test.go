@@ -297,9 +297,7 @@ func TestSinq_CLI_ListScenarios(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(tmpDir, "config.scenario"), []byte(`{"tags": ["api"], "env_matrix": [{"key1": {"a": "1"}}, {"key2": {"b": "2"}}]}`), 0644)
 	_ = os.WriteFile(filepath.Join(tmpDir, "01_test.sinq"), []byte("GET http://example.com"), 0644)
 
-	// Will match due to 'api' tag
 	args1 := []string{"--list", "--tag", "api", tmpDir}
-	// Will skip due to non-matching tag
 	args2 := []string{"--list", "--tag", "nonexistent", tmpDir}
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr

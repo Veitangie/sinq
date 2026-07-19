@@ -59,6 +59,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
@@ -103,3 +105,11 @@ jobs:
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
           NIX_GITHUB_TOKEN: ${{ secrets.NIX_GITHUB_TOKEN }}
           AUR_KEY: ${{ secrets.AUR_SSH_KEY }}
+
+      - name: Attest Build Provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*_checksums.txt

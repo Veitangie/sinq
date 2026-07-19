@@ -1,5 +1,6 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![codecov](https://codecov.io/github/Veitangie/sinq/graph/badge.svg?token=MVHIV761LR)](https://codecov.io/github/Veitangie/sinq)
+[![Coverage](https://codecov.io/github/Veitangie/sinq/graph/badge.svg?token=MVHIV761LR)](https://codecov.io/github/Veitangie/sinq)
+[![Code Quality](https://app.codacy.com/project/badge/Grade/bd32a7efb2b444f78e55cd2f351c613c)](https://app.codacy.com/gh/Veitangie/sinq/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 ![Pipeline Status](https://github.com/Veitangie/sinq/actions/workflows/ci.yml/badge.svg)
 ![Release Version](https://img.shields.io/github/v/release/Veitangie/sinq?include_prereleases&logo=github)
 
@@ -10,6 +11,21 @@ Have you ever felt the pain of wiring up a bunch of independent requests into on
 `sinq` is a concurrent integration and end-to-end http testing tool that treats your filesystem as a workflow definition.
 
 Write requests as near-raw HTTP, add Lua where logic is needed, and organize files into directory trees. Every leaf directory becomes an isolated execution scenario with its own state, configuration, and request chain.
+
+## Table of Contents
+* [Why sinq?](#why-sinq)
+* [Installation & Usage](#installation--usage)
+* [File & Directory Structure](#file--directory-structure)
+* [The .sinq Format](#the-sinq-format)
+* [Lua API](#lua-api)
+* [Configuration & Environment](#configuration--environment)
+* [Secrets & Security](#secrets--security)
+* [Lua Sandboxing & Performance](#lua-sandboxing--performance)
+* [Usage](#usage)
+* [When To Choose Sinq](#when-to-choose-sinq)
+* [Useful Links](#useful-links)
+* [Acknowledgments & Credits](#acknowledgments--credits)
+* [License](#license)
 
 ## Why sinq?
 
@@ -60,7 +76,7 @@ Authorization: Bearer ${AUTH_TOKEN}
 
 { "action": "export" }
 
-$RETRY{ return sinq.retry.when(res.json().status == "pending", 50 * sinq.ms) }
+$RETRY{ return sinq.retry.when(res.json().status == "pending", 50 * sinq.time.ms) }
 
 $ASSERT{ sinq.assert.isTrue(res.json().status == "complete", "Job never completed") }
 ```
@@ -268,7 +284,8 @@ There are two categories of scripts within a `.sinq` file:
 * **`$PRE` (Setup & File I/O):** Executes immediately when a worker picks up the request, before it is materialized. This is the **only** scope where you can modify the filesystem interactions for the request. Current request body payload is inaccessible here.
     * `req.attach("path/file.txt")` — Replaces the request body with the contents of a file. (Fails if a body is already defined in the request).
     * `req.saveResponseTo("path/download.bin")` — Streams the incoming response body directly to disk, bypassing the Lua memory buffer.
-    * `req.cache(true)` — If `true` the request will be cached in memory to prevent repeated network calls with the same data. **filenames passed to `attach` and `saveResponseTo` are also considered request data**
+    * `req.cache(bool?)` — If `true` (default), the request will be cached in memory to prevent repeated network calls with the same data. **Filenames passed to `attach` and `saveResponseTo` are also considered request data.**
+    * `req.skip(bool?)` — If `true` (default), marks the request to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` without throwing a failure.
 
 * **`$RETRY` (Retry Policies):** Executes immediately after receiving the HTTP response. **This is the only lifecycle script that must return a value.** It must return a Lua number representing milliseconds to wait before retrying, or a negative number to stop retrying.
     * Scope-Exclusive API: `sinq.retry.when()`, `sinq.retry.whenExponential()`, `sinq.retry.withJitter()`.
@@ -293,10 +310,25 @@ There are two categories of scripts within a `.sinq` file:
 * `req` — Shorthand for current request table
 
 ### Time Constants
-* `sinq.ms` (1)
-* `sinq.second` (1000)
-* `sinq.minute` (60000)
-* `sinq.hour` (3600000)
+* `sinq.time.ms` (1)
+* `sinq.time.second` (1000)
+* `sinq.time.minute` (60000)
+* `sinq.time.hour` (3600000)
+
+### Additional APIs
+
+**Time API (`sinq.time`)**
+* Functions: `now()`, `fromString(str, format?)`, `toString(ms, format?)`
+
+**Crypto API (`sinq.crypto`)**
+* Encoding: `base64Encode(str)`, `base64Decode(str)`, `base64UrlEncode(str)`, `base64UrlDecode(str)`, `hexEncode(str)`, `hexDecode(str)`
+* Hashing: `md5(str, enc?)`, `sha1(str, enc?)`, `sha256(str, enc?)`, `sha512(str, enc?)`, `hmac(str, algo?, key?, enc?)`
+
+**JWT API (`sinq.jwt`)**
+* Functions: `decode(token)`, `verify(token, key, algo?)`, `sign(claimsTable, key, method?)`
+
+**Fake Data API (`sinq.fake`)**
+* Functions: See [lua-api.md](docs/lua-api.md) for a comprehensive suite of fake data generators (`sinq.fake.uuid()`, `sinq.fake.email()`, `sinq.fake.company()`, etc.) to generate random, realistic payloads for endpoints.
 
 ### Responses
 All completed responses are stored in the global `sinq.responses` table. Lua is 1-indexed, so the response to the first request is `sinq.responses[1]`.
@@ -335,7 +367,7 @@ Default configuration that can be overridden in `.scenario` files:
   "max_retries": 10,
   "max_redirects": 5,
   "max_body_size": "1MiB",
-  "env_matrix": [{ }],
+  "env_matrix": [],
   "tags": [],
 }
 ```
@@ -403,7 +435,7 @@ sinq -iV ./tests/local
   -o, --out path         Path to write the output file (prints to stdout if omitted)
   -L, --log-level string Log level to use: debug, info, warn or error (default "warn")
   -f, --format string    Output format: std or junit (default "std")
-  -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps)
+  -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps, only affects "std" format)
   -c, --color string     Terminal colors: always, never, auto (default "auto")
   -S, --show string      Which results to show in the output: all, no-skip, failures (default "no-skip")
   -l, --list             Parse and list scenarios at specified directories

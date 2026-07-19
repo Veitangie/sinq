@@ -4,7 +4,7 @@ The `env_matrix` configuration allows a single scenario definition to be execute
 
 ## Definition and Cartesian Product
 
-The `env_matrix` property in a `.scenario` file takes an array of objects. Each object represents an axis in the matrix. The keys in these objects serve as labels, and their values are the environment variable overrides/additions applied to that specific branch of the execution. The objects must either be empty (`{}`) or have all their top-level keys correspond to objects.
+The `env_matrix` property in a `.scenario` file takes an array of objects. Each object represents an axis in the matrix. The keys in these objects serve as labels, and their values are the environment variable overrides/additions applied to that specific branch of the execution. The objects must have all their top-level keys correspond to objects. Empty objects (`{}`) are safely ignored and dropped by the parser.
 
 **`config.scenario`:**
 ```json
@@ -30,6 +30,8 @@ During the Treewalker aggregation phase, `sinq` gathers all of these arrays into
 4.  **`guest_crypto`**: `role`="guest", `auth_token`="guest-jwt-111", `method`="crypto", `expected_status`=202
 
 The generated scenarios will automatically append these labels to the base scenario name (e.g., `checkout_admin_card`).
+
+> **Note:** Because the combination parsing relies on Go map iteration, the generation and execution sequence of the matrix combinations is inherently non-deterministic.
 
 ## Usage in Requests
 

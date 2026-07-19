@@ -59,13 +59,12 @@ func NewReporter(writer io.Writer) JUnitReporter {
 
 func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan time.Duration, size int) error {
 	result := JUnitReport{
-		Suites: make([]JUnitTestSuite, size),
+		Suites: make([]JUnitTestSuite, 0, size),
 	}
-	curIdx := 0
 
 	for scenarioResult := range source {
-		suite := &result.Suites[curIdx]
-		curIdx += 1
+		result.Suites = append(result.Suites, JUnitTestSuite{})
+		suite := &result.Suites[len(result.Suites)-1]
 
 		suite.Name = scenarioResult.Name
 		suite.Tests = len(scenarioResult.RequestResults)
@@ -101,7 +100,6 @@ func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 	}
 
 	result.Time = fmt.Sprintf("%.3f", (<-timer).Seconds())
-	result.Suites = result.Suites[:curIdx]
 	toWrite, err := xml.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return err

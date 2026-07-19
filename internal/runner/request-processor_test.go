@@ -30,7 +30,7 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	w := setupTestWorker(t, ctx)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n$RETRY{\n return 10000 \n}"
 	reqBp, err := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "retry_test.sinq")
@@ -88,23 +88,6 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 	}
 }
 
-func TestBug_SaveToLeak(t *testing.T) {
-	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
-
-	dummyExtract := func(scenario.Token) []byte { return []byte("") }
-
-	_, _, _, err := w.runPreScript(scenario.Token{}, dummyExtract, "test.sinq", 1*time.Second)
-	if err != nil {
-		t.Fatalf("runPreScript failed: %v", err)
-	}
-
-	saveToVal := w.lc.requestTable.RawGetString("saveResponseTo")
-	if saveToVal.Type().String() != "nil" {
-		t.Errorf("BUG EXPOSED: 'saveResponseTo' leaked! Expected LNil in requestTable, got %s", saveToVal.Type().String())
-	}
-}
-
 func TestBug_ZeroByteUpload(t *testing.T) {
 	var receivedBody []byte
 	var receivedTransferEncoding []string
@@ -123,7 +106,7 @@ func TestBug_ZeroByteUpload(t *testing.T) {
 
 	w := setupTestWorker(t, nil)
 	w.env.workspace = &mockWorkspace{FS: mockFS}
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", server.URL, nil)
 
@@ -164,13 +147,13 @@ func TestBug_ZeroByteUpload(t *testing.T) {
 
 func TestWorker_AttachInvalidFileFastFails(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	script := []byte(`req.attach("missing.txt")`)
 	extract := func(scenario.Token) []byte { return script }
 	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
 
-	_, _, _, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+	_, _, _, _, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
 
 	if err == nil {
 		t.Fatal("Expected runPreScript to fail on missing file, but it succeeded")
@@ -180,9 +163,27 @@ func TestWorker_AttachInvalidFileFastFails(t *testing.T) {
 	}
 }
 
+func TestWorker_SkipRequest(t *testing.T) {
+	w := setupTestWorker(t, nil)
+	w.lc.SetupRequestEnvironment(0)
+
+	script := []byte(`req.skip()`)
+	extract := func(scenario.Token) []byte { return script }
+	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
+
+	_, _, _, skip, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+
+	if err != nil {
+		t.Fatalf("Expected runPreScript to succeed, but got error: %v", err)
+	}
+	if !skip {
+		t.Errorf("Expected skip to be true, got false")
+	}
+}
+
 func TestRequestProcessor_FailsIfBodyAndFileAttached(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	rawRequest := "POST http://localhost\n\nthis is a body"
 
@@ -215,7 +216,7 @@ func TestRequestProcessor_MaxRetriesExceeded(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n$RETRY{\n return 1 \n}"
 	reqBp, err := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "retry_test.sinq")
@@ -265,7 +266,7 @@ func TestRequestProcessor_BadTLS_FailsGracefully(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "/path HTTP/1.1\n"
 	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "tls_test.sinq")
@@ -301,7 +302,7 @@ func TestRequestProcessor_EmptyBodyGet_NoChunkedEncoding(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n\n"
 	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
@@ -342,7 +343,7 @@ func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	sg := &singleflight.Group{}
 	w.env.singleFlight = sg
@@ -359,7 +360,7 @@ func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
 			hasher.SetSeed(seed)
 
 			wLocal := setupTestWorker(t, nil)
-			wLocal.lc.setupRequestEnvironment(0)
+			wLocal.lc.SetupRequestEnvironment(0)
 			wLocal.env.singleFlight = sg
 			wLocal.env.hasher = hasher
 
@@ -401,7 +402,7 @@ func TestRequestProcessor_SingleFlight_DistinctRequests(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	sg := &singleflight.Group{}
 	w.env.singleFlight = sg
@@ -417,7 +418,7 @@ func TestRequestProcessor_SingleFlight_DistinctRequests(t *testing.T) {
 			hasher.SetSeed(seed)
 
 			wLocal := setupTestWorker(t, nil)
-			wLocal.lc.setupRequestEnvironment(0)
+			wLocal.lc.SetupRequestEnvironment(0)
 			wLocal.env.singleFlight = sg
 			wLocal.env.hasher = hasher
 
@@ -462,7 +463,7 @@ func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	sg := &singleflight.Group{}
 	w.env.singleFlight = sg
@@ -479,7 +480,7 @@ func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
 			hasher.SetSeed(seed)
 
 			wLocal := setupTestWorker(t, nil)
-			wLocal.lc.setupRequestEnvironment(0)
+			wLocal.lc.SetupRequestEnvironment(0)
 			wLocal.env.singleFlight = sg
 			wLocal.env.hasher = hasher
 
@@ -518,7 +519,7 @@ func TestRequestProcessor_AssertAndPostScripts(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n$ASSERT{\nsinq.assert.code(200)\n}\n$POST{\nenv.postRan = true\n}"
 	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "hooks.sinq")
@@ -562,7 +563,7 @@ func TestRequestProcessor_OversizedBody(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n"
 	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
@@ -601,7 +602,7 @@ func TestRequestProcessor_SaveResponseToFile(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, nil)
-	w.lc.setupRequestEnvironment(0)
+	w.lc.SetupRequestEnvironment(0)
 
 	mockFS := fstest.MapFS{}
 	w.env.workspace = &mockWorkspace{FS: mockFS}
@@ -640,4 +641,3 @@ func TestRequestProcessor_SaveResponseToFile(t *testing.T) {
 		t.Errorf("Expected filenameTo to be output.txt, got %s", result.filenameTo)
 	}
 }
-

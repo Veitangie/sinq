@@ -51,6 +51,7 @@ type RequestProcessor struct {
 	filenameFrom      string
 	filenameTo        string
 	cache             bool
+	skip              bool
 	sentRequest       bool
 }
 
@@ -66,7 +67,7 @@ func (p *RequestProcessor) handleError(err error) error {
 func (p *RequestProcessor) runPre() error {
 	p.w.env.logger.Debug("[Runner] Worker running pre script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.Start()
-	filenameFrom, filenameTo, cache, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
+	filenameFrom, filenameTo, cache, skip, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.result.Pre = p.requestTimer.Time()
 	p.totalRequestTimer = p.requestTimer
 	p.result.StartedAt = p.requestTimer.StartedAt()
@@ -78,6 +79,7 @@ func (p *RequestProcessor) runPre() error {
 	p.filenameFrom = filenameFrom
 	p.filenameTo = filenameTo
 	p.cache = cache
+	p.skip = skip
 	return p.handleError(err)
 }
 
@@ -254,7 +256,7 @@ func (p *RequestProcessor) makeIntermediate(resp *http.Response) (intermediate, 
 
 	if uint64(len(data)) > p.scenarioBp.Config.MaxBodySize.ByteAmount {
 		data = data[:len(data)-1]
-		io.Copy(io.Discard, resp.Body)
+		io.CopyN(io.Discard, resp.Body, 50*(1<<20))
 		result.oversized = true
 	}
 
@@ -328,7 +330,7 @@ func (p *RequestProcessor) run() (any, error) {
 func (p *RequestProcessor) runAssert() error {
 	p.w.env.logger.Debug("[Runner] Worker running assert script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.Start()
-	err := p.w.runAssertScript(p.requestBp.Assert, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
+	err := p.w.runAssertScript(p.requestBp.Assert, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration, p.filenameTo)
 	p.result.Assert = p.requestTimer.Time()
 
 	if err != nil {

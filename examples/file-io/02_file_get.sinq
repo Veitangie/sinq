@@ -2,4 +2,7 @@ $PRE{ req.saveResponseTo("../assets/received_file") }
 
 GET ${env.BASE_URL}/download
 
-$ASSERT{ sinq.assert.equals(res.size, 1024) }
+$ASSERT{
+    sinq.assert.equals(res.size, 1024)
+    sinq.assert.fileMatches("../assets/received_file", "../assets/expected_file")
+}

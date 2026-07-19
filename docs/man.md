@@ -154,7 +154,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **sinq.responses**
 : Table of all completed responses in the current scenario (1-indexed).
 
-### Flow Control & Time
+### Flow Control
 
 **sinq.setNextRequest(index)**
 : Execute request with the 1-indexed number in the scenario next (doesn't stop current request's lifecycle).
@@ -162,8 +162,76 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **sinq.finishScenario()**
 : Finish the scenario after the current request (doesn't stop current request's lifecycle).
 
-**sinq.ms**, **sinq.second**, **sinq.minute**, **sinq.hour**
-: Time constants for retry logic.
+### Time API
+
+**sinq.time.ms**, **sinq.time.second**, **sinq.time.minute**, **sinq.time.hour**
+: Time constants for retry logic. Use `math.floor` when dividing timestamps by these constants.
+
+**sinq.time.now()**
+: Returns current UNIX timestamp in milliseconds.
+
+**sinq.time.fromString(str, format?)**
+: Parses a time string into a UNIX timestamp (milliseconds).
+
+**sinq.time.toString(ms, format?)**
+: Formats a UNIX timestamp (milliseconds) into a time string.
+
+### Crypto API
+
+**sinq.crypto.base64Encode**, **sinq.crypto.base64Decode**, **sinq.crypto.base64UrlEncode**, **sinq.crypto.base64UrlDecode**
+: Base64 encoding/decoding functions.
+
+**sinq.crypto.hexEncode**, **sinq.crypto.hexDecode**
+: Hexadecimal encoding/decoding functions.
+
+**sinq.crypto.md5(string, encoding?)**, **sinq.crypto.sha1(string, encoding?)**, **sinq.crypto.sha256(string, encoding?)**, **sinq.crypto.sha512(string, encoding?)**, **sinq.crypto.hmac(source, algo?, key?, encoding?)**
+: Hashing functions supporting hex, base64, base64url, and raw string encodings. Default is hex. If an unknown encoding or algorithm is provided, returns an error string as the second value.
+
+### JWT API
+
+**sinq.jwt.decode(token)**
+: Decodes a JWT token without validating signature.
+
+**sinq.jwt.verify(token, key, algo?)**
+: Verifies the token using the key and optional algorithm. Algorithm defaults to hs256.
+
+**sinq.jwt.sign(claimsTable, key, method?)**
+: Creates and signs a JWT token. Method defaults to hs256. Passing a cyclic `claimsTable` is UB.
+
+### JSON API
+
+**sinq.json.parse(string)**
+: Parses a JSON string into a Lua table.
+
+**sinq.json.serialize(table, indent?)**
+: Serializes a Lua table into a JSON string. Passing a cyclic table returns an error.
+
+**sinq.json.null**
+: A constant used to explicitly serialize a `null` value in JSON tables.
+
+**sinq.fake.uuid()**
+: Returns a random UUIDv4 string.
+
+**sinq.fake.email()**, **sinq.fake.ipv4()**, **sinq.fake.ipv6()**, **sinq.fake.url()**, **sinq.fake.userAgent()**, **sinq.fake.trace()**, **sinq.fake.username()**, **sinq.fake.password()**
+: Fake generators for network and identity strings.
+
+**sinq.fake.name()**, **sinq.fake.firstName()**, **sinq.fake.lastName()**, **sinq.fake.phone()**, **sinq.fake.address()**, **sinq.fake.company()**
+: Fake generators for personal information.
+
+**sinq.fake.word()**
+: Fake generators for text.
+
+**sinq.fake.int(min?, max?)**, **sinq.fake.float(min?, max?)**, **sinq.fake.shakespeare()**
+: Fake generators for primitives (int, float, boolean).
+
+**sinq.fake.timestamp(timeMs)**
+: Returns a UNIX timestamp (integer milliseconds) based on offset.
+
+**sinq.fake.oneOf(array)**
+: Returns a random element from the provided array.
+
+**sinq.fake.setSeed(int64)**
+: Seeds the fake data generator for deterministic output.
 
 ### $PRE Scope API
 
@@ -171,24 +239,27 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Replace request body with file contents.
 
 **req.saveResponseTo(filepath)**
-: Stream upcoming response directly to disk.
+: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Is meant for downloading large files. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks. Expects path to be relative to the current file.
 
-**req.cache(bool)**
-: Turn on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo)
+**req.cache(bool?)**
+: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames. Parameter defaults to `true` if omitted.
+
+**req.skip(bool?)**
+: If `true` (default), marks the request to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
 
 ### $RETRY Scope API
 
 **sinq.retry.stop**
 : Constant (-1) to break the retry loop.
 
-**sinq.retry.when(condition, delay)**
+**sinq.retry.when(condition, delay?)**
 : Retry if condition is true.
 
-**sinq.retry.whenExponential(condition, base, constant)**
-: Retry using exponential backoff.
+**sinq.retry.whenExponential(condition, base?, constant?)**
+: Retry with exponential backoff.
 
-**sinq.retry.withJitter(condition, range, delegate, args...)**
-: Add randomized jitter to a retry delegate.
+**sinq.retry.withJitter(condition, range?, delegate?, delegate_args...)**
+: Retry with randomized jitter.
 
 ### $ASSERT Scope API
 
@@ -206,6 +277,9 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 
 **sinq.assert.isTrue(condition, message?)**
 : Fail if condition is false or nil.
+
+**sinq.assert.fileMatches(filepath)**
+: Fail if response previously saved with `req.saveResponseTo` does not match the file at `filepath`.
 
 ### Response Methods And Fields
 

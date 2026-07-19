@@ -1,5 +1,3 @@
 GET ${env.BASE_URL}/unreachable
 
-$ASSERT{
-    sinq.assert.fail("This request should have been skipped by finishScenario()")
-}
+$ASSERT{ sinq.assert.fail("This request should have been skipped by sinq.finishScenario()") }

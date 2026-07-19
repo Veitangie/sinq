@@ -31,11 +31,13 @@ While the workers operate independently, they share underlying resources to opti
 * **Connection Pooling:** All workers share a single, underlying `http.Transport`. This allows `sinq` to reuse keep-alive TCP connections
 * **Cookie Isolation:** Despite sharing the TCP transport layer, every single scenario execution creates a brand new, isolated `http.CookieJar`. Cookies set by a server in Scenario A will be completely invisible to Scenario B.
 
-## AST Bytecode Caching
+## AST Bytecode Caching & Request Collapsing
 
 When a worker encounters a Lua script block (like a `$PRE` or `$ASSERT` block), it does not execute the raw string. It parses and compiles the script into an Abstract Syntax Tree (AST) bytecode. 
 
 To prevent 100 workers from simultaneously compiling the exact same `01_login.sinq` script, the Runner maintains a thread-safe, globally shared AST cache. The cache key is bound to the physical byte-offset of the script in the `.sinq` file.
+
+Furthermore, if multiple concurrent workers attempt to process the exact same request file simultaneously, `sinq` can use a `singleflight` mechanism. This is **opt-in per request** by calling `req.cache(true)` in the request's `$PRE` block. When enabled, the first worker performs the parsing and execution, while all other waiting workers pause and receive the cached result instantly when the first worker finishes, preventing the thundering herd problem.
 
 ## Context Cancellation & Graceful Degradation
 

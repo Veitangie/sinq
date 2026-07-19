@@ -320,7 +320,7 @@ func (p *Parser) parseLogLevel() {
 }
 
 func (p *Parser) parseShow() {
-	value, err := p.getNextValue("No show option passed. Usage: --show|-s all")
+	value, err := p.getNextValue("No show option passed. Usage: --show|-S all")
 	if err != nil {
 		p.accumulateError(err)
 		return

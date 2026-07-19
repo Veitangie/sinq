@@ -29,7 +29,7 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - os.MkdirAll
-        - io.Copy
+        - io.CopyN
         - (*os.File).Close
         - (io.ReadCloser).Close
         - (io.WriteCloser).Close

@@ -24,6 +24,14 @@ esac
 BINARY_NAME="sinq${EXE_EXT:-}"
 echo "Detected OS: $OS_NAME, Architecture: $ARCH_NAME"
 
+if [ "$EXT" = ".tar.gz" ] && ! command -v tar >/dev/null 2>&1; then
+    echo "Error: 'tar' is required to extract the archive, but it is not installed."
+    exit 1
+fi
+if [ "$EXT" = ".zip" ] && ! command -v unzip >/dev/null 2>&1; then
+    echo "Error: 'unzip' is required to extract the archive, but it is not installed."
+    exit 1
+fi
 if [ -z "$TARGET_VERSION" ]; then
     echo "Fetching latest release version..."
     TARGET_VERSION=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
@@ -40,7 +48,7 @@ fi
 RAW_VERSION=$(echo "$TARGET_VERSION" | sed 's/^v//')
 ARCHIVE_NAME="sinq-${RAW_VERSION}-${OS_NAME}-${ARCH_NAME}${EXT}"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TARGET_VERSION/$ARCHIVE_NAME"
-CHECKSUMS_URL="https://github.com/$REPO/releases/download/$TARGET_VERSION/checksums.txt"
+CHECKSUMS_URL="https://github.com/$REPO/releases/download/$TARGET_VERSION/sinq_${RAW_VERSION}_checksums.txt"
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -83,6 +91,17 @@ if [ "$ACTUAL_CHECKSUM" != "$EXPECTED_CHECKSUM" ]; then
     exit 1
 fi
 echo "Checksum verified successfully."
+
+if command -v gh >/dev/null 2>&1; then
+    echo "Verifying artifact attestation with GitHub CLI..."
+    if ! gh attestation verify "$TMP_ARCHIVE" --repo "$REPO"; then
+        echo "Error: Artifact attestation verification failed!"
+        exit 1
+    fi
+    echo "Artifact attestation verified successfully."
+else
+    echo "Notice: GitHub CLI (gh) not found. Skipping artifact attestation verification."
+fi
 
 echo "Extracting archive..."
 if [ "$EXT" = ".tar.gz" ]; then

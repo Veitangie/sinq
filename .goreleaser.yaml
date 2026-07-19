@@ -92,3 +92,5 @@ dockers_v2:
       - "{{ .Tag }}"
       - "{{ if not .Prerelease }}v{{ .Major }}{{ end }}"
       - "{{ if not .Prerelease }}latest{{ end }}"
+
+

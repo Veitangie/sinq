@@ -26,10 +26,10 @@ The syntax `${env.BASE_URL}` is syntactic sugar. When the parser encounters a `$
 Under the hood, `sinq` takes the contents of that script, prepends the `return` keyword, and executes it in the Lua VM. 
 * `${ env.BASE_URL }` effectively becomes `$Unnamed_1{ return env.BASE_URL }`.
 * If a script does not explicitly return a value, `sinq` will attempt to execute it normally, and if that yields a compilation error, it falls back to recompiling it with a `return` statement. For complex multiline interpolation, it is always faster to write `return my_value` explicitly.
-* **If both attempts fail, the error of the first (unmodified) run is shown**
+* **If both attempts fail, the error of the first (unmodified) run is shown.**
 
-### AST Caching
-To maintain high performance, `sinq` compiles all Lua scripts into bytecode (AST) and caches them in memory. The cache key is tied to the physical byte-offset of the script in the file. This means you can have 1,000 workers executing the same scenario concurrently, and the Lua engine will only compile the bytecode once.
+### AST Caching & Request Collapsing
+To maintain high performance, `sinq` compiles all Lua scripts into bytecode (AST) and caches them in memory. The cache key is tied to the physical byte-offset of the script in the file. This means you can have 1,000 workers executing the same scenario concurrently, and the Lua engine will only compile the bytecode once. Furthermore, if multiple workers attempt to process identical requests simultaneously, `sinq` can use a `singleflight` mechanism to collapse the execution. This is strictly **opt-in per request** by calling `req.cache(true)` in the `$PRE` block. When enabled, the first worker performs the processing, while all other waiting workers receive the cached result instantly when the first finishes.
 
 ### Escape Sequences
 If you need to send a literal `$PRE{` or `${` string in a JSON payload without `sinq` attempting to execute it as Lua, use the backslash escape character `\`.
@@ -58,7 +58,7 @@ Default configuration that can be overridden in `.scenario` files:
   "max_retries": 10,
   "max_redirects": 5,
   "max_body_size": "1MiB",
-  "env_matrix": [{ }],
+  "env_matrix": { },
   "tags": [],
 }
 ```
@@ -73,7 +73,7 @@ Default configuration that can be overridden in `.scenario` files:
 * **`max_retries`**: The maximum amount of times any request in the scenario can be retried upon retry script returning a valid non-negative number.
 * **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
 * **`max_body_size`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
-* **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](docs/env-matrix.md).
+* **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](env-matrix.md).
 * **`tags`**: Tags or labels assigned to scenarios containing this `.scenario` file. They get collected into one list for the resulting scenario.
 
 Everything defined in the `env` object can be accessed directly in your HTTP paths and headers using `${env.variableName}`, or inside your Lua scripts via the global `env` table.

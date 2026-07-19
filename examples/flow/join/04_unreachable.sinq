@@ -1,0 +1,5 @@
+GET ${env.BASE_URL}/unreachable
+
+$PRE{ req.skip() }
+
+$ASSERT{ sinq.assert.fail("This request should have been skipped by sinq.skip()") }
