@@ -150,7 +150,21 @@ inputs.sinq.url = "github:Veitangie/sinq-nix";
 <details>
 <summary><strong>📦 Arch Linux (AUR)</strong></summary>
 
-*Coming soon.* The Arch User Repository package (`sinq-bin`) will be available shortly once the AUR resumes normal operations. 
+Available via the Arch User Repository as `sinq-bin`. You can use an AUR helper like `yay` or `paru`:
+
+```bash
+yay -S sinq-bin
+# or
+paru -S sinq-bin
+```
+
+Or, you can build and install it manually:
+
+```bash
+git clone https://aur.archlinux.org/sinq-bin.git
+cd sinq-bin
+makepkg -si
+```
 </details>
 
 <details>

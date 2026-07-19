@@ -89,7 +89,9 @@ Executes before the HTTP request is materialized. Used for file I/O operations.
 * **`req.saveResponseTo(filepath)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
 * **`req.cache(bool?)`**: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo). The parameter defaults to `true` if omitted.
 * **`req.skip(bool?)`**: If `true` (default), marks the request to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
+
 > *Both of the file functions expect the path to be relative to the current file. Passing in an absolute path will fail*
+
 > **Stupid Stuff**: Due to the caching being based on go's `singleflight` package, there exists at least one edge case that I'm aware of that can break tests. If multiple scenarios get to the cached request at the same time, and the scenario with the lowest timeout picks up the request, it's possible that it times out, and every other scenario will fail with a timeout error despite having time. To prevent this, make sure all the scenarios that have cached requests in their path have roughly the same timeouts, or disable caching dynamically for the scenarios with significantly different timeouts.
 
 ### `$RETRY` (Polling Phase)
