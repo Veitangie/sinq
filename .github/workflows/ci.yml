@@ -94,6 +94,11 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Add AUR to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
@@ -104,7 +109,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
           NIX_GITHUB_TOKEN: ${{ secrets.NIX_GITHUB_TOKEN }}
-          AUR_KEY: ${{ secrets.AUR_SSH_KEY }}
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
 
       - name: Attest Build Provenance
         uses: actions/attest@v4

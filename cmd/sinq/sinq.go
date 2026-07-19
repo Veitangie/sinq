@@ -336,7 +336,7 @@ Flags:
 For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
 Or read the manual: man 1 sinq`
 
-const versionConstPart = `sinq v1.0.0-rc.8 - `
+const versionConstPart = `sinq v1.0.0-rc.9 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",
@@ -346,4 +346,7 @@ var sinqMeaning []string = []string{
 	"Sinq Is Now Qombinatorial",
 	"Slick, Independent, Novel, Quirky",
 	"Stateful Integrated by Network Quality Assurer",
+	"Stealth Interpreter, Normal Querier",
+	"[S]top searching for mean[inq]",
+	"[Sin]q is on Arch Linu[q]s",
 }

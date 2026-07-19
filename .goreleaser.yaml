@@ -59,17 +59,18 @@ homebrew_casks:
     manpages:
       - sinq.1
 
-# aurs:
-#   - name: sinq-bin
-#     homepage: https://github.com/Veitangie/sinq
-#     description: A concurrent HTTP functional and integration testing tool.
-#     maintainer: Veitangie
-#     license: GPL-3.0
-#     private_key: '{{ .Env.AUR_KEY }}'
-#     git_url: 'ssh://aur@aur.archlinux.org/sinq-bin.git'
-#     package: |-
-#       install -Dm755 sinq "${pkgdir}/usr/bin/sinq"
-#       install -Dm644 sinq.1 "${pkgdir}/usr/share/man/man1/sinq.1"
+aurs:
+  - name: sinq-bin
+    homepage: https://github.com/Veitangie/sinq
+    description: A concurrent HTTP functional and integration testing tool.
+    maintainers:
+      - 'Veitangie <emignatiev.work@gmail.com>'
+    license: GPL-3.0
+    private_key: '{{ .Env.AUR_SSH_KEY }}'
+    git_url: 'ssh://aur@aur.archlinux.org/sinq-bin.git'
+    package: |-
+      install -Dm755 sinq "${pkgdir}/usr/bin/sinq"
+      install -Dm644 sinq.1 "${pkgdir}/usr/share/man/man1/sinq.1"
 
 nix:
   - name: sinq
