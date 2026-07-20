@@ -41,6 +41,7 @@ nfpms:
     formats:
       - deb
       - rpm
+      - apk
     contents:
       - src: sinq.1
         dst: /usr/share/man/man1/sinq.1
@@ -94,4 +95,14 @@ dockers_v2:
       - "{{ if not .Prerelease }}v{{ .Major }}{{ end }}"
       - "{{ if not .Prerelease }}latest{{ end }}"
 
+scoops:
+  - name: sinq
+    homepage: https://github.com/Veitangie/sinq
+    description: A concurrent HTTP functional and integration testing tool.
+    license: gpl3Only
+    goamd64: v3
+    repository:
+      owner: Veitangie
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_GITHUB_TOKEN }}"
 

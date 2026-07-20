@@ -9,24 +9,22 @@ import (
 	"hash/maphash"
 	"log/slog"
 	"net/http"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/Veitangie/sinq/internal/config"
 	"github.com/Veitangie/sinq/internal/scenario"
 	"github.com/Veitangie/sinq/internal/timer"
-	lua "github.com/yuin/gopher-lua"
 	"golang.org/x/sync/singleflight"
 )
 
 type Runner struct {
-	cfg       config.Config
-	ctx       context.Context
-	transport http.RoundTripper
-	logger    slog.Logger
-	clock     timer.Clock
+	cfg           config.Config
+	ctx           context.Context
+	transport     http.RoundTripper
+	logger        slog.Logger
+	clock         timer.Clock
+	rootWorkspace Workspace
 }
 
 type ScenarioBundle struct {
@@ -71,22 +69,6 @@ func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle
 	return taskCh
 }
 
-func (r *Runner) getLuaPath() string {
-	lua.LuaLDir = ""
-	lua.LuaPath = ""
-	lua.LuaPathDefault = ""
-	pathBuilder := strings.Builder{}
-	for idx, path := range r.cfg.LuaPaths {
-		pathBuilder.WriteString(filepath.Join(path, "?.lua"))
-		pathBuilder.WriteByte(';')
-		pathBuilder.WriteString(filepath.Join(path, "?", "init.lua"))
-		if idx < len(r.cfg.LuaPaths)-1 {
-			pathBuilder.WriteByte(';')
-		}
-	}
-	return pathBuilder.String()
-}
-
 func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, secrets map[string]any, totalTimer *timer.Timer) (<-chan ScenarioResult, <-chan time.Duration, <-chan error) {
 
 	taskCh := r.startDataSource(ctx, scenarios)
@@ -94,13 +76,22 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 	resultCh := make(chan ScenarioResult, r.cfg.Workers)
 	durationCh := make(chan time.Duration, 1)
 	wg := sync.WaitGroup{}
-	sg := singleflight.Group{}
+	singleflightProcessor := cachedRequestProcessor{
+		group:        singleflight.Group{},
+		ctx:          ctx,
+		transport:    r.transport,
+		maxCacheSize: r.cfg.MaxCacheSize,
+		cacheTimeout: r.cfg.CacheTimeout,
+		logger:       &r.logger,
+	}
 
-	sharedCache := map[scriptKey]*lua.FunctionProto{}
-	sharedLock := sync.RWMutex{}
+	loader := cachedLoader{
+		path:      r.cfg.LuaPaths,
+		workspace: r.rootWorkspace,
+		group:     singleflight.Group{},
+	}
 
 	sharedSeed := maphash.MakeSeed()
-	luaPath := r.getLuaPath()
 
 	go func() {
 		defer func() {
@@ -110,22 +101,23 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 		}()
 
 		compiler := cachedCompiler{
-			scriptCacheLock: &sharedLock,
-			scriptCache:     sharedCache,
+			group:      singleflight.Group{},
+			cache:      sync.Map{},
+			hasherSeed: sharedSeed,
 		}
 
 		hasher := maphash.Hash{}
 		hasher.SetSeed(sharedSeed)
 		env := workerEnv{
-			cfg:          r.cfg,
-			secrets:      secrets,
-			luaPath:      luaPath,
-			logger:       &r.logger,
-			transport:    r.transport,
-			clock:        r.clock,
-			compiler:     compiler,
-			singleFlight: &sg,
-			hasher:       hasher,
+			cfg:             r.cfg,
+			secrets:         secrets,
+			logger:          &r.logger,
+			transport:       r.transport,
+			clock:           r.clock,
+			compiler:        &compiler,
+			cachedProcessor: &singleflightProcessor,
+			hasher:          hasher,
+			loader:          &loader,
 		}
 
 		for idx := range r.cfg.Workers {
@@ -153,7 +145,7 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 	return resultCh, durationCh, errorCh
 }
 
-func NewRunner(cfg config.Config, ctx context.Context, transport http.RoundTripper, logger slog.Logger, clock timer.Clock) (*Runner, error) {
+func NewRunner(cfg config.Config, ctx context.Context, transport http.RoundTripper, logger slog.Logger, clock timer.Clock, rootWorkspace Workspace) (*Runner, error) {
 	if transport == nil {
 		return nil, errors.New("Cannot construct scenario runner: http transport is nil")
 	}
@@ -166,5 +158,9 @@ func NewRunner(cfg config.Config, ctx context.Context, transport http.RoundTripp
 		clock = timer.DefaultClock{}
 	}
 
-	return &Runner{cfg, ctx, transport, logger, clock}, nil
+	if rootWorkspace == nil {
+		return nil, errors.New("Cannot construct scenario runner: root workspace is nil")
+	}
+
+	return &Runner{cfg, ctx, transport, logger, clock, rootWorkspace}, nil
 }

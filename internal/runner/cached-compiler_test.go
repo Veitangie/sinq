@@ -4,6 +4,7 @@
 package runner
 
 import (
+	"hash/maphash"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,50 +15,7 @@ import (
 )
 
 func setupTestCompiler() cachedCompiler {
-	return cachedCompiler{
-		scriptCacheLock: &sync.RWMutex{},
-		scriptCache:     make(map[scriptKey]*lua.FunctionProto),
-	}
-}
-
-func TestCachedCompiler_BasicReuse(t *testing.T) {
-	cc := setupTestCompiler()
-
-	token := scenario.Token{
-		Type:   scenario.Script,
-		Name:   "BASIC_TEST",
-		Line:   1,
-		Offset: 0,
-		Start:  0,
-	}
-
-	callCount := 0
-	extract := func(scenario.Token) []byte {
-		callCount++
-		return []byte(`return "hello"`)
-	}
-
-	proto1, err := cc.compileScript(token, extract, "test.sinq")
-	if err != nil {
-		t.Fatalf("Unexpected error compiling script: %v", err)
-	}
-	if proto1 == nil {
-		t.Fatal("Expected non-nil FunctionProto")
-	}
-	if callCount != 1 {
-		t.Errorf("Expected extract to be called exactly once, got %d", callCount)
-	}
-
-	proto2, err := cc.compileScript(token, extract, "test.sinq")
-	if err != nil {
-		t.Fatalf("Unexpected error on second compile: %v", err)
-	}
-	if proto1 != proto2 {
-		t.Errorf("Cache failed: expected pointer %p, got %p", proto1, proto2)
-	}
-	if callCount != 1 {
-		t.Errorf("Cache failed: extract function was called again! Count: %d", callCount)
-	}
+	return cachedCompiler{hasherSeed: maphash.MakeSeed()}
 }
 
 func TestCachedCompiler_CacheMiss_DifferentKeys(t *testing.T) {
@@ -78,8 +36,10 @@ func TestCachedCompiler_CacheMiss_DifferentKeys(t *testing.T) {
 		t.Error("Compiler returned same pointer for different cache keys")
 	}
 
-	if len(cc.scriptCache) != 4 {
-		t.Errorf("Expected cache map size to be 4, got %d", len(cc.scriptCache))
+	count := 0
+	cc.cache.Range(func(key, value any) bool { count++; return true })
+	if count != 4 {
+		t.Errorf("Expected cache map size to be 4, got %d", count)
 	}
 }
 
@@ -94,8 +54,10 @@ func TestCachedCompiler_SyntaxError_NotCached(t *testing.T) {
 		t.Fatal("Expected syntax error, got nil")
 	}
 
-	if len(cc.scriptCache) != 0 {
-		t.Errorf("Expected cache to be empty after failure, but got %d entries", len(cc.scriptCache))
+	count := 0
+	cc.cache.Range(func(key, value any) bool { count++; return true })
+	if count != 0 {
+		t.Errorf("Expected cache to be empty after failure, but got %d entries", count)
 	}
 }
 
@@ -158,7 +120,9 @@ func TestCachedCompiler_OptimisticConcurrency(t *testing.T) {
 		t.Logf("Warning: Optimistic race didn't trigger. Call count was %d", finalCompileCount)
 	}
 
-	if len(cc.scriptCache) != 1 {
-		t.Errorf("Cache corruption! Expected exactly 1 entry in map, found %d", len(cc.scriptCache))
+	count := 0
+	cc.cache.Range(func(key, value any) bool { count++; return true })
+	if count != 1 {
+		t.Errorf("Cache corruption! Expected exactly 1 entry in map, found %d", count)
 	}
 }

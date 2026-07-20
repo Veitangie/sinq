@@ -41,6 +41,9 @@ func (w *worker) failAssert(ls *lua.LState) int {
 }
 
 func (w *worker) runEffectfulScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) error {
+	if token.Type == scenario.IncompleteToken {
+		return nil
+	}
 	return w.safeExecute(token, extract, filename, executionTimeout)
 }
 
@@ -324,12 +327,10 @@ func (w *worker) requestCompleted(response intermediate) (string, error) {
 }
 
 func (w *worker) setupScenarioEnvironment(ctx context.Context, env map[string]any) error {
-	if w.env.cfg.Safe || w.lc == nil {
-		if w.lc != nil {
-			w.lc.Close()
-		}
-		w.lc = luapi.NewLuaContext(timer.DefaultClock{}, w.env.cfg.Unrestricted, w.env.luaPath)
+	if w.lc != nil {
+		w.lc.Close()
 	}
+	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, w.env.cfg.Unrestricted, w.env.loader.load)
 
 	w.lc.SetContext(ctx)
 

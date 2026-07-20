@@ -1,3 +1,6 @@
+-- sinq - A concurrent integration testing tool
+-- Copyright (C) 2026 Veitangie
+-- SPDX-License-Identifier: GPL-3.0-or-later
 local condition, message = ...
 if type(message) == "nil" then message = "sinq.assert.isTrue: Assertion failed" end
 

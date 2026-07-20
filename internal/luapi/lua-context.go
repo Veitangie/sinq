@@ -33,7 +33,7 @@ type LuaContext struct {
 	ResponseTable     *lua.LTable
 }
 
-func NewLuaContext(clock timer.Clock, unrestricted bool, luaPath string) *LuaContext {
+func NewLuaContext(clock timer.Clock, unrestricted bool, loader lua.LGFunction) *LuaContext {
 	if clock == nil {
 		clock = timer.DefaultClock{}
 	}
@@ -41,7 +41,7 @@ func NewLuaContext(clock timer.Clock, unrestricted bool, luaPath string) *LuaCon
 	if unrestricted {
 		lc = LuaContext{LState: *lua.NewState()}
 	} else {
-		lc = LuaContext{LState: *lua.NewState(lua.Options{SkipOpenLibs: true})}
+		lc = LuaContext{LState: *lua.NewState(lua.Options{SkipOpenLibs: true, IncludeGoStackTrace: true})}
 		lua.OpenBase(&lc.LState)
 		lua.OpenChannel(&lc.LState)
 		lua.OpenCoroutine(&lc.LState)
@@ -55,7 +55,9 @@ func NewLuaContext(clock timer.Clock, unrestricted bool, luaPath string) *LuaCon
 	lc.clock = clock
 
 	if module, ok := lc.GetGlobal("package").(*lua.LTable); ok {
-		lc.SetField(module, "path", lua.LString(luaPath))
+		if loaders, ok := module.RawGetString("loaders").(*lua.LTable); ok {
+			loaders.RawSetInt(2, lc.NewFunction(loader))
+		}
 	}
 
 	lc.sandbox = lc.NewTable()
@@ -72,7 +74,6 @@ func NewLuaContext(clock timer.Clock, unrestricted bool, luaPath string) *LuaCon
 }
 
 func (lc *LuaContext) SetupScenarioEnvironment(setIdx lua.LGFunction, finishScenario lua.LGFunction, failAssert lua.LGFunction, secrets any, env any) {
-	lc.sandbox.ForEach(func(k, v lua.LValue) { lc.sandbox.RawSet(k, lua.LNil) })
 	lc.sandbox.RawSetString("_G", lc.sandbox)
 
 	lc.sinqTable = lc.NewTable()

@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type parserState int
@@ -361,8 +363,6 @@ func (p *Parser) parseLongFlag() {
 func (p *Parser) parseLongOnlyFlag() {
 	flag := p.getCurrent()
 	switch flag {
-	case "--safe":
-		p.result.Safe = true
 	case "--skip-tag":
 		tag, err := p.getNextValue("No tag passed for filtering by tag. Usage: --skip-tag my-tag")
 		if err != nil {
@@ -404,7 +404,41 @@ func (p *Parser) parseLongOnlyFlag() {
 			p.accumulateError(err)
 			return
 		}
-		p.result.LuaPaths = append(p.result.LuaPaths, strings.Split(path, ";")...)
+		p.result.LuaPaths = append(p.result.LuaPaths, filepath.SplitList(path)...)
+	case "--max-cache-size":
+		maybeSize, err := p.getNextValue("No value passed for maximum cache size. Usage --max-cache-size 50MB")
+		if err != nil {
+			p.accumulateError(err)
+			return
+		}
+
+		size, err := ParseSize(maybeSize)
+		if err != nil {
+			p.accumulateError(fmt.Errorf("--max-cache-size: %w", err))
+			return
+		}
+
+		p.result.MaxCacheSize = size
+
+	case "--cache-timeout":
+		maybeTimeout, err := p.getNextValue("No value passed for cache timeout. Usage --cache-timeout 60s")
+		if err != nil {
+			p.accumulateError(err)
+			return
+		}
+
+		timeout, err := time.ParseDuration(maybeTimeout)
+		if err != nil {
+			p.accumulateError(fmt.Errorf("--cache-timeout: %w", err))
+			return
+		}
+
+		if timeout.Seconds() < 0 {
+			p.accumulateError(errors.New("--cache-timeout: negative value"))
+			return
+		}
+
+		p.result.CacheTimeout = timeout
 	default:
 		p.accumulateError(fmt.Errorf("Unknown option: %s", flag))
 	}

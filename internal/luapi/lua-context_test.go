@@ -14,7 +14,7 @@ import (
 func dummyFunc(L *lua.LState) int { return 0 }
 
 func TestLuaContext_PreScript_Lifecycle(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
 	lc.SetupRequestEnvironment(0)
 
@@ -54,7 +54,7 @@ func TestLuaContext_PreScript_Lifecycle(t *testing.T) {
 }
 
 func TestBug_SaveToLeak(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
 	lc.SetupRequestEnvironment(0)
 
@@ -68,7 +68,7 @@ func TestBug_SaveToLeak(t *testing.T) {
 }
 
 func TestLuaContext_JSONParserEquality(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
@@ -85,7 +85,7 @@ func TestLuaContext_JSONParserEquality(t *testing.T) {
 }
 
 func TestLuaContext_RecordResponse(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
@@ -114,7 +114,7 @@ func TestLuaContext_RecordResponse(t *testing.T) {
 }
 
 func TestLuaContext_SetupScripts(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
@@ -139,7 +139,7 @@ func TestLuaContext_SetupScripts(t *testing.T) {
 }
 
 func TestLuaContext_RunSandboxed(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)

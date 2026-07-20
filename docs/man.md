@@ -50,7 +50,7 @@ Lifecycle scripts have reserved names, and are executed at different times durin
 
 `sinq` uses JSON-formatted `.scenario` files along the scenario path to manage environments, timeouts, and other configurations. When a leaf directory inherits a `.scenario` file from a parent, the configurations are deep merged (the only exclusion being the `env_matrix` and `tag` lists, which all get combined into flat lists), with the deeper (child) configuration taking precedence. Unmentioned default values are preserved. 
 
-Available keys include `name`, `description`, `env`, `req_timeout`, `script_timeout`, `timeout`, `fail_fast`, `max_retries`, `max_redirects`, `max_body_size`, `env_matrix` and `tags`. The `env` object is parsed into a global Lua table and can be accessed directly in any Lua script. `env_matrix` is accumulated from all the `.scenario` files in the scenario. Every entry should be a json object, every key being a label for a particular dataset, and the value for the key being another object. Then, treating every entry as a matrix or axis, `sinq` creates a Cartesian product of all of them, and the scenario is run multiple times for every unique resulting combination, the combinations being deep merged with the `env` data.
+Available keys include `name`, `description`, `env`, `req_timeout`, `script_timeout`, `timeout`, `fail_fast`, `max_retries`, `max_redirects`, `max_body`, `env_matrix` and `tags`. The `env` object is parsed into a global Lua table and can be accessed directly in any Lua script. `env_matrix` is accumulated from all the `.scenario` files in the scenario. Every entry should be a json object, every key being a label for a particular dataset, and the value for the key being another object. Then, treating every entry as a matrix or axis, `sinq` creates a Cartesian product of all of them, and the scenario is run multiple times for every unique resulting combination, the combinations being deep merged with the `env` data.
 
 ## OPTIONS
 
@@ -112,20 +112,24 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Do not execute scenarios which names match the regular expression
 
 **--plugins** *string*
-: Paths to lua plugin directory entries, joined with ';'
+: Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows
+
+**--max-cache-size** *string*
+: Global maximum response size for cached requests, default 5MB
+
+**--cache-timeout** *string*
+: Global timeout for the cached requests, default 10s
+
 
 **--dump-on-failure**
 : Print full request and response data on failed assertion
-
-**--safe**
-: Instantiate a new Lua VM per request instead of resetting state.
 
 ## ENVIRONMENTAL VARIABLES
 
 `sinq` reads the following environment variables:
 
 **SINQ_LUA_PATH**
-: Defines a list of directories that `sinq` will look for plugins in, joined with ';'. Is ignored if **--plugins** flag is used
+: Defines a list of directories that `sinq` will look for plugins in, joined with ':' on Linux and MacOS, ';' on Windows. Is ignored if **--plugins** flag is used
 
 **HTTP_PROXY**
 : Defines the proxy to use for http requests

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+
+	"github.com/Veitangie/sinq/internal/config"
 )
 
 type errorReader struct{}
@@ -304,26 +306,26 @@ func TestParseSize(t *testing.T) {
 		name       string
 		input      string
 		wantAmount uint64
-		wantUnit   DataUnit
+		wantUnit   config.DataUnit
 		wantErr    bool
 	}{
-		{"Bytes", "500 B", 500, Byte, false},
-		{"Bytes Without Space", "1024Byte", 1024, Byte, false},
-		{"Kilobytes", "2 K", 2048, KiByte, false},
-		{"Megabytes Decimals", "1.5 MiB", 1572864, MiByte, false},
-		{"Gigabytes", "10 G", 10737418240, GiByte, false},
-		{"Missing Unit Defaults to B", "256", 256, Byte, false},
-		{"Whitespace Heavy", "   42   KiByte  ", 43008, KiByte, false},
-		{"Empty String", "", 0, Byte, true},
-		{"Invalid Number", "abc MiB", 0, Byte, true},
-		{"Negative Number", "-10 M", 0, Byte, true},
-		{"Unknown Unit", "100 ZB", 0, Byte, true},
-		{"Multiple Decimals", "10.5.5 MiB", 0, Byte, true},
+		{"Bytes", "500 B", 500, config.Byte, false},
+		{"Bytes Without Space", "1024Byte", 1024, config.Byte, false},
+		{"Kilobytes", "2 K", 2048, config.KiByte, false},
+		{"Megabytes Decimals", "1.5 MiB", 1572864, config.MiByte, false},
+		{"Gigabytes", "10 G", 10737418240, config.GiByte, false},
+		{"Missing Unit Defaults to B", "256", 256, config.Byte, false},
+		{"Whitespace Heavy", "   42   KiByte  ", 43008, config.KiByte, false},
+		{"Empty String", "", 0, config.Byte, true},
+		{"Invalid Number", "abc MiB", 0, config.Byte, true},
+		{"Negative Number", "-10 M", 0, config.Byte, true},
+		{"Unknown Unit", "100 ZB", 0, config.Byte, true},
+		{"Multiple Decimals", "10.5.5 MiB", 0, config.Byte, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseSize(tt.input)
+			got, err := config.ParseSize(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseSize(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 				return
@@ -359,7 +361,7 @@ func TestParseConfig(t *testing.T) {
 		if cfg.FailFast != true {
 			t.Errorf("Expected FailFast true")
 		}
-		if cfg.MaxBodySize.ByteAmount != 5*uint64(MiByte) {
+		if cfg.MaxBodySize.ByteAmount != 5*uint64(config.MiByte) {
 			t.Errorf("Expected MaxBodySize to be parsed to 5 MiB, got %d bytes", cfg.MaxBodySize.ByteAmount)
 		}
 	})
@@ -393,13 +395,13 @@ func TestParseConfig(t *testing.T) {
 
 func TestDataSize_StringAndUnit(t *testing.T) {
 	tests := []struct {
-		size     DataSize
+		size     config.DataSize
 		expected string
 	}{
-		{DataSize{ByteAmount: 512, Unit: Byte}, "512.000000B"},
-		{DataSize{ByteAmount: 2048, Unit: KiByte}, "2.000000KiB"},
-		{DataSize{ByteAmount: 1572864, Unit: MiByte}, "1.500000MiB"},
-		{DataSize{ByteAmount: 10737418240, Unit: GiByte}, "10.000000GiB"},
+		{config.DataSize{ByteAmount: 512, Unit: config.Byte}, "512.000000B"},
+		{config.DataSize{ByteAmount: 2048, Unit: config.KiByte}, "2.000000KiB"},
+		{config.DataSize{ByteAmount: 1572864, Unit: config.MiByte}, "1.500000MiB"},
+		{config.DataSize{ByteAmount: 10737418240, Unit: config.GiByte}, "10.000000GiB"},
 	}
 
 	for _, tt := range tests {
@@ -409,7 +411,7 @@ func TestDataSize_StringAndUnit(t *testing.T) {
 		}
 	}
 
-	unmappedUnit := DataUnit(999)
+	unmappedUnit := config.DataUnit(999)
 	if unmappedUnit.String() != "" {
 		t.Errorf("Expected empty string for unknown unit, got %q", unmappedUnit.String())
 	}

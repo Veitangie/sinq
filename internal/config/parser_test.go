@@ -5,10 +5,12 @@ package config
 
 import (
 	"log/slog"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParser_Parse(t *testing.T) {
@@ -328,18 +330,8 @@ func TestParser_Parse(t *testing.T) {
 			wantErrs: 0,
 		},
 		{
-			name:  "Safe Long Flag",
-			flags: []string{"--safe"},
-			wantConfig: func() Config {
-				c := SaneDefaults()
-				c.Safe = true
-				return c
-			}(),
-			wantErrs: 0,
-		},
-		{
 			name:  "Plugins Flag",
-			flags: []string{"--plugins", "path/to/plugins;path/to/more"},
+			flags: []string{"--plugins", "path/to/plugins" + string(os.PathListSeparator) + "path/to/more"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
 				c.LuaPaths = []string{"path/to/plugins", "path/to/more"}
@@ -366,6 +358,56 @@ func TestParser_Parse(t *testing.T) {
 				return c
 			}(),
 			wantErrs: 0,
+		},
+		{
+			name:  "Max Cache Size",
+			flags: []string{"--max-cache-size", "10MB"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.MaxCacheSize = DataSize{ByteAmount: 10 * (1 << 20), Unit: MiByte}
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:       "Max Cache Size Invalid",
+			flags:      []string{"--max-cache-size", "invalid"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Max Cache Size Missing Value",
+			flags:      []string{"--max-cache-size"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:  "Cache Timeout",
+			flags: []string{"--cache-timeout", "5s"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.CacheTimeout = 5 * time.Second
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:       "Cache Timeout Invalid",
+			flags:      []string{"--cache-timeout", "invalid"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Cache Timeout Missing Value",
+			flags:      []string{"--cache-timeout"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
+		},
+		{
+			name:       "Cache Timeout Negative",
+			flags:      []string{"--cache-timeout", "-5s"},
+			wantConfig: SaneDefaults(),
+			wantErrs:   1,
 		},
 		{
 			name:       "Env Missing Value (Short)",

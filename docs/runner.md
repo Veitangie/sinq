@@ -20,10 +20,6 @@ This design choice was made to ensure that complex, multi-step workflows (like l
 
 Each concurrent worker gets its own Lua VM. Because the Treewalker branches the DAG at the directory level, if Leaf A and Leaf B both inherit `01_login.sinq`, they will each execute it independently.
 
-To achieve this, `sinq` uses a soft-reset mechanism. Instead of destroying and rebuilding the Lua `LState` for every scenario, the worker reuses the VM but provides a semi-sandboxed environment to the scripts that is reset across scenario boundaries. However, this semi-sandboxed environment still allows user code to persistently mutate global libraries. These mutations (for example of `table.insert`) **will** persist for all scenarios run on the worker. Any mutations of `sinq`, `env` and `secrets` tables are guaranteed to persist within the scenario but not carry over to any other scenario.
-
-*(If you suspect a core Lua library was mutated and leaked across scenarios, you can force a hard-reset of the VM on every request using the `--safe` flag).*
-
 ## Network & Session State
 
 While the workers operate independently, they share underlying resources to optimize performance:

@@ -11,7 +11,7 @@ import (
 )
 
 func TestJSONParser_Parse(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	defer lc.Close()
 
 	p := &lc.parser
@@ -304,7 +304,7 @@ func TestJSONParser_Parse(t *testing.T) {
 }
 
 func TestJSONSerializer_SerializeLValue(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	defer lc.Close()
 	ls := &lc.LState
 	mapToTable := func(m map[string]lua.LValue) *lua.LTable {
@@ -486,7 +486,7 @@ func TestJSONSerializer_SerializeLValue(t *testing.T) {
 }
 
 func TestSerializeToJSON(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	defer lc.Close()
 	ls := &lc.LState
 

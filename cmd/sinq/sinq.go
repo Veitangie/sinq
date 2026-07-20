@@ -32,16 +32,38 @@ import (
 
 const sinqLuaPath = "SINQ_LUA_PATH"
 
-func populateConfigInRuntime(cfg *config.Config) {
+func populateConfigInRuntime(cfg *config.Config) error {
 	if len(cfg.LuaPaths) == 0 {
 		if path, ok := os.LookupEnv(sinqLuaPath); ok {
-			cfg.LuaPaths = strings.Split(path, ";")
+			cfg.LuaPaths = filepath.SplitList(path)
 		}
 	}
 
-	if len(cfg.Paths) == 0 {
-		cfg.Paths = append(cfg.Paths, ".")
+	for idx := range cfg.LuaPaths {
+		abs, err := filepath.Abs(cfg.LuaPaths[idx])
+		if err != nil {
+			return err
+		}
+
+		cfg.LuaPaths[idx] = abs
 	}
+
+	for _, path := range cfg.Paths {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+
+		cfg.LuaPaths = append(cfg.LuaPaths, abs)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	cfg.LuaPaths = append(cfg.LuaPaths, wd)
+	return nil
 }
 
 func sinq(args []string) int {
@@ -74,7 +96,12 @@ func sinq(args []string) int {
 		return 0
 	}
 
-	populateConfigInRuntime(&cfg)
+	err := populateConfigInRuntime(&cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to enrich configuration in runtime: %s\n", err.Error())
+		fmt.Fprint(os.Stderr, "Will proceed without runtime configuration\n")
+		cfg.LuaPaths = []string{}
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	logger.Debug("[sinq] Initialization complete", "duration", mainTimer.Time())
@@ -94,7 +121,7 @@ func sinq(args []string) int {
 
 	allScenarios := []runner.ScenarioBundle{}
 	for _, path := range cfg.Paths {
-		fs, err := NewOSWorkspace(path)
+		fs, err := NewOSRootWorkspace(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to open filetree at %s: %s\n", path, err.Error())
 			continue
@@ -153,7 +180,7 @@ func sinq(args []string) int {
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
-	rn, err := runner.NewRunner(cfg, ctx, transport, *logger, nil)
+	rn, err := runner.NewRunner(cfg, ctx, transport, *logger, timer.DefaultClock{}, OSWorkspace{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to construct runner: %s\n", err.Error())
 		return 1
@@ -310,33 +337,34 @@ const helpSuffix = `Usage: sinq [flags] [directories...]
 A concurrent HTTP functional and integration testing tool.
 
 Flags:
-  -v, --version          Print the current sinq version and exit
-  -h, --help             Print this help message and exit
-  -w, --workers int      Number of concurrent workers (default 10)
-  -i, --insecure         Disable SSL/TLS certificate verification
-  -s, --secret string    Key=value pair overrides for scenario secrets
-  -e, --env string       Key=value pair overrides for all scenario environments
-  -o, --out path         Path to write the output file (prints to stdout if omitted)
-  -L, --log-level string Log level to use: debug, info, warn or error (default "warn")
-  -f, --format string    Output format: std or junit (default "std")
-  -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps, only affects "std" format)
-  -c, --color string     Terminal colors: always, never, auto (default "auto")
-  -S, --show string      Which results to show in the output: all, no-skip, failures (default "no-skip")
-  -l, --list             Parse and list scenarios at specified directories
-  -t, --tag string       Execute only scenarios that have the tag
-  -n, --name string      Execute only scenarios which names match the regular expression
-  -u, --unrestricted     Load lua "os" and "io" modules for scripts
-  --secrets-file string  Path to JSON-formatted secrets file
-  --skip-tag string      Do not execute scenarios that have the tag
-  --skip-name string     Do not execute scenarios which names match the regular expression
-  --plugins string       Paths to lua plugin directory entries, joined with ';'
-  --dump-on-failure      Print full request and response data on failed assertion
-  --safe                 Instantiate a new Lua VM per request instead of resetting state
+  -v, --version           Print the current sinq version and exit
+  -h, --help              Print this help message and exit
+  -w, --workers int       Number of concurrent workers (default 10)
+  -i, --insecure          Disable SSL/TLS certificate verification
+  -s, --secret string     Key=value pair overrides for scenario secrets
+  -e, --env string        Key=value pair overrides for all scenario environments
+  -o, --out path          Path to write the output file (prints to stdout if omitted)
+  -L, --log-level string  Log level to use: debug, info, warn or error (default "warn")
+  -f, --format string     Output format: std or junit (default "std")
+  -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
+  -c, --color string      Terminal colors: always, never, auto (default "auto")
+  -S, --show string       Which results to show in the output: all, no-skip, failures (default "no-skip")
+  -l, --list              Parse and list scenarios at specified directories
+  -t, --tag string        Execute only scenarios that have the tag
+  -n, --name string       Execute only scenarios which names match the regular expression
+  -u, --unrestricted      Load lua "os" and "io" modules for scripts
+  --secrets-file string   Path to JSON-formatted secrets file
+  --skip-tag string       Do not execute scenarios that have the tag
+  --skip-name string      Do not execute scenarios which names match the regular expression
+  --plugins string        Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows
+  --max-cache-size string Global maximum response size for cached requests, default 5MB
+  --cache-timeout string  Global timeout for the cached requests, default 10s
+  --dump-on-failure       Print full request and response data on failed assertion
 
 For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
 Or read the manual: man 1 sinq`
 
-const versionConstPart = `sinq v1.0.0-rc.9 - `
+const versionConstPart = `sinq v1.0.0-rc.11 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",
@@ -349,4 +377,5 @@ var sinqMeaning []string = []string{
 	"Stealth Interpreter, Normal Querier",
 	"[S]top searching for mean[inq]",
 	"[Sin]q is on Arch Linu[q]s",
+	"[S]leepless [ni]ghts in [Q]azaqstan",
 }

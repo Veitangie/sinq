@@ -7,7 +7,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"testing"
 
 	"github.com/Veitangie/sinq/internal/config"
@@ -25,12 +24,12 @@ func (r noopRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 func TestNewRunner_Validation(t *testing.T) {
 	cfg := config.SaneDefaults()
 
-	_, err := NewRunner(cfg, context.Background(), nil, *slog.Default(), nil)
+	_, err := NewRunner(cfg, context.Background(), nil, *slog.Default(), nil, nil)
 	if err == nil {
 		t.Error("Expected error when creating Runner with nil transport")
 	}
 
-	_, err = NewRunner(cfg, nil, noopRoundTripper{}, *slog.Default(), nil)
+	_, err = NewRunner(cfg, nil, noopRoundTripper{}, *slog.Default(), nil, nil)
 	if err == nil {
 		t.Error("Expected error when creating Runner with nil context")
 	}
@@ -43,7 +42,7 @@ func TestRunner_GoroutineLeakage(t *testing.T) {
 	cfg.Workers = 50
 
 	ctx, cancel := context.WithCancel(context.Background())
-	runner, _ := NewRunner(cfg, ctx, noopRoundTripper{}, *slog.Default(), nil)
+	runner, _ := NewRunner(cfg, ctx, noopRoundTripper{}, *slog.Default(), nil, &mockWorkspace{})
 
 	scenarios := make([]ScenarioBundle, 1000)
 	for i := range scenarios {
@@ -233,23 +232,4 @@ func TestRunner_StartDataSource_NoMatrix(t *testing.T) {
 	}
 }
 
-func TestRunner_GetLuaPath(t *testing.T) {
-	cfg := config.SaneDefaults()
-	cfg.LuaPaths = []string{"/custom/plugin/path", "./local/plugins"}
 
-	runner := &Runner{cfg: cfg}
-	got := runner.getLuaPath()
-
-	p1Base := "/custom/plugin/path"
-	p2Base := "local/plugins"
-
-	expectedCrossPlatform := "" +
-		filepath.Join(p1Base, "?.lua") + ";" +
-		filepath.Join(p1Base, "?", "init.lua") + ";" +
-		filepath.Join(p2Base, "?.lua") + ";" +
-		filepath.Join(p2Base, "?", "init.lua")
-
-	if got != expectedCrossPlatform {
-		t.Errorf("getLuaPath() = %q, want %q", got, expectedCrossPlatform)
-	}
-}

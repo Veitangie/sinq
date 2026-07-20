@@ -185,7 +185,7 @@ func TestWorker_SandboxLeak_GlobalG(t *testing.T) {
 func TestWorker_Unrestricted_FileAccess(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.env.cfg.Unrestricted = true
-	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, w.env.cfg.Unrestricted, "")
+	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, w.env.cfg.Unrestricted, nil)
 
 	err := w.lc.DoString(`
 		if type(os) ~= "table" then

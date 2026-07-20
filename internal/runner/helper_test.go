@@ -6,16 +6,18 @@ package runner
 import (
 	"bytes"
 	"context"
+	"hash/maphash"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
+	"github.com/Veitangie/sinq/internal/config"
 	"github.com/Veitangie/sinq/internal/timer"
-	lua "github.com/yuin/gopher-lua"
+	"golang.org/x/sync/singleflight"
 )
 
 type mockWorkspace struct {
@@ -39,6 +41,10 @@ func (m *mockWorkspace) Create(name string) (io.WriteCloser, error) {
 	return nopWriteCloser{buf}, nil
 }
 
+func (m *mockWorkspace) String() string {
+	return "test"
+}
+
 func setupTestWorker(t *testing.T, ctx context.Context) *worker {
 	t.Helper()
 
@@ -46,18 +52,20 @@ func setupTestWorker(t *testing.T, ctx context.Context) *worker {
 		ctx = context.Background()
 	}
 
-	sharedCache := make(map[scriptKey]*lua.FunctionProto)
-	sharedLock := &sync.RWMutex{}
-
 	env := workerEnv{
 		logger:    slog.Default(),
 		clock:     timer.DefaultClock{},
 		transport: http.DefaultTransport,
-		compiler: cachedCompiler{
-			scriptCacheLock: sharedLock,
-			scriptCache:     sharedCache,
-		},
+		compiler:  &cachedCompiler{hasherSeed: maphash.MakeSeed()},
 		workspace: &mockWorkspace{FS: fstest.MapFS{}},
+		cachedProcessor: &cachedRequestProcessor{
+			group:        singleflight.Group{},
+			ctx:          context.Background(),
+			transport:    http.DefaultTransport,
+			maxCacheSize: config.DataSize{ByteAmount: 1 << 20, Unit: config.MiByte},
+			cacheTimeout: 1 * time.Second,
+			logger:       slog.Default(),
+		},
 	}
 
 	w := &worker{

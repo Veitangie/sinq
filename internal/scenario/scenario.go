@@ -9,6 +9,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/Veitangie/sinq/internal/config"
 )
 
 type ScenarioBlueprint struct {
@@ -76,48 +78,15 @@ type ScenarioConfig struct {
 
 	Env map[string]any `json:"env"`
 
-	ReqTimeout    Duration `json:"req_timeout"`
-	ScriptTimeout Duration `json:"script_timeout"`
-	Timeout       Duration `json:"timeout"`
-	FailFast      bool     `json:"fail_fast"`
-	MaxRedirects  int      `json:"max_redirects"`
-	MaxRetries    int      `json:"max_retries"`
-	MaxBody       string   `json:"max_body"`
-	MaxBodySize   DataSize
+	ReqTimeout    Duration                    `json:"req_timeout"`
+	ScriptTimeout Duration                    `json:"script_timeout"`
+	Timeout       Duration                    `json:"timeout"`
+	FailFast      bool                        `json:"fail_fast"`
+	MaxRedirects  int                         `json:"max_redirects"`
+	MaxRetries    int                         `json:"max_retries"`
+	MaxBody       string                      `json:"max_body"`
+	MaxBodySize   config.DataSize             `json:"-"`
 	EnvMatrix     []map[string]map[string]any `json:"-"`
-}
-
-type DataSize struct {
-	ByteAmount uint64
-	Unit       DataUnit
-}
-
-func (d DataSize) String() string {
-	unitAmount := float64(d.ByteAmount) / float64(d.Unit)
-	return fmt.Sprintf("%f%v", unitAmount, d.Unit)
-}
-
-type DataUnit int
-
-const (
-	Byte   DataUnit = 1
-	KiByte DataUnit = 1 << 10
-	MiByte DataUnit = 1 << 20
-	GiByte DataUnit = 1 << 30
-)
-
-func (d DataUnit) String() string {
-	switch d {
-	case Byte:
-		return "B"
-	case KiByte:
-		return "KiB"
-	case MiByte:
-		return "MiB"
-	case GiByte:
-		return "GiB"
-	}
-	return ""
 }
 
 func (sc ScenarioConfig) String() string {
@@ -149,9 +118,9 @@ func SaneDefaultConfig() ScenarioConfig {
 		FailFast:      true,
 		MaxRedirects:  5,
 		MaxRetries:    10,
-		MaxBodySize: DataSize{
+		MaxBodySize: config.DataSize{
 			ByteAmount: 1 << 20,
-			Unit:       MiByte,
+			Unit:       config.MiByte,
 		},
 		EnvMatrix: make([]map[string]map[string]any, 0),
 	}

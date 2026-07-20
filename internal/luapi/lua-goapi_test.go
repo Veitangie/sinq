@@ -14,7 +14,7 @@ import (
 
 func TestExtractBodyJson(t *testing.T) {
 	t.Run("Success: Parses valid JSON and caches it", func(t *testing.T) {
-		lc := NewLuaContext(timer.DefaultClock{}, false, "")
+		lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 		ls := &lc.LState
 		defer ls.Close()
 
@@ -45,7 +45,7 @@ func TestExtractBodyJson(t *testing.T) {
 	})
 
 	t.Run("Success: Returns cached value immediately (Type Agnostic)", func(t *testing.T) {
-		lc := NewLuaContext(timer.DefaultClock{}, false, "")
+		lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 		ls := &lc.LState
 		defer ls.Close()
 
@@ -72,7 +72,7 @@ func TestExtractBodyJson(t *testing.T) {
 	})
 
 	t.Run("Failure: Invalid JSON returns nil and error", func(t *testing.T) {
-		lc := NewLuaContext(timer.DefaultClock{}, false, "")
+		lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 		ls := &lc.LState
 		defer ls.Close()
 
@@ -101,7 +101,7 @@ func TestExtractBodyJson(t *testing.T) {
 	})
 
 	t.Run("Failure: Missing bodyRaw", func(t *testing.T) {
-		lc := NewLuaContext(timer.DefaultClock{}, false, "")
+		lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 		ls := &lc.LState
 		defer ls.Close()
 
@@ -126,7 +126,7 @@ func TestExtractBodyJson(t *testing.T) {
 	})
 
 	t.Run("Failure: Upvalue is not a table", func(t *testing.T) {
-		lc := NewLuaContext(timer.DefaultClock{}, false, "")
+		lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 		ls := &lc.LState
 		defer ls.Close()
 
@@ -150,7 +150,7 @@ func TestExtractBodyJson(t *testing.T) {
 }
 
 func TestToLuaValue(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	ls := &lc.LState
 	defer ls.Close()
 
@@ -254,7 +254,7 @@ func TestToLuaValue(t *testing.T) {
 }
 
 func TestExtractBodyJsonUnsafe(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	ls := &lc.LState
 	defer ls.Close()
 
@@ -290,7 +290,7 @@ func TestExtractBodyJsonUnsafe(t *testing.T) {
 }
 
 func TestFromLuaValue(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, "")
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
 	ls := &lc.LState
 	defer ls.Close()
 

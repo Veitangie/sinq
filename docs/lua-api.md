@@ -88,11 +88,9 @@ Executes before the HTTP request is materialized. Used for file I/O operations.
 * **`req.attach(filepath)`**: Replaces the request body with the contents of the specified file. *Note: Fails if a textual body is already defined in the `.sinq` file.*
 * **`req.saveResponseTo(filepath)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
 * **`req.cache(bool?)`**: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo). The parameter defaults to `true` if omitted.
-* **`req.skip(bool?)`**: If `true` (default), marks the request to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
+* **`req.skip(bool?)`**: Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
 
 > *Both of the file functions expect the path to be relative to the current file. Passing in an absolute path will fail*
-
-> **Stupid Stuff**: Due to the caching being based on go's `singleflight` package, there exists at least one edge case that I'm aware of that can break tests. If multiple scenarios get to the cached request at the same time, and the scenario with the lowest timeout picks up the request, it's possible that it times out, and every other scenario will fail with a timeout error despite having time. To prevent this, make sure all the scenarios that have cached requests in their path have roughly the same timeouts, or disable caching dynamically for the scenarios with significantly different timeouts.
 
 ### `$RETRY` (Polling Phase)
 Executes after receiving a response. The script **must** return a number indicating how many milliseconds to wait before retrying, or a negative number to stop.
@@ -144,7 +142,7 @@ When an HTTP request completes, `sinq` parses the response and injects it into t
 ### Response Object Structure
 * `attempt` *(number)*: The current execution attempt (useful during `$RETRY`).
 * `code` *(number)*: The HTTP status code (e.g., `200`, `404`).
-* `oversized` *(boolean | nil)*: `true` if the payload exceeded the scenario's `max_body_size` limit and was safely truncated.
+* `oversized` *(boolean | nil)*: `true` if the payload exceeded the scenario's `max_body` limit and was safely truncated.
 
 ### Body Access Methods
 *Note: These are only available if `req.saveResponseTo()` was NOT used in the `$PRE` hook.*
@@ -350,9 +348,6 @@ The `sinq.fake` table exposes deterministic fake data generators. All generators
 
 `sinq` does not load two of common core Lua libraries - `io` and `os` by default. This is done in order to prevent `.sinq` scripts from becoming a safety concern when ran without due diligence. To enable these libraries in Lua scripts use `--unrestricted` flag, and only run trusted scripts with this flag.
 
-`sinq` allows users to import external Lua packages. For them to be accessible via the `require("package")` calls, path to the directory containing the files for the package should be passed to `sinq` via the environment variable `SINQ_LUA_PATH` or via the `--plugins` flag. If both present, the flag takes precedence. The path is expected to consist of plain paths to the directories joined with `;`. Several `--plugins` flags can be passed on startup, which will result in an aggregated list of all paths within them.
+`sinq` allows users to import external Lua packages. For them to be accessible via the `require("package")` calls, path to the directory containing the files for the package should be passed to `sinq` via the environment variable `SINQ_LUA_PATH` or via the `--plugins` flag. If both present, the flag takes precedence. The path is expected to consist of plain paths to the directories joined with `:` on Linux and MacOS, `;` on Windows. Several `--plugins` flags can be passed on startup, which will result in an aggregated list of all paths within them.
 
-### State Isolation
-By default, `sinq` reuses the Lua `LState` to maximize performance. Do not mutate core Lua functions (e.g., overwriting `table.insert` or `string.sub`) or imported package data.
-
-If a test suite requires core or external library mutation, you must run `sinq` with the `--safe` (`-s`) flag to force a hard VM reset on every request. Also, you should probably reconsider if whatever you're doing **really** requires core library mutation. **Note, that passing modified state between scenarios via library mutation is considered UB, and may change in any future release**
+> Note: All paths passed to `sinq` as positional arguments and the current working directory also get appended to the end of path for the purposes of searching for Lua plugins. So if you run `sinq` from a directory containing a file `my-module.lua`, `require("my-module")` will work for all `.sinq` files.

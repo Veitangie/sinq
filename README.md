@@ -103,6 +103,23 @@ brew install Veitangie/tap/sinq
 </details>
 
 <details>
+<summary><strong>🪟 Windows</strong></summary>
+
+Pre-compiled `.zip` archives are generated for every release.
+
+1. Go to the [Releases page](https://github.com/Veitangie/sinq/releases) and find the latest version.
+2. Download the `.zip` file for your architecture (`amd64` or `arm64`).
+3. Extract `sinq.exe` and add the containing folder to your system `$PATH`.
+
+> **Using Scoop?**
+> If you use the [Scoop](https://scoop.sh/) package manager, you can install and stay updated automatically:
+> ```powershell
+> scoop bucket add veitangie https://github.com/Veitangie/scoop-bucket
+> scoop install sinq
+> ```
+</details>
+
+<details>
 <summary><strong>🐧 Debian / Ubuntu (.deb)</strong></summary>
 
 Pre-compiled `.deb` packages are generated for every release.
@@ -224,7 +241,7 @@ steps:
   - name: Run Sinq Integration Tests
     uses: Veitangie/sinq-action@v1
     with:
-      args: '-w 10 -S path/to/secrets.json tests/e2e'
+      args: '-w 10 --secrets-file path/to/secrets.json tests/e2e'
 ```
 </details>
 
@@ -298,8 +315,8 @@ There are two categories of scripts within a `.sinq` file:
 * **`$PRE` (Setup & File I/O):** Executes immediately when a worker picks up the request, before it is materialized. This is the **only** scope where you can modify the filesystem interactions for the request. Current request body payload is inaccessible here.
     * `req.attach("path/file.txt")` — Replaces the request body with the contents of a file. (Fails if a body is already defined in the request).
     * `req.saveResponseTo("path/download.bin")` — Streams the incoming response body directly to disk, bypassing the Lua memory buffer.
-    * `req.cache(bool?)` — If `true` (default), the request will be cached in memory to prevent repeated network calls with the same data. **Filenames passed to `attach` and `saveResponseTo` are also considered request data.**
-    * `req.skip(bool?)` — If `true` (default), marks the request to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` without throwing a failure.
+    * `req.cache(bool?)` — Opts-in to client-side request caching. Parameter defaults to `true` if omitted. The cache is based on the data sent over the wire and any attached filenames.
+    * `req.skip(bool?)` — Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` without throwing a failure.
 
 * **`$RETRY` (Retry Policies):** Executes immediately after receiving the HTTP response. **This is the only lifecycle script that must return a value.** It must return a Lua number representing milliseconds to wait before retrying, or a negative number to stop retrying.
     * Scope-Exclusive API: `sinq.retry.when()`, `sinq.retry.whenExponential()`, `sinq.retry.withJitter()`.
@@ -373,16 +390,16 @@ Default configuration that can be overridden in `.scenario` files:
 {
   "name": "path/to/dir/of/last/file",
   "description": "",
-  "env": { },
+  "env": {},
   "req_timeout": "5s",
   "script_timeout": "5s",
   "timeout": "10m",
   "fail_fast": true,
   "max_retries": 10,
   "max_redirects": 5,
-  "max_body_size": "1MiB",
+  "max_body": "1MiB",
   "env_matrix": [],
-  "tags": [],
+  "tags": []
 }
 ```
 
@@ -409,19 +426,6 @@ To reduce the risk of accidental exposure, some error messages intentionally omi
 
 ---
 
-## Lua Sandboxing & Performance
-
-By default, `sinq` prioritizes performance by reusing and resetting Lua Virtual Machines (`LState`) between scenarios instead of destroying and recreating them from scratch. While intentional global variables (like `AUTH_TOKEN`) are passed safely through scenario request chains and discarded at the end of every scenario, mutating core Lua libraries can theoretically pollute the VM worker for the next scenario that picks it up.
-
-**The `--safe` Flag:**
-If you suspect state leakage across concurrent scenarios is causing flaky tests, use the `--safe` flag. This forces `sinq` to instantiate a brand new Lua VM for every single request. It guarantees isolation but incurs a performance and memory allocation penalty.
-
-**How to avoid needing `--safe`:**
-1. **Scope your variables:** Use `local myVar = ...` for temporary data. Only assign to global variables (or `_G`) when you explicitly need to pass data to the next `.sinq` file in the scenario chain.
-2. **Never mutate standard libraries:** Do not overwrite core Lua functions (e.g., `table.insert = ...`).
-
----
-
 ## Usage
 
 Point `sinq` at a directory containing your `.sinq` files. `sinq` will automatically sort them in natural order, bundle them into scenarios and execute them concurrently.
@@ -440,28 +444,29 @@ sinq -iV ./tests/local
 ### Options
 
 ```text
-  -v, --version          Print the current sinq version and exit
-  -h, --help             Print this help message and exit
-  -w, --workers int      Number of concurrent workers (default 10)
-  -i, --insecure         Disable SSL/TLS certificate verification
-  -s, --secret string    Key=value pair overrides for scenario secrets
-  -e, --env string       Key=value pair overrides for all scenario environments
-  -o, --out path         Path to write the output file (prints to stdout if omitted)
-  -L, --log-level string Log level to use: debug, info, warn or error (default "warn")
-  -f, --format string    Output format: std or junit (default "std")
-  -V, --verbose          Enable verbose reporting (reports each stage duration and timestamps, only affects "std" format)
-  -c, --color string     Terminal colors: always, never, auto (default "auto")
-  -S, --show string      Which results to show in the output: all, no-skip, failures (default "no-skip")
-  -l, --list             Parse and list scenarios at specified directories
-  -t, --tag string       Execute only scenarios that have the tag
-  -n, --name string      Execute only scenarios which names match the regular expression
-  -u, --unrestricted     Load lua "os" and "io" modules for scripts
-  --secrets-file string  Path to JSON-formatted secrets file
-  --skip-tag string      Do not execute scenarios that have the tag
-  --skip-name string     Do not execute scenarios which names match the regular expression
-  --plugins string       Paths to lua plugin directory entries, joined with ';'
-  --dump-on-failure      Print full request and response data on failed assertion
-  --safe                 Instantiate a new Lua VM per request instead of resetting state
+  -v, --version           Print the current sinq version and exit
+  -h, --help              Print this help message and exit
+  -w, --workers int       Number of concurrent workers (default 10)
+  -i, --insecure          Disable SSL/TLS certificate verification
+  -s, --secret string     Key=value pair overrides for scenario secrets
+  -e, --env string        Key=value pair overrides for all scenario environments
+  -o, --out path          Path to write the output file (prints to stdout if omitted)
+  -L, --log-level string  Log level to use: debug, info, warn or error (default "warn")
+  -f, --format string     Output format: std or junit (default "std")
+  -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
+  -c, --color string      Terminal colors: always, never, auto (default "auto")
+  -S, --show string       Which results to show in the output: all, no-skip, failures (default "no-skip")
+  -l, --list              Parse and list scenarios at specified directories
+  -t, --tag string        Execute only scenarios that have the tag
+  -n, --name string       Execute only scenarios which names match the regular expression
+  -u, --unrestricted      Load lua "os" and "io" modules for scripts
+  --secrets-file string   Path to JSON-formatted secrets file
+  --skip-tag string       Do not execute scenarios that have the tag
+  --skip-name string      Do not execute scenarios which names match the regular expression
+  --plugins string        Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows
+  --max-cache-size string Global maximum response size for cached requests, default 5MB
+  --cache-timeout string  Global timeout for the cached requests, default 10s
+  --dump-on-failure       Print full request and response data on failed assertion
 ```
 
 ---
