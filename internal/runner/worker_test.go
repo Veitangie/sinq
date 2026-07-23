@@ -4,6 +4,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"strings"
@@ -213,5 +214,56 @@ func TestWorker_Restricted_NoFileAccess(t *testing.T) {
 	`)
 	if err != nil {
 		t.Fatalf("Restricted mode failed: %v", err)
+	}
+}
+
+type mockRoundTripper struct{}
+
+func (r mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: 200}, nil
+}
+
+func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
+	w := setupTestWorker(t, nil)
+	w.env.transport = mockRoundTripper{}
+
+	skipBP, err := scenario.ParseRequestBlueprint(bytes.NewBufferString("$PRE{\n  req.skip()\n}\n\nGET http://localhost/ HTTP/1.1\r\n\r\n"), "skip.sinq")
+	if err != nil {
+		t.Fatalf("Failed to parse skip request: %v", err)
+	}
+
+	failBP, err := scenario.ParseRequestBlueprint(bytes.NewBufferString("GET http://localhost/ HTTP/1.1\r\n\r\n$ASSERT{\n  sinq.assert.fail(\"assertion failed\")\n}\n"), "fail.sinq")
+	if err != nil {
+		t.Fatalf("Failed to parse fail request: %v", err)
+	}
+
+	bundle := taskBundle{
+		ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config: &scenario.ScenarioConfig{
+				Name:          "SkipThenFailScenario",
+				ReqTimeout:    scenario.Duration{Duration: 1 * time.Second},
+				ScriptTimeout: scenario.Duration{Duration: 1 * time.Second},
+			},
+			Requests: []*scenario.RequestBlueprint{skipBP, failBP},
+		},
+		workspace: &mockWorkspace{},
+		env:       map[string]any{"base_url": "http://localhost"},
+		labels:    []string{},
+	}
+	
+	resCh := make(chan ScenarioResult, 1)
+	errorCh := make(chan error, 1)
+	w.resCh = resCh
+	w.errorCh = errorCh
+
+	w.processScenario(context.Background(), bundle)
+
+	select {
+	case res := <-resCh:
+		if res.Status != Failure {
+			t.Errorf("Expected scenario status to be Failure, got %v: %+v", res.Status, res.RequestResults)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Worker did not return a result")
 	}
 }

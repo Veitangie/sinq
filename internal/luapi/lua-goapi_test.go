@@ -297,24 +297,36 @@ func TestFromLuaValue(t *testing.T) {
 	tests := []struct {
 		name  string
 		input lua.LValue
-		check func(*testing.T, any)
+		check func(*testing.T, any, error)
 	}{
-		{"Nil", lua.LNil, func(t *testing.T, val any) {
+		{"Nil", lua.LNil, func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if val != nil {
 				t.Errorf("expected nil, got %v", val)
 			}
 		}},
-		{"Bool", lua.LBool(true), func(t *testing.T, val any) {
+		{"Bool", lua.LBool(true), func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if val != true {
 				t.Errorf("expected true, got %v", val)
 			}
 		}},
-		{"Number", lua.LNumber(42.5), func(t *testing.T, val any) {
+		{"Number", lua.LNumber(42.5), func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if val != 42.5 {
 				t.Errorf("expected 42.5, got %v", val)
 			}
 		}},
-		{"String", lua.LString("hello"), func(t *testing.T, val any) {
+		{"String", lua.LString("hello"), func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if val != "hello" {
 				t.Errorf("expected 'hello', got %v", val)
 			}
@@ -324,7 +336,10 @@ func TestFromLuaValue(t *testing.T) {
 			tbl.RawSetInt(1, lua.LString("a"))
 			tbl.RawSetInt(2, lua.LNumber(1))
 			return tbl
-		}(), func(t *testing.T, val any) {
+		}(), func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			arr, ok := val.([]any)
 			if !ok {
 				t.Fatalf("expected []any, got %T", val)
@@ -337,7 +352,10 @@ func TestFromLuaValue(t *testing.T) {
 			tbl := ls.NewTable()
 			tbl.RawSetString("key", lua.LString("value"))
 			return tbl
-		}(), func(t *testing.T, val any) {
+		}(), func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			m, ok := val.(map[string]any)
 			if !ok {
 				t.Fatalf("expected map[string]any, got %T", val)
@@ -350,7 +368,10 @@ func TestFromLuaValue(t *testing.T) {
 			ud := ls.NewUserData()
 			ud.Value = struct{ A int }{1}
 			return ud
-		}(), func(t *testing.T, val any) {
+		}(), func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			s, ok := val.(struct{ A int })
 			if !ok || s.A != 1 {
 				t.Errorf("userdata mismatched, got %v", val)
@@ -360,24 +381,26 @@ func TestFromLuaValue(t *testing.T) {
 			tbl := ls.NewTable()
 			tbl.RawSetString("self", tbl)
 			return tbl
-		}(), func(t *testing.T, val any) {
-			m, ok := val.(map[string]any)
-			if !ok {
-				t.Fatalf("expected map[string]any, got %T", val)
+		}(), func(t *testing.T, val any, err error) {
+			if err == nil {
+				t.Fatalf("expected error on cycle reference, got nil")
 			}
-			if m["self"] != nil {
-				t.Errorf("expected cycle reference to be dropped (nil), got %v", m["self"])
+			if !strings.Contains(err.Error(), "Illegal cyclic reference") {
+				t.Errorf("unexpected error message: %v", err)
 			}
 		}},
 		{"DAG Support (No false cycles)", func() lua.LValue {
 			child := ls.NewTable()
 			child.RawSetString("key", lua.LString("val"))
-			
+
 			parent := ls.NewTable()
 			parent.RawSetInt(1, child)
 			parent.RawSetInt(2, child)
 			return parent
-		}(), func(t *testing.T, val any) {
+		}(), func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			arr, ok := val.([]any)
 			if !ok || len(arr) != 2 {
 				t.Fatalf("expected []any of len 2, got %v", val)
@@ -388,12 +411,75 @@ func TestFromLuaValue(t *testing.T) {
 				t.Errorf("DAG references were incorrectly dropped or malformed: %v", arr)
 			}
 		}},
+		{"Mixed Table", func() lua.LValue {
+			tbl := ls.NewTable()
+			tbl.RawSetInt(1, lua.LString("a"))
+			tbl.RawSetString("key", lua.LString("value"))
+			return tbl
+		}(), func(t *testing.T, val any, err error) {
+			if err == nil {
+				t.Fatalf("expected error on mixed table, got nil")
+			}
+			if !strings.Contains(err.Error(), "Table containing both array and key-value entries") {
+				t.Errorf("unexpected error message: %v", err)
+			}
+		}},
+		{"Unknown Key Type", func() lua.LValue {
+			tbl := ls.NewTable()
+			tbl.RawSet(lua.LBool(true), lua.LString("value"))
+			return tbl
+		}(), func(t *testing.T, val any, err error) {
+			if err == nil {
+				t.Fatalf("expected error on unknown key type, got nil")
+			}
+			if !strings.Contains(err.Error(), "Key of unknown type") {
+				t.Errorf("unexpected error message: %v", err)
+			}
+		}},
+		{"Nested Error in Array", func() lua.LValue {
+			tbl := ls.NewTable()
+			inner := ls.NewTable()
+			inner.RawSet(lua.LBool(true), lua.LString("invalid"))
+			tbl.RawSetInt(1, inner)
+			return tbl
+		}(), func(t *testing.T, val any, err error) {
+			if err == nil {
+				t.Fatalf("expected error on nested error in array, got nil")
+			}
+		}},
+		{"Nested Error in Map", func() lua.LValue {
+			tbl := ls.NewTable()
+			inner := ls.NewTable()
+			inner.RawSetString("self", inner)
+			tbl.RawSetString("key", inner)
+			return tbl
+		}(), func(t *testing.T, val any, err error) {
+			if err == nil {
+				t.Fatalf("expected error on nested error in map, got nil")
+			}
+		}},
+		{"Unhandled Type", ls.NewFunction(func(ls *lua.LState) int { return 0 }), func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if val != nil {
+				t.Errorf("expected nil for unhandled type, got %v", val)
+			}
+		}},
+		{"JSON Null", newJSONNull(ls), func(t *testing.T, val any, err error) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if val != nil {
+				t.Errorf("expected nil for JSON null, got %v", val)
+			}
+		}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := FromLuaValue(tt.input, make(map[*lua.LTable]bool))
-			tt.check(t, res)
+			res, err := FromLuaValue(tt.input, make(map[*lua.LTable]bool))
+			tt.check(t, res, err)
 		})
 	}
 }

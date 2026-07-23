@@ -19,8 +19,6 @@ var domains []string = []string{
 	"gmail.com", "icloud.com", "aol.com", "mail.com", "yandex.com", "gmx.com", "zoho.com",
 }
 
-const roughly5Years = 1000*60*60*24*365*5 + 2
-
 var usernames []string = []string{"shadow", "hunter", "coolguy", "ninja", "sniper", "wizard", "gamer", "pro", "master", "king", "queen", "lord", "lady", "knight", "dragon", "slayer", "phantom", "ghost", "spirit", "soul", "legend", "hero", "villain", "boss", "champ", "star", "fire", "ice", "storm", "thunder", "wolf", "tiger", "lion", "bear", "hawk", "eagle", "falcon", "raven", "crow", "snake"}
 var firstNames []string = []string{"James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda", "David", "Elizabeth", "William", "Barbara", "Richard", "Susan", "Joseph", "Jessica", "Thomas", "Sarah", "Charles", "Karen", "Christopher", "Lisa", "Daniel", "Nancy", "Matthew", "Betty", "Anthony", "Margaret", "Mark", "Sandra", "Donald", "Ashley", "Steven", "Kimberly", "Paul", "Emily", "Andrew", "Donna", "Joshua", "Michelle", "Kenneth", "Carol", "Kevin", "Amanda", "Brian", "Melissa", "George", "Deborah", "Timothy", "Stephanie"}
 var lastNames []string = []string{"Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzales", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson", "White", "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker", "Young", "Allen", "King", "Wright", "Scott", "Torres", "Nguyen", "Hill", "Flores", "Green", "Adams", "Nelson", "Baker", "Hall", "Rivera", "Campbell", "Mitchell", "Carter", "Roberts"}
@@ -201,8 +199,9 @@ func (lc *LuaContext) FakeUserAgent(ls *lua.LState) int {
 }
 
 func (lc *LuaContext) FakeTime(ls *lua.LState) int {
-	n := ls.CheckInt64(1)
-	ls.Push(lua.LNumber(float64(lc.randomInt64(n-roughly5Years, n))))
+	from := ls.CheckInt64(1)
+	to := ls.OptInt64(2, lc.clock.Now().UnixMilli())
+	ls.Push(lua.LNumber(float64(lc.randomInt64(from, to))))
 	return 1
 }
 

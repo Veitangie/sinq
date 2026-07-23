@@ -109,7 +109,7 @@ Pre-compiled `.zip` archives are generated for every release.
 
 1. Go to the [Releases page](https://github.com/Veitangie/sinq/releases) and find the latest version.
 2. Download the `.zip` file for your architecture (`amd64` or `arm64`).
-3. Extract `sinq.exe` and add the containing folder to your system `$PATH`.
+3. Extract `sinq.exe` and add the containing folder to your system `%PATH%`.
 
 > **Using Scoop?**
 > If you use the [Scoop](https://scoop.sh/) package manager, you can install and stay updated automatically:
@@ -322,7 +322,7 @@ There are two categories of scripts within a `.sinq` file:
     * Scope-Exclusive API: `sinq.retry.when()`, `sinq.retry.whenExponential()`, `sinq.retry.withJitter()`.
 
 * **`$ASSERT` (Validation):** Executes after the retry loop completes. Used to fail tests.
-    * Scope-Exclusive API: `sinq.assert.code()`, `sinq.assert.equals()`, `sinq.assert.contains()`, `sinq.assert.isTrue()`, `sinq.assert.fail()`.
+    * Scope-Exclusive API: `sinq.assert.code()`, `sinq.assert.equals()`, `sinq.assert.contains()`, `sinq.assert.isTrue()`, `sinq.assert.fileMatches()`, `sinq.assert.fail()`.
 
 * **`$POST` (State Extraction):** Executes after assertions. Used to extract data from the response and save it to the global sandbox for subsequent requests. **It will not execute if `$ASSERT` calls `sinq.assert.fail` and the scenario setting `fail_fast` is true.**
 

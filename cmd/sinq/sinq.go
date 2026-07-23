@@ -364,7 +364,7 @@ Flags:
 For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
 Or read the manual: man 1 sinq`
 
-const versionConstPart = `sinq v1.0.0-rc.11 - `
+const versionConstPart = `sinq v1.0.0-rc.12 - `
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",
@@ -378,4 +378,5 @@ var sinqMeaning []string = []string{
 	"[S]top searching for mean[inq]",
 	"[Sin]q is on Arch Linu[q]s",
 	"[S]leepless [ni]ghts in [Q]azaqstan",
+	"[S]cenario-based [i]nstantiator of [n]on-deterministic se[q]uences",
 }

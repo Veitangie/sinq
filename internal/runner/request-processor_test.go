@@ -4,6 +4,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"hash/maphash"
 
 	"github.com/Veitangie/sinq/internal/config"
@@ -844,5 +846,44 @@ func TestRequestProcessor_CachedRequest_CookiesAndFastPath(t *testing.T) {
 	cookies2 := jar.Cookies(processor2.httpRequest.URL)
 	if len(cookies2) != 2 {
 		t.Errorf("Expected 2 cookies from cache, got %d", len(cookies2))
+	}
+}
+
+func TestCachedRequestProcessor_UsesBody(t *testing.T) {
+	var receivedBody string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL, nil)
+
+	processor := &cachedRequestProcessor{
+		group:        singleflight.Group{},
+		ctx:          context.Background(),
+		transport:    http.DefaultTransport,
+		maxCacheSize: config.DataSize{ByteAmount: 1024, Unit: config.MiByte},
+		cacheTimeout: 5 * time.Second,
+		logger:       setupTestWorker(t, nil).env.logger,
+	}
+
+	getBody := func(ws Workspace) func() (io.ReadCloser, error) {
+		return func() (io.ReadCloser, error) {
+			return io.NopCloser(io.Reader(bytes.NewBufferString("test body"))), nil
+		}
+	}
+
+	resCh := processor.process("some-hash", *req, "", getBody, nil)
+	res := <-resCh
+	if res.Err != nil {
+		t.Fatalf("processor.process failed: %v", res.Err)
+	}
+
+	if receivedBody != "test body" {
+		t.Errorf("Expected body 'test body', got '%s'", receivedBody)
 	}
 }

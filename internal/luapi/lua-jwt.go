@@ -147,7 +147,14 @@ func SignJWT(ls *lua.LState) int {
 		return 2
 	}
 
-	mapClaims, ok := FromLuaValue(source, make(map[*lua.LTable]bool)).(map[string]any)
+	claimsAny, err := FromLuaValue(source, make(map[*lua.LTable]bool))
+	if err != nil {
+		ls.Push(lua.LNil)
+		ls.Push(lua.LString(fmt.Sprintf("Failed to serialize value: %s", err.Error())))
+		return 2
+	}
+
+	mapClaims, ok := claimsAny.(map[string]any)
 	if !ok {
 		ls.Push(lua.LNil)
 		ls.Push(lua.LString("Failed to parse claims, make sure you use only string keys for all tables, and do not mix lists with tables"))

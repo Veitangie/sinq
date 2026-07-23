@@ -7,7 +7,7 @@
 1. **Discovery:** Starting at the target root, the engine finds all `.scenario` and `.sinq` files.
 2. **Sorting:** Files within the same directory are sorted in **natural alphanumeric order**. This means `2_request.sinq` will correctly execute before `10_finalize.sinq`.
 3. **Descent & Inheritance:** The engine recursively descends into subdirectories. Child directories *inherit and append* the sorted `.scenario` and `.sinq` files from their parents.
-4. **Leaf Compilation:** Once the engine reaches a directory containing **at least one** `.sinq` file but **no subdirectories**, it compiles the accumulated path into an executable **Scenario**.
+4. **Leaf Compilation:** Once the engine reaches a directory containing **at least one** `.sinq` or `.scenario` file but **no subdirectories**, it compiles the accumulated path into an executable **Scenario**.
 
 *Note: Sibling leaf directories are completely isolated. `sinq` will spin up separate workers to execute them concurrently.*
 

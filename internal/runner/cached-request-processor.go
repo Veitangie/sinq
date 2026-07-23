@@ -66,17 +66,22 @@ func (sp *cachedRequestProcessor) process(
 		}
 
 		sp.logger.Debug("[Runner] Running cached http request for the first time", "host", request.URL.Host, "path", request.URL.Path)
+		request.GetBody = getBody(workspace)
+		body, err := getBody(workspace)()
+		if err != nil {
+			sp.logger.Debug("[Runner] Failed to open request body", "error", err)
+			return intermediate{}, err
+		}
 
+		request.Body = body
 		betterContext, cancel := context.WithTimeout(sp.ctx, sp.cacheTimeout)
 		defer cancel()
 		betterRequest := request.WithContext(betterContext)
-		betterRequest.GetBody = getBody(workspace)
 
 		resp, err := client.Do(betterRequest)
 		if err != nil {
 			return intermediate{}, err
 		}
-		defer resp.Body.Close()
 
 		res, err := makeIntermediate(workspace, filenameTo, int64(sp.maxCacheSize.ByteAmount), resp)
 		sp.cache.Store(hash, cachedResult[intermediate]{res: res, err: err})
@@ -87,6 +92,7 @@ func (sp *cachedRequestProcessor) process(
 }
 
 func makeIntermediate(workspace Workspace, filenameTo string, maxBodySize int64, response *http.Response) (intermediate, error) {
+	defer response.Body.Close()
 	result := intermediate{
 		statusCode: response.StatusCode,
 		status:     response.Status,

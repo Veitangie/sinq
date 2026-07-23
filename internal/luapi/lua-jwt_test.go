@@ -4,7 +4,9 @@
 package luapi
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	lua "github.com/yuin/gopher-lua"
@@ -241,5 +243,50 @@ func TestJWT_MethodResolvers(t *testing.T) {
 	_, errPriv := privateKeyFromMethod(invalidKey, "unknown")
 	if errPriv == nil {
 		t.Errorf("expected error for unknown private key method")
+	}
+}
+
+func TestSignJWT_CyclicTableBug(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	claims := L.NewTable()
+	claims.RawSetString("sub", lua.LString("1234567890"))
+	claims.RawSetString("self", claims)
+
+	L.Push(L.NewFunction(SignJWT))
+	L.Push(claims)
+	L.Push(lua.LString("secret"))
+	L.Push(lua.LString("hs256"))
+
+	done := make(chan struct{})
+	var panicVal any
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicVal = r
+			}
+			close(done)
+		}()
+		L.PCall(3, 2, nil)
+	}()
+
+	select {
+	case <-done:
+		if panicVal != nil {
+			t.Fatalf("SignJWT panicked: %v", panicVal)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SignJWT hung (infinite loop) due to cyclic table")
+	}
+
+	errRes := L.Get(-1)
+	valRes := L.Get(-2)
+	L.Pop(2)
+
+	if errRes == lua.LNil {
+		t.Errorf("Expected error from SignJWT on cyclic table, got nil. Value: %v", valRes)
+	} else if !strings.Contains(errRes.String(), "Failed to serialize") && !strings.Contains(errRes.String(), "Illegal cyclic") {
+		t.Errorf("Expected specific serialization error, got: %v", errRes)
 	}
 }

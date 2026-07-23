@@ -14,7 +14,7 @@ sinq - The Spanish Inquisition
 
 ## CONCEPTS
 ### Scenarios and Treewalker
-The basic unit of execution for `sinq` is a scenario. `sinq` uses a directory-traversal engine called the Treewalker to treat your physical filesystem as a Directed Acyclic Graph (DAG). It recursively descends into subdirectories, inheriting and appending sorted `.scenario` and `.sinq` files from parent directories. Once it reaches a leaf directory (a directory containing at least one `.sinq` file but no subdirectories), it compiles the path into an executable scenario.
+The basic unit of execution for `sinq` is a scenario. `sinq` uses a directory-traversal engine called the Treewalker to treat your physical filesystem as a Directed Acyclic Graph (DAG). It recursively descends into subdirectories, inheriting and appending sorted `.scenario` and `.sinq` files from parent directories. Once it reaches a leaf directory (a directory containing at least one `.sinq` or `.scenario` file but no subdirectories), it compiles the path into an executable scenario.
 
 ### Concurrency
 In `sinq`, the absolute unit of concurrency is the Scenario, not the Request. Requests within each scenario are strictly guaranteed to execute sequentially, while multiple scenarios execute simultaneously in a worker pool.
@@ -228,8 +228,8 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **sinq.fake.int(min?, max?)**, **sinq.fake.float(min?, max?)**, **sinq.fake.shakespeare()**
 : Fake generators for primitives (int, float, boolean).
 
-**sinq.fake.timestamp(timeMs)**
-: Returns a UNIX timestamp (integer milliseconds) based on offset.
+**sinq.fake.timestamp(fromMs, toMs?)**
+: Generate a random UNIX timestamp between `fromMs` and `toMs` (`toMs` defaults to current time if omitted).
 
 **sinq.fake.oneOf(array)**
 : Returns a random element from the provided array.

@@ -14,45 +14,77 @@ import (
 
 const ISO8601FormatMs = "2006-01-02T15:04:05.000Z07:00"
 
-func FromLuaValue(value lua.LValue, visited map[*lua.LTable]bool) any {
+func FromLuaValue(value lua.LValue, visited map[*lua.LTable]bool) (any, error) {
 	switch typedValue := value.(type) {
 	case *lua.LNilType:
-		return nil
+		return nil, nil
 	case lua.LBool:
-		return bool(typedValue)
+		return bool(typedValue), nil
 	case lua.LNumber:
-		return float64(typedValue)
+		return float64(typedValue), nil
 	case lua.LString:
-		return string(typedValue)
+		return string(typedValue), nil
 	case *lua.LTable:
 		if visited[typedValue] {
-			return nil
+			return nil, errors.New("Illegal cyclic reference")
 		}
 		visited[typedValue] = true
 		defer delete(visited, typedValue)
 
 		if size := typedValue.Len(); size > 0 {
 			res := make([]any, 0, size)
+			var err error
 			typedValue.ForEach(func(key, value lua.LValue) {
-				if len(res) == size {
+				if err != nil {
 					return
 				}
-				res = append(res, FromLuaValue(value, visited))
+
+				if keyTyped, ok := key.(lua.LNumber); ok {
+					var entry any
+					entry, err = FromLuaValue(value, visited)
+					if err != nil {
+						err = fmt.Errorf("%d %w", int(keyTyped), err)
+						return
+					}
+					res = append(res, entry)
+					return
+				}
+
+				err = errors.New("Table containing both array and key-value entries")
 			})
-			return res
+
+			return res, err
 		}
 
 		res := make(map[string]any)
+		var err error
 		typedValue.ForEach(func(key, value lua.LValue) {
-			if stringKey, ok := key.(lua.LString); ok {
-				res[string(stringKey)] = FromLuaValue(value, visited)
+			if err != nil {
+				return
 			}
+
+			if stringKey, ok := key.(lua.LString); ok {
+				var entry any
+				entry, err = FromLuaValue(value, visited)
+				if err != nil {
+					err = fmt.Errorf("%s %w", stringKey, err)
+					return
+				}
+				res[string(stringKey)] = entry
+				return
+			}
+
+			err = fmt.Errorf("Key of unknown type: %s", key.Type().String())
 		})
-		return res
+
+		return res, err
 	case *lua.LUserData:
-		return typedValue.Value
+		if isJSONNull(typedValue) {
+			return nil, nil
+		}
+		return typedValue.Value, nil
 	}
-	return nil
+	return nil, nil
 }
 
 func ToLuaValue(value any, ls *lua.LState) lua.LValue {

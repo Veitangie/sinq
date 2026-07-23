@@ -178,6 +178,7 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 	if len(w.assertionFailures) > 0 {
 		result.Status = Failure
 		result.FailedAssertions = w.assertionFailures
+		*status = Failure
 		w.assertionFailures = make([]string, 0)
 
 		if scenarioBp.Config.FailFast {
@@ -281,9 +282,6 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 			w.env.logger.Debug("[Runner] Request failed", w.loggingContextWithErr(ctx, err)...)
 		}
 		shouldContinue = shouldContinue && w.requestIdx < len(bundle.Requests)
-		if status == Success && (currentResult.Status == Failure || currentResult.Status == Aborted) {
-			status = currentResult.Status
-		}
 	}
 
 	result.Status = status

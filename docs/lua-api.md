@@ -288,7 +288,7 @@ Allows for generation, decoding, and validation of JSON Web Tokens natively with
   * `key`: The signing key string.
   * `method?`: The signing algorithm. Defaults to `HS256`. 
   > **Note:** The `claimsTable` must have strictly string keys. Mixing list-style (integer) indices with string keys in Lua will cause parsing to fail and return an error. Asymmetric algorithms require PEM-encoded private keys.
-  > **Warning:** Passing a cyclic table as the `claimsTable` results in Undefined Behavior (UB). Currently, recursive references are safely dropped during conversion, but this behavior is not guaranteed and may change in future versions.
+  > **Warning:** Passing a cyclic table as the `claimsTable` will result in a serialization error being returned as a second return value (`nil, "Failed to serialize..."`). It is safe and will not crash the runner, but the token will not be generated.
 
 ---
 
@@ -336,7 +336,7 @@ The `sinq.fake` table exposes deterministic fake data generators. All generators
 
 
 #### Time & Configuration
-* **`sinq.fake.timestamp(timeMs)`**: Returns a UNIX timestamp (integer milliseconds) before the given timestamp.
+* **`sinq.fake.timestamp(fromMs, toMs?)`**: Returns a random UNIX timestamp (integer milliseconds) between `fromMs` and `toMs`. If `toMs` is omitted, it defaults to the current time.
 * **`sinq.fake.setSeed(int64)`**: Seeds the fake data generator to ensure deterministic output across runs.
 
 #### Additional Randomness
@@ -346,7 +346,7 @@ The `sinq.fake` table exposes deterministic fake data generators. All generators
 
 ## 12. Libraries
 
-`sinq` does not load two of common core Lua libraries - `io` and `os` by default. This is done in order to prevent `.sinq` scripts from becoming a safety concern when ran without due diligence. To enable these libraries in Lua scripts use `--unrestricted` flag, and only run trusted scripts with this flag.
+`sinq` does not load two of common core Lua libraries - `io` and `os` by default. This is done in order to prevent `.sinq` scripts from becoming a safety concern when run without due diligence. To enable these libraries in Lua scripts use `--unrestricted` flag, and only run trusted scripts with this flag.
 
 `sinq` allows users to import external Lua packages. For them to be accessible via the `require("package")` calls, path to the directory containing the files for the package should be passed to `sinq` via the environment variable `SINQ_LUA_PATH` or via the `--plugins` flag. If both present, the flag takes precedence. The path is expected to consist of plain paths to the directories joined with `:` on Linux and MacOS, `;` on Windows. Several `--plugins` flags can be passed on startup, which will result in an aggregated list of all paths within them.
 

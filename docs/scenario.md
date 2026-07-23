@@ -57,9 +57,9 @@ Default configuration that can be overridden in `.scenario` files:
   "fail_fast": true,
   "max_retries": 10,
   "max_redirects": 5,
-  "max_body_size": "1MiB",
-  "env_matrix": { },
-  "tags": [],
+  "max_body": "1MiB",
+  "env_matrix": [],
+  "tags": []
 }
 ```
 
@@ -69,10 +69,10 @@ Default configuration that can be overridden in `.scenario` files:
 * **`req_timeout`**: Timeout for any single request in the scenario.
 * **`script_timeout`**: Timeout for any single script run in the scenario.
 * **`timeout`**: Total timeout for the whole scenario.
-* **`fail_fast`**: When true, scenarios will not be ran if any of them fails to compile for some reason, and the scenarios stop at the first failed assertion.
+* **`fail_fast`**: When true, scenarios will not be run if any of them fails to compile for some reason, and the scenarios stop at the first failed assertion.
 * **`max_retries`**: The maximum amount of times any request in the scenario can be retried upon retry script returning a valid non-negative number.
 * **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
-* **`max_body_size`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
+* **`max_body`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
 * **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](env-matrix.md).
 * **`tags`**: Tags or labels assigned to scenarios containing this `.scenario` file. They get collected into one list for the resulting scenario.
 

@@ -33,7 +33,7 @@ When a worker encounters a Lua script block (like a `$PRE` or `$ASSERT` block), 
 
 To prevent 100 workers from simultaneously compiling the exact same `01_login.sinq` script, the Runner maintains a thread-safe, globally shared AST cache. The cache key is bound to the physical byte-offset of the script in the `.sinq` file.
 
-Furthermore, if multiple concurrent workers attempt to process the exact same request file simultaneously, `sinq` can use a `singleflight` mechanism. This is **opt-in per request** by calling `req.cache(true)` in the request's `$PRE` block. When enabled, the first worker performs the parsing and execution, while all other waiting workers pause and receive the cached result instantly when the first worker finishes, preventing the thundering herd problem.
+Furthermore, `sinq` can cache the actual HTTP responses to avoid re-executing identical requests. This is **opt-in per request** by calling `req.cache(true)` in the request's `$PRE` block. When enabled, `sinq` behaves both as a concurrent singleflight coalescer and a global response cache across all workers. If multiple workers attempt the exact same request simultaneously, the first worker executes it while the others pause and receive the result instantly. The response is then cached for the duration specified by `--cache-timeout` (default 5s) up to a maximum response body size of `--max-cache-size`, meaning subsequent workers executing that scenario later will also skip the network call and receive the cached response. **Note that the request cache itself is unbounded and has no eviction policy. It will store all uniquely cached requests indefinitely until the test suite finishes.**
 
 ## Context Cancellation & Graceful Degradation
 

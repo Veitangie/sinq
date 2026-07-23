@@ -22,7 +22,7 @@ The `env_matrix` property in a `.scenario` file takes an array of objects. Each 
 }
 ```
 
-During the Treewalker aggregation phase, `sinq` gathers all of these arrays into a single flat array of objects. Then the runner dispatches the resulting scenario combined with every possible combination of environments from these objects (taking one environment from every object - they don't combine within one). These combinations are then deep merged with the static `env` for this particular run. The example above yields 4 distinct data sets that are sent to the worker pool:
+During the Treewalker aggregation phase, `sinq` gathers all of these arrays into a single flat array of objects. Then the runner dispatches the resulting scenario combined with every possible combination of environments from these objects (creating a Cartesian product by picking exactly one key-value pair from each axis object). These combinations are then deep merged with the static `env` for this particular run. The example above yields 4 distinct data sets that are sent to the worker pool:
 
 1.  **`admin_card`**: `role`="admin", `auth_token`="sys-jwt-999", `method`="card", `expected_status`=200
 2.  **`admin_crypto`**: `role`="admin", `auth_token`="sys-jwt-999", `method`="crypto", `expected_status`=202
