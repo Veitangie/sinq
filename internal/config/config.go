@@ -83,7 +83,7 @@ type WhatShow int
 const (
 	All WhatShow = iota
 	NoSkip
-	Failures
+	Failed
 )
 
 type ReporterConfig struct {

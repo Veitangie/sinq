@@ -211,6 +211,19 @@ func TestParseRequestBlueprint(t *testing.T) {
 			checkValidHTTP: true,
 		},
 		{
+			name: "String: Escaped Newline",
+			input: `$PRE{
+			msg = "This string spans \
+two lines, and ignores }"
+		}GET /`,
+			wantPre: `
+			msg = "This string spans \
+two lines, and ignores }"
+		`,
+			wantContent:    "GET /",
+			checkValidHTTP: true,
+		},
+		{
 			name: "Comment: Long Bracket inside Short Comment",
 			input: `$PRE{
 			-- We can write [[ brackets }]] here without consequence }

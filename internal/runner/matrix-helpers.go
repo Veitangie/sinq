@@ -45,6 +45,10 @@ func deepMerge(mut, immut map[string]any) {
 			} else {
 				mut[k] = deepCopy(val)
 			}
+		case []any:
+			sliceCopy := make([]any, len(val))
+			copy(sliceCopy, val)
+			mut[k] = sliceCopy
 		default:
 			mut[k] = v
 		}

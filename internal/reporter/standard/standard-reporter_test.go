@@ -149,7 +149,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 		},
 		{
 			name: "Show Failures filters Success and Skipped",
-			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.Failures},
+			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.Failed},
 			results: []runner.ScenarioResult{
 				{
 					Name:   "Skipped Scenario",

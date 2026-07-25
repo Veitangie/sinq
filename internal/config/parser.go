@@ -125,7 +125,7 @@ func (p *Parser) parseShortFlag() {
 			case 'u':
 				p.result.Unrestricted = true
 			default:
-				p.accumulateError(fmt.Errorf("Unknown boolean flag: %c", b))
+				p.accumulateError(fmt.Errorf("Unknown boolean flag: %c. See 'sinq --help'", b))
 			}
 		}
 		return
@@ -192,7 +192,7 @@ func (p *Parser) parseShortFlag() {
 
 		p.result.NamesInclude = append(p.result.NamesInclude, *nameRegex)
 	default:
-		p.accumulateError(fmt.Errorf("Unknown short flag: %c", flag[1]))
+		p.accumulateError(fmt.Errorf("Unknown short flag: %c. See 'sinq --help'", flag[1]))
 	}
 }
 
@@ -256,7 +256,7 @@ func (p *Parser) parseOutFormat() {
 			hack = true
 		}
 
-		p.accumulateError(fmt.Errorf("Unknown output format: %s. Known options: %s", format, sb.String()))
+		p.accumulateError(fmt.Errorf("Unknown output format: %s, expected one of: %s", format, sb.String()))
 	} else {
 		p.result.Format = format
 	}
@@ -296,7 +296,7 @@ func (p *Parser) parseColorOption() {
 	case "auto":
 		p.result.Reporter.Color = Auto
 	default:
-		p.accumulateError(fmt.Errorf("Unknown color option: %s", value))
+		p.accumulateError(fmt.Errorf("Unknown color option: %s, expected one of: never, auto, always", value))
 	}
 }
 
@@ -317,7 +317,7 @@ func (p *Parser) parseLogLevel() {
 	case "error":
 		p.result.LogLevel = slog.LevelError
 	default:
-		p.accumulateError(fmt.Errorf("Unknown log level: %s", value))
+		p.accumulateError(fmt.Errorf("Unknown log level: %s, expected one of: debug, info, warn, error", value))
 	}
 }
 
@@ -333,10 +333,10 @@ func (p *Parser) parseShow() {
 		p.result.Reporter.Show = All
 	case "no-skip":
 		p.result.Reporter.Show = NoSkip
-	case "failures":
-		p.result.Reporter.Show = Failures
+	case "failed":
+		p.result.Reporter.Show = Failed
 	default:
-		p.accumulateError(fmt.Errorf("Unknown show option: %s", value))
+		p.accumulateError(fmt.Errorf("Unknown show option: %s, expected one of: all, no-skip, failed", value))
 	}
 }
 
@@ -406,7 +406,7 @@ func (p *Parser) parseLongOnlyFlag() {
 		}
 		p.result.LuaPaths = append(p.result.LuaPaths, filepath.SplitList(path)...)
 	case "--max-cache-size":
-		maybeSize, err := p.getNextValue("No value passed for maximum cache size. Usage --max-cache-size 50MB")
+		maybeSize, err := p.getNextValue("No value passed for maximum cache size. Usage: --max-cache-size 50MB")
 		if err != nil {
 			p.accumulateError(err)
 			return
@@ -421,7 +421,7 @@ func (p *Parser) parseLongOnlyFlag() {
 		p.result.MaxCacheSize = size
 
 	case "--cache-timeout":
-		maybeTimeout, err := p.getNextValue("No value passed for cache timeout. Usage --cache-timeout 60s")
+		maybeTimeout, err := p.getNextValue("No value passed for cache timeout. Usage: --cache-timeout 60s")
 		if err != nil {
 			p.accumulateError(err)
 			return
@@ -440,7 +440,7 @@ func (p *Parser) parseLongOnlyFlag() {
 
 		p.result.CacheTimeout = timeout
 	default:
-		p.accumulateError(fmt.Errorf("Unknown option: %s", flag))
+		p.accumulateError(fmt.Errorf("Unknown long flag: %s. See 'sinq --help'", flag))
 	}
 }
 

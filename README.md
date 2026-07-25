@@ -1,5 +1,6 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Coverage](https://codecov.io/github/Veitangie/sinq/graph/badge.svg?token=MVHIV761LR)](https://codecov.io/github/Veitangie/sinq)
+[![CodeFactor](https://www.codefactor.io/repository/github/veitangie/sinq/badge)](https://www.codefactor.io/repository/github/veitangie/sinq)
 [![Code Quality](https://app.codacy.com/project/badge/Grade/bd32a7efb2b444f78e55cd2f351c613c)](https://app.codacy.com/gh/Veitangie/sinq/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 ![Pipeline Status](https://github.com/Veitangie/sinq/actions/workflows/ci.yml/badge.svg)
 ![Release Version](https://img.shields.io/github/v/release/Veitangie/sinq?include_prereleases&logo=github)
@@ -20,7 +21,6 @@ Write requests as near-raw HTTP, add Lua where logic is needed, and organize fil
 * [Lua API](#lua-api)
 * [Configuration & Environment](#configuration--environment)
 * [Secrets & Security](#secrets--security)
-* [Lua Sandboxing & Performance](#lua-sandboxing--performance)
 * [Usage](#usage)
 * [When To Choose Sinq](#when-to-choose-sinq)
 * [Useful Links](#useful-links)
@@ -90,16 +90,22 @@ Choose your preferred installation method below to get started.
 <details>
 <summary><strong>🍺 Homebrew (macOS & Linux)</strong></summary>
 
-The easiest way to install and stay updated on macOS or Linux is via the official Homebrew tap.
+Available via the official Homebrew tap. You can choose to build from source (avoids macOS Gatekeeper warnings) or install the pre-compiled binary.
 
+**Option 1: Build from Source (Recommended for macOS)**
+Builds natively on your machine. This automatically bypasses Apple's Gatekeeper "unverified developer" blocks.
 ```bash
 brew install Veitangie/tap/sinq
 ```
 
-> For MacOS Users: Due to Apple's policies, you will need to turn off the quarantine flag for the installed binary:
-> ```bash
-> xattr -d com.apple.quarantine $(which sinq)
-> ```
+**Option 2: Pre-compiled Binary (Cask)**
+Installs instantly, but macOS users will need to manually remove the quarantine flag due to Gatekeeper policies.
+```bash
+brew install --cask Veitangie/tap/sinq-bin
+
+# macOS only: Remove quarantine flag
+xattr -d com.apple.quarantine $(which sinq)
+```
 </details>
 
 <details>
@@ -167,19 +173,21 @@ inputs.sinq.url = "github:Veitangie/sinq-nix";
 <details>
 <summary><strong>📦 Arch Linux (AUR)</strong></summary>
 
-Available via the Arch User Repository as `sinq-bin`. You can use an AUR helper like `yay` or `paru`:
+Available via the Arch User Repository. You can build from source (`sinq`) or install the pre-compiled binary (`sinq-bin`).
 
+Using an AUR helper like `yay` or `paru`:
 ```bash
+# Build from source natively
+yay -S sinq
+
+# Or install the pre-compiled binary instantly
 yay -S sinq-bin
-# or
-paru -S sinq-bin
 ```
 
-Or, you can build and install it manually:
-
+Or, you can build and install manually:
 ```bash
-git clone https://aur.archlinux.org/sinq-bin.git
-cd sinq-bin
+git clone https://aur.archlinux.org/sinq.git
+cd sinq
 makepkg -si
 ```
 </details>
@@ -334,7 +342,7 @@ There are two categories of scripts within a `.sinq` file:
 
 ### Globals & Control Flow
 * `env` — Table of environment variables configured for the scenario.
-* `secrets` — Table of secrets passed via the `-S` argument.
+* `secrets` — Table of secrets passed via the `-s, --secrets, --secrets-file` arguments.
 * `sinq.setNextRequest(index)` — Change execution flow to the n-th request (1-indexed). Allows loops or skipping requests.
 * `sinq.finishScenario()` — Change execution flow to end after the current request.
 * `res` — Shorthand for current request's response table
@@ -412,7 +420,7 @@ Default configuration that can be overridden in `.scenario` files:
 * **`fail_fast`**: When true, scenarios will not be ran if any of them fails to compile for some reason, and the scenarios stop at the first failed assertion.
 * **`max_retries`**: The maximum amount of times any request in the scenario can be retried upon retry script returning a valid non-negative number.
 * **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
-* **`max_body_size`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
+* **`max_body`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
 * **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](docs/env-matrix.md).
 * **`tags`**: Tags or labels assigned to scenarios containing this `.scenario` file. They get collected into one list for the resulting scenario.
 
@@ -455,7 +463,7 @@ sinq -iV ./tests/local
   -f, --format string     Output format: std or junit (default "std")
   -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
   -c, --color string      Terminal colors: always, never, auto (default "auto")
-  -S, --show string       Which results to show in the output: all, no-skip, failures (default "no-skip")
+  -S, --show string       Which results to show in the output: all, no-skip, failed (default "no-skip")
   -l, --list              Parse and list scenarios at specified directories
   -t, --tag string        Execute only scenarios that have the tag
   -n, --name string       Execute only scenarios which names match the regular expression

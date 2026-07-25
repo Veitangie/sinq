@@ -352,7 +352,7 @@ func (p *parser) parseLuaSimpleString() error {
 			return p.scriptError(fmt.Sprintf("Unclosed string literal at pos %d:%d, expecting %c", startLine, startOffset, quote))
 		}
 
-		if b == '\n' {
+		if b == '\n' && !isEscaped {
 			return p.scriptError(fmt.Sprintf("Unclosed string literal at pos %d:%d, expecting %c", startLine, startOffset, quote))
 		}
 		p.advance()

@@ -88,7 +88,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Terminal colors: always, never, auto (default "auto").
 
 **-S**, **--show** *string*
-: Which results to show in the output: all, no-skip, failures (default "no-skip")
+: Which results to show in the output: all, no-skip, failed (default "no-skip")
 
 **-l**, **--list**
 : Parse and list scenarios at specified directories.
@@ -273,7 +273,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **sinq.assert.code(expected, message?)**
 : Fail if HTTP status code does not match.
 
-**sinq.assert.equals(actual, expected, message?)**
+**sinq.assert.equals(actual, expected)**
 : Fail if values are not strictly equal.
 
 **sinq.assert.contains(str, substring, message?)**

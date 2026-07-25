@@ -118,3 +118,29 @@ func TestConfig_ShouldInclude(t *testing.T) {
 		})
 	}
 }
+
+func TestDataSizeString(t *testing.T) {
+	ds := DataSize{ByteAmount: 1024, Unit: KiByte}
+	if ds.String() != "1.000000KiB" {
+		t.Errorf("expected 1.000000KiB, got %s", ds.String())
+	}
+}
+
+func TestDataUnitString(t *testing.T) {
+	tests := []struct {
+		unit DataUnit
+		want string
+	}{
+		{Byte, "B"},
+		{KiByte, "KiB"},
+		{MiByte, "MiB"},
+		{GiByte, "GiB"},
+		{DataUnit(0), ""},
+	}
+
+	for _, tt := range tests {
+		if got := tt.unit.String(); got != tt.want {
+			t.Errorf("DataUnit(%d).String() = %v, want %v", tt.unit, got, tt.want)
+		}
+	}
+}

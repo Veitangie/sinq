@@ -4,14 +4,6 @@ on:
   push:
     branches: [ "main" ]
     tags: [ "v*" ]
-    paths:
-      - 'cmd/**'
-      - 'examples/**'
-      - 'internal/**'
-      - 'test-all'
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ "**" ]
     paths:
@@ -22,6 +14,9 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/ci.yml'
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -50,6 +45,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.txt
 
   release:
     name: Build, Pack & Publish
@@ -119,3 +115,129 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*_checksums.txt
+
+  update-aur:
+    name: Update AUR (Source Package)
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    permissions:
+      contents: read
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm git openssh pacman-contrib
+
+      - name: Setup SSH
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+          cat <<EOF > ~/.ssh/config
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+          EOF
+          
+          mkdir -p /root/.ssh
+          cp -r ~/.ssh/* /root/.ssh/
+
+      - name: Clone AUR Repo
+        run: git clone ssh://aur@aur.archlinux.org/sinq.git aur-repo
+
+      - name: Update PKGBUILD
+        run: |
+          cd aur-repo
+          
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          PKGVER=$(echo "${TAG_NAME#v}" | tr '-' '_')
+          
+          sed -i "s/^_tag=.*/_tag=$TAG_NAME/" PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$PKGVER/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+
+      - name: Update Checksums and SRCINFO
+        run: |
+          cd aur-repo
+          git config --global --add safe.directory '*'
+          useradd -m builder
+          chown -R builder:builder .
+          su builder -c "updpkgsums"
+          su builder -c "makepkg --printsrcinfo > .SRCINFO"
+          chown -R root:root .
+
+      - name: Commit and Push
+        run: |
+          cd aur-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update to $GITHUB_REF_NAME"
+            git push
+          fi
+
+  update-brew:
+    name: Update Homebrew (Source Formula)
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Clone Homebrew Tap
+        uses: actions/checkout@v6
+        with:
+          repository: Veitangie/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Formula
+        run: |
+          cd homebrew-tap
+          mkdir -p Formula
+          
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          TARBALL_URL="https://github.com/Veitangie/sinq/archive/refs/tags/${TAG_NAME}.tar.gz"
+          
+          SHA256=$(curl -fSL "$TARBALL_URL" | sha256sum | awk '{print $1}')
+          
+          cat <<EOF > Formula/sinq.rb
+          class Sinq < Formula
+            desc "A concurrent HTTP functional and integration testing tool."
+            homepage "https://github.com/Veitangie/sinq"
+            url "$TARBALL_URL"
+            sha256 "$SHA256"
+            license "GPL-3.0-only"
+
+            depends_on "go" => :build
+            depends_on "go-md2man" => :build
+
+            def install
+              system "go", "build", "-trimpath", "-ldflags", "-s -w -X 'main.versionConstPart=sinq ${GITHUB_REF_NAME} - '", "-o", bin/"sinq", "./cmd/sinq"
+              system "go-md2man", "-in", "docs/man.md", "-out", "sinq.1"
+              man1.install "sinq.1"
+            end
+          end
+          EOF
+
+      - name: Commit and Push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/sinq.rb
+          
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Brew formula update for sinq version $GITHUB_REF_NAME"
+            git push
+          fi

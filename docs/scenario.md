@@ -12,7 +12,7 @@ When a worker picks up a scenario, it executes the requests sequentially. For a 
 2. **Materialization (Interpolation):** The engine scans the raw HTTP text and evaluates all general and unnamed scripts (e.g., `${env.HOST}`). The output of these scripts is injected directly into the raw text byte stream.
 3. **HTTP Parsing:** The fully materialized byte stream is parsed into a standard Go `http.Request`.
 4. **Execution (Send):** The HTTP request is sent over the network. The response is captured and parsed into `sinq.responses`.
-5. **`$RETRY` Loop:** If a `$RETRY` block exists, it executes. If it returns a number greater than 0, the worker sleeps for that many milliseconds and then jumps back to Step 4. If it returns 0 or less, the loop breaks.
+5. **`$RETRY` Loop:** If a `$RETRY` block exists, it executes. If it returns a number greater or equal to 0, the worker sleeps for that many milliseconds (or does not sleep for 0) and then jumps back to Step 4. If it returns less than 0, the loop breaks.
 6. **`$ASSERT` Execution:** The `$ASSERT` block evaluates the final response. If you call `sinq.assert.fail("reason")`, the test fails.
 7. **`$POST` Execution:** The `$POST` block executes. *If the `$ASSERT` block failed the test and the scenario's `fail_fast` configuration is `true`, this step is skipped.*
 

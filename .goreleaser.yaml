@@ -11,6 +11,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      - -X "main.versionConstPart=sinq {{.Tag}} - "
     goos:
       - linux
       - windows
@@ -49,7 +50,8 @@ nfpms:
           mode: 0644
 
 homebrew_casks:
-  - repository:
+  - name: sinq-bin
+    repository:
       owner: Veitangie
       name: homebrew-tap
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
@@ -69,6 +71,11 @@ aurs:
     license: GPL-3.0
     private_key: '{{ .Env.AUR_SSH_KEY }}'
     git_url: 'ssh://aur@aur.archlinux.org/sinq-bin.git'
+    provides:
+      - sinq
+    conflicts:
+      - sinq
+      - sinq-git
     package: |-
       install -Dm755 sinq "${pkgdir}/usr/bin/sinq"
       install -Dm644 sinq.1 "${pkgdir}/usr/share/man/man1/sinq.1"
@@ -99,7 +106,7 @@ scoops:
   - name: sinq
     homepage: https://github.com/Veitangie/sinq
     description: A concurrent HTTP functional and integration testing tool.
-    license: gpl3Only
+    license: GPL-3.0-only
     goamd64: v3
     repository:
       owner: Veitangie

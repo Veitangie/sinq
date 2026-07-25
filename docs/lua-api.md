@@ -97,14 +97,14 @@ Executes after receiving a response. The script **must** return a number indicat
 
 * **`sinq.retry.stop`**: A constant (`-1`) indicating the retry loop should break immediately.
 * **`sinq.retry.when(condition, delay?)`**
-  * Retries if `condition` is true. `delay` defaults to `1000ms`.
+  * Retries if `condition` is true. `delay` defaults to `500ms`.
 * **`sinq.retry.whenExponential(condition, base?, constant?)`**
   * Retries if `condition` is true, using exponential backoff (`base ^ attempt * constant`).
   * `base` defaults to `2` (Max `10`). `constant` defaults to `500ms`.
 * **`sinq.retry.withJitter(condition, range?, delegate?, delegate_args...)`**
   * Adds randomized jitter to a retry calculation to prevent thundering herd problems.
   * `range` defaults to `50` (±50ms jitter). `delegate` defaults to `sinq.retry.when`, delegate will be passed condition and delegate_args when called.
-  * Usage is: `sinq.retry.withJitter(res.code ~= 200, 100, sinq.retry.when, 2 * sinq.second)` - jitter conditional retry with range of [-200:200]
+  * Usage is: `sinq.retry.withJitter(res.code ~= 200, 100, sinq.retry.when, 2 * sinq.second)` - jitter conditional retry with range of [-100:100]
 
 ### `$ASSERT` (Validation Phase)
 Executes after the retry loop finishes. Used to validate the final state of the response.
@@ -123,7 +123,7 @@ Executes after the retry loop finishes. Used to validate the final state of the 
   }
   ```
 * **`sinq.assert.code(expectedHttpCode, message?)`**: Fails if the actual status code does not match.
-* **`sinq.assert.equals(actual, expected, message?)`**: Fails if `actual` does not strictly equal `expected`. Recursively compares nested tables.
+* **`sinq.assert.equals(actual, expected)`**: Fails if `actual` does not equal `expected`. When comparing tables, checks that every key-value pair in `expected` recursively matches those in `actual`, but ignores pairs from `actual` not present in `expected`.
 * **`sinq.assert.contains(string, substring, message?)`**: Fails if the string does not contain the specified substring.
 * **`sinq.assert.isTrue(condition, message?)`**: Fails if the condition resolves to `false` or `nil`.
 * **`sinq.assert.fileMatches(filepath)`**: Fails if the response previously saved using `req.saveResponseTo()` does not exactly match the contents of `filepath`. Fails immediately if `req.saveResponseTo()` was not called.

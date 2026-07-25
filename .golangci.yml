@@ -67,7 +67,6 @@ linters:
       - path: _test\.go
         linters:
           - errcheck
-          - gosec
           - gocognit
           - gocyclo
           - exhaustive

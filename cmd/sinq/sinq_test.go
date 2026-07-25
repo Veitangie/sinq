@@ -354,3 +354,41 @@ func TestSinq_CLI_CreateReporter_InvalidFormat(t *testing.T) {
 		t.Errorf("Expected createReporter to fallback to standard reporter, got nil")
 	}
 }
+
+func TestPopulateConfigInRuntime(t *testing.T) {
+	os.Setenv("SINQ_LUA_PATH", "/tmp/luapath1" + string(os.PathListSeparator) + "/tmp/luapath2")
+	defer os.Unsetenv("SINQ_LUA_PATH")
+
+	cfg := &config.Config{}
+	err := populateConfigInRuntime(cfg)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(cfg.Paths) != 1 || cfg.Paths[0] != "." {
+		t.Errorf("expected Paths to be ['.'], got %v", cfg.Paths)
+	}
+
+	if len(cfg.LuaPaths) != 4 {
+		t.Errorf("expected 4 LuaPaths, got %d", len(cfg.LuaPaths))
+	}
+}
+
+func TestPopulateConfigInRuntime_WithPaths(t *testing.T) {
+	cfg := &config.Config{
+		Paths: []string{"/tmp/testpath"},
+		LuaPaths: []string{"/tmp/existinglua"},
+	}
+	err := populateConfigInRuntime(cfg)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(cfg.Paths) != 1 || cfg.Paths[0] != "/tmp/testpath" {
+		t.Errorf("expected Paths to be ['/tmp/testpath'], got %v", cfg.Paths)
+	}
+
+	if len(cfg.LuaPaths) != 3 {
+		t.Errorf("expected 3 LuaPaths, got %d", len(cfg.LuaPaths))
+	}
+}

@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/usr/bin/env bash
 set -euo pipefail
 
 REPO="Veitangie/sinq"
 INSTALL_DIR="/usr/local/bin"
-TARGET_VERSION=$1
+TARGET_VERSION=${1:-}
 
 OS=$(uname -s)
 ARCH=$(uname -m)

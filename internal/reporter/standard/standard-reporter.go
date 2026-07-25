@@ -83,7 +83,7 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 			if result.Status == runner.Skipped {
 				continue
 			}
-		case config.Failures:
+		case config.Failed:
 			if result.Status != runner.Failure && result.Status != runner.Error {
 				for _, request := range result.RequestResults {
 					if request.Status != runner.Skipped {

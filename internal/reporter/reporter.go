@@ -5,6 +5,7 @@ package reporter
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -54,7 +55,18 @@ func (r *ReporterPool) Report(source <-chan runner.ScenarioResult, timer <-chan 
 
 		wg.Add(1)
 		go func(rep Reporter, src <-chan runner.ScenarioResult, tmr <-chan time.Duration) {
-			defer wg.Done()
+			defer func() {
+				err := recover()
+				if err != nil {
+					if errTyped, ok := err.(error); ok {
+						errorCh <- errTyped
+					} else {
+						errorCh <- fmt.Errorf("%v", err)
+					}
+				}
+
+				wg.Done()
+			}()
 			err := rep.Report(src, tmr, size)
 			if err != nil {
 				errorCh <- err

@@ -189,10 +189,10 @@ func TestParser_Parse(t *testing.T) {
 		},
 		{
 			name:  "Show Failures",
-			flags: []string{"--show", "failures"},
+			flags: []string{"--show", "failed"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
-				c.Reporter.Show = Failures
+				c.Reporter.Show = Failed
 				return c
 			}(),
 			wantErrs: 0,
@@ -293,8 +293,8 @@ func TestParser_Parse(t *testing.T) {
 			wantErrs: 0,
 		},
 		{
-			name:  "Secret Inline Invalid (No Equal)",
-			flags: []string{"-s", "API_KEY123"},
+			name:       "Secret Inline Invalid (No Equal)",
+			flags:      []string{"-s", "API_KEY123"},
 			wantConfig: SaneDefaults(),
 			wantErrs:   1,
 		},
@@ -452,15 +452,15 @@ func TestParser_Parse(t *testing.T) {
 			wantErrs:   1,
 		},
 		{
-			name:       "Unknown Boolean Chained",
-			flags:      []string{"-viX"},
+			name:  "Unknown Boolean Chained",
+			flags: []string{"-viX"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
 				c.Version = true
 				c.Insecure = true
 				return c
 			}(),
-			wantErrs:   1,
+			wantErrs: 1,
 		},
 	}
 

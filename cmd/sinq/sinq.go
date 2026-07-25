@@ -39,6 +39,10 @@ func populateConfigInRuntime(cfg *config.Config) error {
 		}
 	}
 
+	if len(cfg.Paths) == 0 {
+		cfg.Paths = append(cfg.Paths, ".")
+	}
+
 	for idx := range cfg.LuaPaths {
 		abs, err := filepath.Abs(cfg.LuaPaths[idx])
 		if err != nil {
@@ -348,7 +352,7 @@ Flags:
   -f, --format string     Output format: std or junit (default "std")
   -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
   -c, --color string      Terminal colors: always, never, auto (default "auto")
-  -S, --show string       Which results to show in the output: all, no-skip, failures (default "no-skip")
+  -S, --show string       Which results to show in the output: all, no-skip, failed (default "no-skip")
   -l, --list              Parse and list scenarios at specified directories
   -t, --tag string        Execute only scenarios that have the tag
   -n, --name string       Execute only scenarios which names match the regular expression
@@ -364,7 +368,8 @@ Flags:
 For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
 Or read the manual: man 1 sinq`
 
-const versionConstPart = `sinq v1.0.0-rc.12 - `
+var versionConstPart = "sinq dev - "
+
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",

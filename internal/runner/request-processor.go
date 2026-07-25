@@ -266,6 +266,11 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 		}
 		result = fromCache
 	} else {
+		if p.client.Jar != nil {
+			for _, cookie := range p.client.Jar.Cookies(p.httpRequest.URL) {
+				p.httpRequest.AddCookie(cookie)
+			}
+		}
 
 		p.requestTimer.Start()
 		select {
