@@ -356,7 +356,7 @@ func TestSinq_CLI_CreateReporter_InvalidFormat(t *testing.T) {
 }
 
 func TestPopulateConfigInRuntime(t *testing.T) {
-	os.Setenv("SINQ_LUA_PATH", "/tmp/luapath1" + string(os.PathListSeparator) + "/tmp/luapath2")
+	os.Setenv("SINQ_LUA_PATH", "/tmp/luapath1"+string(os.PathListSeparator)+"/tmp/luapath2")
 	defer os.Unsetenv("SINQ_LUA_PATH")
 
 	cfg := &config.Config{}
@@ -376,7 +376,7 @@ func TestPopulateConfigInRuntime(t *testing.T) {
 
 func TestPopulateConfigInRuntime_WithPaths(t *testing.T) {
 	cfg := &config.Config{
-		Paths: []string{"/tmp/testpath"},
+		Paths:    []string{"/tmp/testpath"},
 		LuaPaths: []string{"/tmp/existinglua"},
 	}
 	err := populateConfigInRuntime(cfg)
@@ -390,5 +390,82 @@ func TestPopulateConfigInRuntime_WithPaths(t *testing.T) {
 
 	if len(cfg.LuaPaths) != 3 {
 		t.Errorf("expected 3 LuaPaths, got %d", len(cfg.LuaPaths))
+	}
+}
+
+func TestSinq_EndToEnd_SingleFile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	req := fmt.Sprintf("GET %s/\n$ASSERT{ assert(sinq.responses[1].code == 200) }", srv.URL)
+	filePath := filepath.Join(tmpDir, "single_test.sinq")
+	_ = os.WriteFile(filePath, []byte(req), 0644)
+
+	args := []string{
+		"--format", "std",
+		filePath,
+	}
+
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	devNull, _ := os.Open(os.DevNull)
+	os.Stdout, os.Stderr = devNull, devNull
+	defer func() {
+		os.Stdout, os.Stderr = oldStdout, oldStderr
+		devNull.Close()
+	}()
+
+	exitCode := sinq(args)
+	if exitCode != 0 {
+		t.Fatalf("Expected sinq to successfully execute a single file, but got exit code %d. The engine likely failed because it tried to treat the file as a directory.", exitCode)
+	}
+}
+
+func TestSinq_EndToEnd_SingleFile_ParseFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "bad.sinq")
+	_ = os.WriteFile(filePath, []byte("$PRE{ "), 0644)
+
+	args := []string{
+		"--format", "std",
+		filePath,
+	}
+
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	devNull, _ := os.Open(os.DevNull)
+	os.Stdout, os.Stderr = devNull, devNull
+	defer func() {
+		os.Stdout, os.Stderr = oldStdout, oldStderr
+		devNull.Close()
+	}()
+
+	exitCode := sinq(args)
+	if exitCode == 0 {
+		t.Fatalf("BUG FOUND: Expected sinq to fail and exit with non-zero code on a malformed single file, but got 0. It likely swallowed the error!")
+	}
+}
+
+func TestSinq_EndToEnd_StupidFilename(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "test.sinq")
+
+	req := fmt.Sprintf("### my / stupid test\nGET %s/\n$PRE{ req.saveResponseTo('out') }", srv.URL)
+	_ = os.WriteFile(filePath, []byte(req), 0644)
+
+	args := []string{
+		"--format", "std",
+		filePath,
+	}
+
+	exitCode := sinq(args)
+	if exitCode != 0 {
+		t.Fatalf("BUG FOUND: Expected sinq to succeed even with slashes in the request name, but got exit code %d", exitCode)
 	}
 }

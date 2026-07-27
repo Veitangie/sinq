@@ -38,7 +38,7 @@ nfpms:
     maintainer: Veitangie
     description: A concurrent HTTP functional and integration testing tool.
     homepage: https://github.com/Veitangie/sinq
-    license: GPLv3
+    license: GPL-3.0-or-later
     formats:
       - deb
       - rpm
@@ -58,7 +58,7 @@ homebrew_casks:
     directory: Casks
     homepage: https://github.com/Veitangie/sinq
     description: A concurrent HTTP functional and integration testing tool.
-    license: GPL-3.0-only
+    license: GPL-3.0-or-later
     manpages:
       - sinq.1
 
@@ -68,7 +68,7 @@ aurs:
     description: A concurrent HTTP functional and integration testing tool.
     maintainers:
       - 'Veitangie <emignatiev.work@gmail.com>'
-    license: GPL-3.0
+    license: GPL-3.0-or-later
     private_key: '{{ .Env.AUR_SSH_KEY }}'
     git_url: 'ssh://aur@aur.archlinux.org/sinq-bin.git'
     provides:
@@ -88,7 +88,7 @@ nix:
       token: "{{ .Env.NIX_GITHUB_TOKEN }}"
     homepage: https://github.com/Veitangie/sinq
     description: A concurrent HTTP functional and integration testing tool.
-    license: gpl3Only
+    license: gpl3Plus
 
 dockers_v2:
   - images:
@@ -106,7 +106,7 @@ scoops:
   - name: sinq
     homepage: https://github.com/Veitangie/sinq
     description: A concurrent HTTP functional and integration testing tool.
-    license: GPL-3.0-only
+    license: GPL-3.0-or-later
     goamd64: v3
     repository:
       owner: Veitangie

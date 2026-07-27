@@ -8,7 +8,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -224,6 +226,7 @@ func TestWorker_CompileScript_SyntaxError(t *testing.T) {
 type errWriterCloser struct{}
 
 func (errWriterCloser) Write(p []byte) (n int, err error) { return 0, errors.New("write error") }
+func (errWriterCloser) MkDirall(dirpath string) error     { return nil }
 func (errWriterCloser) Close() error                      { return nil }
 
 type errCreateWorkspace struct{ mockWorkspace }
@@ -340,5 +343,73 @@ func TestWorker_RequestCompleted(t *testing.T) {
 	}
 	if !strings.Contains(resStr, "X-Test: Val") {
 		t.Errorf("Expected dump to contain X-Test: Val, got: %s", resStr)
+	}
+}
+
+type trackMkdirWorkspace struct {
+	mockWorkspace
+	createdDirs []string
+	failMkdir   bool
+}
+
+func (t *trackMkdirWorkspace) MkDirall(name string) error {
+	if t.failMkdir {
+		return errors.New("mkdir failed")
+	}
+	t.createdDirs = append(t.createdDirs, name)
+	return nil
+}
+
+type mockDirFileInfo struct{ name string }
+
+func (mockDirFileInfo) Name() string       { return "dir" }
+func (mockDirFileInfo) Size() int64        { return 0 }
+func (mockDirFileInfo) Mode() fs.FileMode  { return fs.ModeDir }
+func (mockDirFileInfo) ModTime() time.Time { return time.Time{} }
+func (mockDirFileInfo) IsDir() bool        { return true }
+func (mockDirFileInfo) Sys() any           { return nil }
+
+func (t *trackMkdirWorkspace) Stat(name string) (fs.FileInfo, error) {
+	if slices.Contains(t.createdDirs, name) {
+		return mockDirFileInfo{name: name}, nil
+	}
+	return t.mockWorkspace.Stat(name)
+}
+
+func TestWorker_SaveResponseTo_Mkdir(t *testing.T) {
+	w := setupTestWorker(t, nil)
+
+	mockFS := fstest.MapFS{
+		"test.sinq": &fstest.MapFile{Data: []byte("request")},
+	}
+	trackFS := &trackMkdirWorkspace{mockWorkspace: mockWorkspace{FS: mockFS}}
+	w.env.workspace = trackFS
+	w.lc.SetupRequestEnvironment(0)
+
+	script := `req.saveResponseTo('newdir/out.txt')`
+	extract := func(scenario.Token) []byte { return []byte(script) }
+	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
+
+	_, filenameOut, _, _, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if filenameOut != "newdir/out.txt" {
+		t.Errorf("Expected filenameOut to be newdir/out.txt, got %s", filenameOut)
+	}
+	if len(trackFS.createdDirs) != 1 || trackFS.createdDirs[0] != "newdir" {
+		t.Errorf("Expected newdir to be created, got %v", trackFS.createdDirs)
+	}
+
+	trackFS.failMkdir = true
+	scriptFail := `req.saveResponseTo('faildir/out.txt')`
+	extractFail := func(scenario.Token) []byte { return []byte(scriptFail) }
+
+	_, _, _, _, errFail := w.runPreScript(token, extractFail, "test.sinq", 1*time.Second)
+	if errFail == nil {
+		t.Fatal("Expected error on mkdir failure, got nil")
+	}
+	if !strings.Contains(errFail.Error(), "failed to create directory") {
+		t.Errorf("Expected failure message to contain 'failed to create directory', got: %v", errFail)
 	}
 }

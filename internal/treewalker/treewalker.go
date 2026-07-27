@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -29,17 +30,17 @@ const (
 	PathCtxKey TreewalkerCtxKey = "path"
 )
 
-type ParseRequestFunc func(io.Reader, string) (*scenario.RequestBlueprint, error)
+type ParseRequestsFunc func(io.Reader, string) ([]*scenario.RequestBlueprint, error)
 type ParseScenarioConfigFunc func(*scenario.ScenarioConfig, io.Reader) error
 
 type Treewalker struct {
 	cfg                 config.Config
 	logger              slog.Logger
-	parseRequest        ParseRequestFunc
+	parseRequest        ParseRequestsFunc
 	parseScenarioConfig ParseScenarioConfigFunc
 }
 
-func NewTreewalker(cfg config.Config, logger slog.Logger, parseRequest ParseRequestFunc, parseScenarioConfig ParseScenarioConfigFunc) (*Treewalker, error) {
+func NewTreewalker(cfg config.Config, logger slog.Logger, parseRequest ParseRequestsFunc, parseScenarioConfig ParseScenarioConfigFunc) (*Treewalker, error) {
 	if parseRequest == nil {
 		return nil, errors.New("Empty parse request function passed to Treewalker")
 	}
@@ -120,6 +121,41 @@ func (t *Treewalker) startExploration(ctx context.Context, cancelCtx context.Can
 		t.exploreFS(ctx, cancelCtx, ".", fileSystem, taskCh, errorCh, []string{})
 	}()
 	return taskCh
+}
+
+func (t *Treewalker) ParseSingleFile(fileSystem fs.FS, filename string) (scenario.ScenarioBlueprint, error) {
+	totalTimer := timer.NewTimer(timer.DefaultClock{})
+	defer t.logger.Debug(
+		"[Treewalker] Finished discovery",
+		"path", filename,
+		"startedAt", totalTimer.StartedAt(),
+		"duration", totalTimer.Time(),
+	)
+
+	res := scenario.ScenarioBlueprint{}
+	base := filepath.Base(filename)
+	file, err := fileSystem.Open(base)
+	if err != nil {
+		return res, err
+	}
+
+	requests, err := t.parseRequest(file, base)
+	file.Close()
+	if err != nil {
+		return res, err
+	}
+
+	res.Requests = requests
+
+	cfg := scenario.SaneDefaultConfig()
+	cfg.Name = getDefaultScenarioNameFromPath(filename)
+	for key, value := range t.cfg.Treewalker.Env {
+		cfg.Env[key] = value
+	}
+
+	res.Config = &cfg
+
+	return res, nil
 }
 
 func (t *Treewalker) ParseFiletree(ctx context.Context, fileSystem fs.FS) ([]scenario.ScenarioBlueprint, error) {

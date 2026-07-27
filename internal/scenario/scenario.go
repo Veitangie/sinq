@@ -42,6 +42,7 @@ type RequestBlueprint struct {
 	Retry    Token
 	Post     Token
 	Filename string
+	Name     string
 }
 
 func (bp RequestBlueprint) String() string {
@@ -56,6 +57,10 @@ func (bp RequestBlueprint) String() string {
 			sb.WriteByte('{')
 			sb.Write(bp.ExtractPayload(token))
 			sb.WriteByte('}')
+		case Delimiter:
+			sb.WriteString("\n### ")
+			sb.Write(bp.ExtractPayload(token))
+			sb.WriteByte('\n')
 		case IncompleteToken:
 		case EOF:
 		}
@@ -137,12 +142,13 @@ func (d *Duration) UnmarshalJSON(source []byte) error {
 	return nil
 }
 
-func ParseRequestBlueprint(r io.Reader, filename string) (*RequestBlueprint, error) {
+func ParseRequestBlueprints(r io.Reader, filename string) ([]*RequestBlueprint, error) {
 	source, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to read request source: %w", err)
 	}
-	res := RequestBlueprint{Source: source, Filename: filename}
+	currentRes := &RequestBlueprint{Source: source, Filename: filename}
+	res := []*RequestBlueprint{currentRes}
 	parser := parser{source: source, lineNumber: 1, offsetNumber: 1}
 
 	parser.consumeWhitespace()
@@ -156,9 +162,9 @@ ParsingLoop:
 
 		switch t.Type {
 		case Text:
-			res.Content = append(res.Content, t)
+			currentRes.Content = append(currentRes.Content, t)
 		case Script:
-			err := res.setScript(t)
+			err := currentRes.setScript(t)
 			if err != nil {
 				return nil, err
 			}
@@ -167,12 +173,23 @@ ParsingLoop:
 			}
 		case IncompleteToken:
 			return nil, errors.New("Incomplete token in parser output")
+		case Delimiter:
+			if len(currentRes.Content) != 0 {
+				currentRes = &RequestBlueprint{Source: source, Filename: filename}
+				res = append(res, currentRes)
+			}
+			currentRes.Name = fmt.Sprintf("%s#%s", filename, currentRes.ExtractPayload(t))
+			parser.consumeWhitespace()
 		case EOF:
 			break ParsingLoop
 		}
 	}
 
-	return &res, nil
+	if len(currentRes.Content) == 0 {
+		return res, errors.New("Unexpected delimiter resulting in an empty request at the end of file")
+	}
+
+	return res, nil
 }
 
 func (bp *RequestBlueprint) ExtractPayload(t Token) []byte {

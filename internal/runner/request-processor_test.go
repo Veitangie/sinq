@@ -38,7 +38,7 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n$RETRY{\n return 10000 \n}"
-	reqBp, err := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "retry_test.sinq")
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "retry_test.sinq")
 	if err != nil {
 		t.Fatalf("Failed to parse blueprint: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 		w:            w,
 		ctx:          ctx,
 		scenarioBp:   scenarioBp,
-		requestBp:    reqBp,
+		requestBp:    reqBp[0],
 		status:       &status,
 		result:       result,
 		requestTimer: timer.NewTimer(timer.DefaultClock{}),
@@ -223,7 +223,7 @@ func TestRequestProcessor_MaxRetriesExceeded(t *testing.T) {
 	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n$RETRY{\n return 1 \n}"
-	reqBp, err := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "retry_test.sinq")
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "retry_test.sinq")
 	if err != nil {
 		t.Fatalf("Failed to parse blueprint: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestRequestProcessor_MaxRetriesExceeded(t *testing.T) {
 		w:            w,
 		ctx:          context.Background(),
 		scenarioBp:   scenarioBp,
-		requestBp:    reqBp,
+		requestBp:    reqBp[0],
 		status:       &status,
 		result:       result,
 		requestTimer: timer.NewTimer(timer.DefaultClock{}),
@@ -273,13 +273,13 @@ func TestRequestProcessor_BadTLS_FailsGracefully(t *testing.T) {
 	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "/path HTTP/1.1\n"
-	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "tls_test.sinq")
+	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "tls_test.sinq")
 
 	processor := &RequestProcessor{
 		ctx:          context.Background(),
 		w:            w,
 		client:       &http.Client{},
-		requestBp:    reqBp,
+		requestBp:    reqBp[0],
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
 		status:       new(ResultStatus),
 		result:       &RequestResult{},
@@ -309,13 +309,13 @@ func TestRequestProcessor_EmptyBodyGet_NoChunkedEncoding(t *testing.T) {
 	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n\n"
-	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
 
 	processor := &RequestProcessor{
 		ctx:          context.Background(),
 		w:            w,
 		client:       srv.Client(),
-		requestBp:    reqBp,
+		requestBp:    reqBp[0],
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
 		status:       new(ResultStatus),
 		result:       &RequestResult{},
@@ -351,7 +351,7 @@ func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
 	seed := maphash.MakeSeed()
 
 	rawSinq := "GET " + srv.URL + "\n\n"
-	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
 
 	var wg sync.WaitGroup
 	for range 10 {
@@ -369,7 +369,7 @@ func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
 				ctx:          context.Background(),
 				w:            wLocal,
 				client:       srv.Client(),
-				requestBp:    reqBp,
+				requestBp:    reqBp[0],
 				scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
 				status:       new(ResultStatus),
 				result:       &RequestResult{},
@@ -421,13 +421,13 @@ func TestRequestProcessor_SingleFlight_DistinctRequests(t *testing.T) {
 			wLocal.env.hasher = hasher
 
 			rawSinq := "GET " + srv.URL + "\n" + "X-Unique-ID: " + fmt.Sprint(idx) + "\n\n"
-			reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+			reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
 
 			processor := &RequestProcessor{
 				ctx:          context.Background(),
 				w:            wLocal,
 				client:       srv.Client(),
-				requestBp:    reqBp,
+				requestBp:    reqBp[0],
 				scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
 				status:       new(ResultStatus),
 				result:       &RequestResult{},
@@ -466,7 +466,7 @@ func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
 	seed := maphash.MakeSeed()
 
 	rawSinq := "GET " + srv.URL + "\n\n"
-	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
 
 	var wg sync.WaitGroup
 	for range 10 {
@@ -483,7 +483,7 @@ func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
 				ctx:          context.Background(),
 				w:            wLocal,
 				client:       srv.Client(),
-				requestBp:    reqBp,
+				requestBp:    reqBp[0],
 				scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
 				status:       new(ResultStatus),
 				result:       &RequestResult{},
@@ -517,13 +517,13 @@ func TestRequestProcessor_AssertAndPostScripts(t *testing.T) {
 	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n$ASSERT{\nsinq.assert.code(200)\n}\n$POST{\nenv.postRan = true\n}"
-	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "hooks.sinq")
+	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "hooks.sinq")
 
 	processor := &RequestProcessor{
 		ctx:          context.Background(),
 		w:            w,
 		client:       srv.Client(),
-		requestBp:    reqBp,
+		requestBp:    reqBp[0],
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{ScriptTimeout: scenario.Duration{Duration: 5 * time.Second}, MaxBodySize: config.DataSize{ByteAmount: 1024}}},
 		status:       new(ResultStatus),
 		result:       &RequestResult{},
@@ -562,13 +562,13 @@ func TestRequestProcessor_OversizedBody(t *testing.T) {
 	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n"
-	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
 
 	processor := &RequestProcessor{
 		ctx:          context.Background(),
 		w:            w,
 		client:       srv.Client(),
-		requestBp:    reqBp,
+		requestBp:    reqBp[0],
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 10}}},
 		status:       new(ResultStatus),
 		result:       &RequestResult{},
@@ -607,13 +607,13 @@ func TestRequestProcessor_SaveResponseToFile(t *testing.T) {
 	w.env.workspace = &mockWorkspace{FS: mockFS}
 
 	rawSinq := "GET " + srv.URL + "\n$PRE{\nreq.saveResponseTo('output.txt')\n}"
-	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
 
 	processor := &RequestProcessor{
 		ctx:          context.Background(),
 		w:            w,
 		client:       srv.Client(),
-		requestBp:    reqBp,
+		requestBp:    reqBp[0],
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{ScriptTimeout: scenario.Duration{Duration: 5 * time.Second}, MaxBodySize: config.DataSize{ByteAmount: 1024}}},
 		status:       new(ResultStatus),
 		result:       &RequestResult{},
@@ -651,7 +651,7 @@ func TestRequestProcessor_SingleFlight_ContextIndependence(t *testing.T) {
 	wGlobal.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n\n"
-	reqBp, _ := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "get.sinq")
+	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
 
 	seed := maphash.MakeSeed()
 	hasher := maphash.Hash{}
@@ -678,7 +678,7 @@ func TestRequestProcessor_SingleFlight_ContextIndependence(t *testing.T) {
 			ctx:          ctx1,
 			w:            w1,
 			scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-			requestBp:    reqBp,
+			requestBp:    reqBp[0],
 			materialized: []byte(rawSinq),
 			status:       new(ResultStatus),
 			result:       &RequestResult{},
@@ -709,7 +709,7 @@ func TestRequestProcessor_SingleFlight_ContextIndependence(t *testing.T) {
 			ctx:          ctx2,
 			w:            w2,
 			scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-			requestBp:    reqBp,
+			requestBp:    reqBp[0],
 			materialized: []byte(rawSinq),
 			status:       new(ResultStatus),
 			result:       &RequestResult{},
@@ -763,7 +763,7 @@ func TestRequestProcessor_CachedRequest_CookiesAndFastPath(t *testing.T) {
 	w.lc.SetupRequestEnvironment(0)
 
 	rawSinq := "GET " + srv.URL + "\n"
-	reqBp, err := scenario.ParseRequestBlueprint(strings.NewReader(rawSinq), "cache_test.sinq")
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "cache_test.sinq")
 	if err != nil {
 		t.Fatalf("Failed to parse blueprint: %v", err)
 	}
@@ -780,7 +780,7 @@ func TestRequestProcessor_CachedRequest_CookiesAndFastPath(t *testing.T) {
 		w:            w,
 		ctx:          ctx,
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-		requestBp:    reqBp,
+		requestBp:    reqBp[0],
 		materialized: []byte(rawSinq),
 		status:       new(ResultStatus),
 		result:       &RequestResult{},
@@ -817,7 +817,7 @@ func TestRequestProcessor_CachedRequest_CookiesAndFastPath(t *testing.T) {
 		w:            w,
 		ctx:          ctx,
 		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-		requestBp:    reqBp,
+		requestBp:    reqBp[0],
 		materialized: []byte(rawSinq),
 		status:       new(ResultStatus),
 		result:       &RequestResult{},

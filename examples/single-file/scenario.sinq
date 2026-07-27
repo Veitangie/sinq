@@ -1,0 +1,42 @@
+### Authenticate
+POST ${env.BASE_URL}/system/login
+Content-Type: application/json
+
+{
+    "user": "player_one",
+    "password": "hunter2"
+}
+
+$ASSERT{ 
+  sinq.assert.code(200, "System login failed") 
+  sinq.assert.isTrue(type(res.json().token) == "string", "Returned token is not string")
+}
+
+$POST{ AUTH_TOKEN = res.json().token }
+
+### Create Player Character
+$PRE{
+    if not AUTH_TOKEN then error("Token missing") end
+}
+POST ${env.BASE_URL}/players
+Authorization: Bearer ${ AUTH_TOKEN }
+Content-Type: application/json
+
+{
+    "name": "Scyth",
+    "class": "Spellsword"
+}
+
+$ASSERT{ sinq.assert.code(201, "Failed to create character") }
+
+$POST{ PLAYER_ID = res.json().id }
+
+### Start Initial Quest
+GET ${env.BASE_URL}/players/$Unnamed_1{ PLAYER_ID }/quests/evolution
+Authorization: Bearer ${ AUTH_TOKEN }
+
+$RETRY{ return sinq.retry.when(res.json().status == "calculating_stats", 10) }
+
+$ASSERT{
+    sinq.assert.equals(res.json(), {status = "complete"})
+}

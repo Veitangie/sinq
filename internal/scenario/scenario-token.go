@@ -9,6 +9,7 @@ const (
 	IncompleteToken TokenType = iota
 	Text
 	Script
+	Delimiter
 	EOF
 )
 

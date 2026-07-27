@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -77,8 +78,17 @@ func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, 
 		resolvedPath := filepath.Join(filepath.Dir(filename), savePath)
 
 		info, err := w.env.workspace.Stat(filepath.Dir(resolvedPath))
+		if os.IsNotExist(err) {
+			err = w.env.workspace.MkDirall(filepath.Dir(resolvedPath))
+			if err != nil {
+				ls.RaiseError("req.saveResponseTo: invalid file path '%s' (failed to create directory at %s)", savePath, filepath.Dir(resolvedPath))
+				return 0
+			}
+			info, err = w.env.workspace.Stat(filepath.Dir(resolvedPath))
+		}
+
 		if err != nil || !info.IsDir() {
-			ls.RaiseError("req.saveResponseTo: invalid file path '%s' (resolved path '%s' does not exist or is not a directory)", savePath, filepath.Dir(resolvedPath))
+			ls.RaiseError("req.saveResponseTo: invalid file path '%s' (resolved path '%s' is not a directory)", savePath, filepath.Dir(resolvedPath))
 			return 0
 		}
 		filenameOut = resolvedPath

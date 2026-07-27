@@ -32,6 +32,10 @@ func (m *mockWorkspace) Stat(name string) (fs.FileInfo, error) {
 	return fs.Stat(m.FS, name)
 }
 
+func (m *mockWorkspace) MkDirall(name string) error {
+	return nil
+}
+
 type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }

@@ -215,7 +215,7 @@ jobs:
             homepage "https://github.com/Veitangie/sinq"
             url "$TARBALL_URL"
             sha256 "$SHA256"
-            license "GPL-3.0-only"
+            license "GPL-3.0-or-later"
 
             depends_on "go" => :build
             depends_on "go-md2man" => :build

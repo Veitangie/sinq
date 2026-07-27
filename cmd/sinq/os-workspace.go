@@ -13,6 +13,7 @@ import (
 
 const PERM_RWX fs.FileMode = 0777
 const PERM_RW fs.FileMode = 0666
+const PERM_DIR fs.FileMode = 0755
 const O_CRWRTR int = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 
 type OSRootWorkspace struct {
@@ -39,6 +40,10 @@ func (ws OSRootWorkspace) Create(filename string) (io.WriteCloser, error) {
 	return ws.root.OpenFile(filename, O_CRWRTR, PERM_RW)
 }
 
+func (ws OSRootWorkspace) MkDirall(dirpath string) error {
+	return ws.root.MkdirAll(dirpath, PERM_DIR)
+}
+
 func (ws OSRootWorkspace) String() string {
 	return ws.rootString
 }
@@ -57,6 +62,10 @@ func (ws OSWorkspace) Open(filename string) (fs.File, error) {
 
 func (ws OSWorkspace) Create(filename string) (io.WriteCloser, error) {
 	return os.OpenFile(filename, O_CRWRTR, PERM_RW)
+}
+
+func (ws OSWorkspace) MkDirall(dirpath string) error {
+	return os.MkdirAll(dirpath, PERM_DIR)
 }
 
 func (ws OSWorkspace) String() string {

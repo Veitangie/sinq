@@ -23,12 +23,12 @@ import (
 	"github.com/Veitangie/sinq/internal/treewalker"
 )
 
-func mockParseRequest(r io.Reader, filename string) (*scenario.RequestBlueprint, error) {
+func mockParseRequest(r io.Reader, filename string) ([]*scenario.RequestBlueprint, error) {
 	b, _ := io.ReadAll(r)
-	return &scenario.RequestBlueprint{
+	return []*scenario.RequestBlueprint{{
 		Source:  b,
 		Content: []scenario.Token{{Type: scenario.Text, Start: 0, End: len(b), PayloadStart: 0, PayloadEnd: len(b)}},
-	}, nil
+	}}, nil
 }
 
 func mockParseConfig(target *scenario.ScenarioConfig, r io.Reader) error {
@@ -171,7 +171,7 @@ func TestTreewalker_TagsCachePoisoning_Concurrency(t *testing.T) {
 		Workers: 4,
 	}
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, scenario.ParseConfig)
 		blueprints, err := walker.ParseFiletree(context.Background(), memFS)
 		if err != nil {
@@ -218,7 +218,7 @@ func TestTreewalker_EnvMatrixCachePoisoning_Concurrency(t *testing.T) {
 
 	cfg := config.Config{Workers: 4}
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, scenario.ParseConfig)
 		blueprints, err := walker.ParseFiletree(context.Background(), memFS)
 		if err != nil {
@@ -401,7 +401,7 @@ func TestTreewalker_ParseSecrets(t *testing.T) {
 				"NEW":   "000",
 			},
 		}}, *slog.Default(), mockParseRequest, mockParseConfig)
-		
+
 		secrets, err := tw.ParseSecrets()
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
@@ -417,7 +417,7 @@ func TestTreewalker_ParseSecrets(t *testing.T) {
 				"TOKEN": "789",
 			},
 		}}, *slog.Default(), mockParseRequest, mockParseConfig)
-		
+
 		secrets, err := tw.ParseSecrets()
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
@@ -444,5 +444,37 @@ func TestTreewalker_FileSystemErrors(t *testing.T) {
 	_, err := walker.ParseFiletree(context.Background(), errFS{})
 	if err == nil {
 		t.Error("Expected error when FS fails to read directory")
+	}
+}
+
+func TestTreewalker_ParseSingleFile(t *testing.T) {
+	memFS := fstest.MapFS{
+		"test.sinq": {Data: []byte("GET /")},
+		"bad.sinq":  {Data: []byte("###\nGET /")},
+	}
+
+	cfg := config.Config{Workers: 1}
+
+	walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, mockParseConfig)
+	bp, err := walker.ParseSingleFile(memFS, "test.sinq")
+	if err != nil {
+		t.Fatalf("ParseSingleFile failed: %v", err)
+	}
+	if bp.Config.Name != "test.sinq" {
+		t.Errorf("Expected scenario config name to be 'test.sinq', got %s", bp.Config.Name)
+	}
+
+	_, err = walker.ParseSingleFile(memFS, "nonexistent.sinq")
+	if err == nil {
+		t.Fatalf("Expected ParseSingleFile to fail on missing file")
+	}
+
+	failWalker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), func(r io.Reader, fn string) ([]*scenario.RequestBlueprint, error) {
+		return nil, errors.New("simulated parse error")
+	}, mockParseConfig)
+
+	_, err = failWalker.ParseSingleFile(memFS, "test.sinq")
+	if err == nil || err.Error() != "simulated parse error" {
+		t.Fatalf("Expected ParseSingleFile to fail with parse error, got: %v", err)
 	}
 }

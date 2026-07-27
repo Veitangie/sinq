@@ -26,6 +26,7 @@ import (
 type Workspace interface {
 	fs.StatFS
 	Create(string) (io.WriteCloser, error)
+	MkDirall(string) error
 	String() string
 }
 
@@ -200,7 +201,7 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	w.env.logger.Debug("[Runner] Starting scenario", w.loggingContext(ctx)...)
 	requestResults := make([]RequestResult, len(bundle.Requests))
 	for idx, req := range bundle.Requests {
-		requestResults[idx].Name = req.Filename
+		requestResults[idx].Name = fmt.Sprintf("%s#%s", req.Filename, req.Name)
 	}
 	scenarioTimer := timer.NewTimer(w.env.clock)
 	result := ScenarioResult{
@@ -305,6 +306,8 @@ func (w *worker) materializeRequest(ctx context.Context, req *scenario.RequestBl
 			materialized.Write([]byte(value.String()))
 		case scenario.IncompleteToken:
 			return []byte{}, fmt.Errorf("%s#%d:%d: Failed to materialize request: incomplete token", req.Filename, token.Line, token.Offset)
+		case scenario.Delimiter:
+			return []byte{}, fmt.Errorf("%s#%d:%d: Failed to materialize request: found delimiter", req.Filename, token.Line, token.Offset)
 		case scenario.EOF:
 		}
 	}

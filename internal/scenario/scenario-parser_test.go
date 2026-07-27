@@ -264,7 +264,7 @@ two lines, and ignores }"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := strings.NewReader(tt.input)
-			got, err := ParseRequestBlueprint(r, "test")
+			gotSlice, err := ParseRequestBlueprints(r, "test")
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseRequestBlueprint() error = %v, wantErr %t", err, tt.wantErr)
@@ -273,6 +273,11 @@ two lines, and ignores }"
 			if err != nil {
 				return
 			}
+
+			if len(gotSlice) == 0 {
+				t.Fatalf("ParseRequestBlueprints() returned 0 blueprints")
+			}
+			got := gotSlice[0]
 
 			if string(got.ExtractPayload(got.Pre)) != tt.wantPre {
 				t.Errorf("Pre script mismatch.\nGot:  %q\nWant: %q", string(got.ExtractPayload(got.Pre)), tt.wantPre)
@@ -430,6 +435,181 @@ func TestDataSize_StringAndUnit(t *testing.T) {
 	}
 }
 
+func TestParseMultipleRequestBlueprints(t *testing.T) {
+	input := `$PRE{ local x = 1 }
+GET /api/v1/users
+###
+POST /api/v1/users
+Content-Type: application/json
+
+{"name": "test"}
+###
+$ASSERT{ assert(200) }
+DELETE /api/v1/users/1`
+
+	r := strings.NewReader(input)
+	blueprints, err := ParseRequestBlueprints(r, "multi.sinq")
+	if err != nil {
+		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+	}
+
+	if len(blueprints) != 3 {
+		t.Fatalf("Expected 3 blueprints, got %d", len(blueprints))
+	}
+
+	req1 := string(blueprints[0].ExtractPayload(blueprints[0].Content[0]))
+	if !strings.Contains(req1, "GET /api/v1/users") {
+		t.Errorf("Blueprint 1 mismatch, got: %s", req1)
+	}
+
+	req2 := string(blueprints[1].ExtractPayload(blueprints[1].Content[0]))
+	if !strings.Contains(req2, "POST /api/v1/users") {
+		t.Errorf("Blueprint 2 mismatch, got: %s", req2)
+	}
+
+	req3 := string(blueprints[2].ExtractPayload(blueprints[2].Content[0]))
+	if !strings.Contains(req3, "DELETE /api/v1/users/1") {
+		t.Errorf("Blueprint 3 mismatch, got: %s", req3)
+	}
+}
+
+func TestParseDelimiter_BugTrailingNewline(t *testing.T) {
+	input := "GET /\n###\nPOST /"
+	r := strings.NewReader(input)
+	blueprints, err := ParseRequestBlueprints(r, "bug_newline.sinq")
+	if err != nil {
+		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+	}
+
+	if len(blueprints) != 2 {
+		t.Fatalf("Expected 2 blueprints, got %d", len(blueprints))
+	}
+
+	req1 := string(blueprints[0].ExtractPayload(blueprints[0].Content[0]))
+	if strings.HasSuffix(req1, "\n") {
+		t.Errorf("BUG FOUND: The preceding request ends with a trailing newline that was meant to be part of the delimiter.\nPayload: %q", req1)
+	}
+}
+
+func TestParseDelimiter_BugNoBacktrack(t *testing.T) {
+	input := "GET /\n##$PRE{ local x = 1 }\nPOST /"
+	r := strings.NewReader(input)
+	blueprints, err := ParseRequestBlueprints(r, "bug_backtrack.sinq")
+	if err != nil {
+		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+	}
+
+	if blueprints[0].Pre.Type == IncompleteToken {
+		t.Errorf("BUG FOUND: The '$' character was skipped because of a failure to backtrack after a partial delimiter match!")
+	}
+}
+
+func TestParseDelimiter_BugEndOfFile(t *testing.T) {
+	input := "GET /\n###\n"
+	r := strings.NewReader(input)
+	_, err := ParseRequestBlueprints(r, "bug_end.sinq")
+	if err == nil {
+		t.Errorf("BUG FOUND: Expected an error when a delimiter is at the end of the file, but it was accepted and created a ghost request!")
+	}
+}
+
+func TestParseDelimiter_EscapeDelimiter(t *testing.T) {
+	input := "GET /\n\\###\nPOST /"
+	r := strings.NewReader(input)
+	blueprints, err := ParseRequestBlueprints(r, "escaped.sinq")
+	if err != nil {
+		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+	}
+
+	if len(blueprints) != 1 {
+		t.Fatalf("Expected 1 blueprint since the delimiter was escaped, got %d", len(blueprints))
+	}
+
+	req := string(blueprints[0].ExtractPayload(blueprints[0].Content[0]))
+	if !strings.Contains(req, "\n###\n") {
+		t.Errorf("Expected the extracted payload to contain the unescaped literal '###', got %q", req)
+	}
+}
+
+func TestParseDelimiter_BugIncompleteAtEOF(t *testing.T) {
+	input := "GET /\n###"
+	r := strings.NewReader(input)
+	blueprints, err := ParseRequestBlueprints(r, "bug_incomplete_eof.sinq")
+	if err != nil {
+		t.Fatalf("BUG FOUND: Expected ParseRequestBlueprints to successfully parse the incomplete delimiter at EOF as raw text, but got error: %v", err)
+	}
+
+	if len(blueprints) != 1 {
+		t.Fatalf("Expected 1 blueprint, got %d", len(blueprints))
+	}
+
+	req := string(blueprints[0].ExtractPayload(blueprints[0].Content[0]))
+	if !strings.HasSuffix(req, "\n###") {
+		t.Errorf("Expected the payload to end with the literal '\\n###', got: %q", req)
+	}
+}
+
+func TestParseDelimiter_CommentAsFilename(t *testing.T) {
+	input := "GET /\n### Setup Request\nPOST /"
+	r := strings.NewReader(input)
+	blueprints, err := ParseRequestBlueprints(r, "test.sinq")
+	if err != nil {
+		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+	}
+
+	if len(blueprints) != 2 {
+		t.Fatalf("Expected 2 blueprints, got %d", len(blueprints))
+	}
+
+	expectedName := "test.sinq#Setup Request"
+	if string(blueprints[1].Name) != expectedName {
+		t.Errorf("Expected the second blueprint to have the comment as its Name, want: %q, got: %q", expectedName, blueprints[1].Name)
+	}
+}
+
+func TestParseDelimiter_CommentAtStartOfFile(t *testing.T) {
+	input := "### Request one\nGET /\n### Request two\nPOST /"
+	r := strings.NewReader(input)
+	blueprints, err := ParseRequestBlueprints(r, "test.sinq")
+	if err != nil {
+		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+	}
+
+	if len(blueprints) != 2 {
+		t.Fatalf("Expected 2 blueprints (no ghost requests), got %d", len(blueprints))
+	}
+
+	expectedName1 := "test.sinq#Request one"
+	if string(blueprints[0].Name) != expectedName1 {
+		t.Errorf("Expected the first blueprint to be named %q, got: %q", expectedName1, blueprints[0].Name)
+	}
+
+	expectedName2 := "test.sinq#Request two"
+	if string(blueprints[1].Name) != expectedName2 {
+		t.Errorf("Expected the second blueprint to be named %q, got: %q", expectedName2, blueprints[1].Name)
+	}
+}
+
+func TestParseDelimiter_BugPanicOnDanglingEscape(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("BUG: Parser panicked: %v", r)
+		}
+	}()
+
+	input := "\\\n###\\"
+	r := strings.NewReader(input)
+	blueprints, err := ParseRequestBlueprints(r, "test.sinq")
+	if err == nil {
+		t.Fatalf("ParseRequestBlueprints swallowed error for \\n###\\\\")
+	}
+	for _, b := range blueprints {
+		for _, token := range b.Content {
+			b.ExtractPayload(token)
+		}
+	}
+}
+
 func FuzzParseRequestBlueprint(f *testing.F) {
 	seedCorpus := []string{
 		`$PRE{ local x = 1 } GET /`,
@@ -515,25 +695,27 @@ X-Escape: \`,
 	f.Fuzz(func(t *testing.T, data string) {
 		r := strings.NewReader(data)
 
-		bp, err := ParseRequestBlueprint(r, "fuzz.sinq")
+		bps, err := ParseRequestBlueprints(r, "fuzz.sinq")
 
 		if err != nil {
 			return
 		}
 
-		verifyBounds := func(tok Token) {
+		verifyBounds := func(bp *RequestBlueprint, tok Token) {
 			if tok.Type != IncompleteToken {
 				_ = bp.ExtractPayload(tok)
 			}
 		}
 
-		verifyBounds(bp.Pre)
-		verifyBounds(bp.Post)
-		verifyBounds(bp.Assert)
-		verifyBounds(bp.Retry)
+		for _, bp := range bps {
+			verifyBounds(bp, bp.Pre)
+			verifyBounds(bp, bp.Post)
+			verifyBounds(bp, bp.Assert)
+			verifyBounds(bp, bp.Retry)
 
-		for _, tok := range bp.Content {
-			verifyBounds(tok)
+			for _, tok := range bp.Content {
+				verifyBounds(bp, tok)
+			}
 		}
 	})
 }

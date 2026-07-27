@@ -227,12 +227,12 @@ func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.env.transport = mockRoundTripper{}
 
-	skipBP, err := scenario.ParseRequestBlueprint(bytes.NewBufferString("$PRE{\n  req.skip()\n}\n\nGET http://localhost/ HTTP/1.1\r\n\r\n"), "skip.sinq")
+	skipBP, err := scenario.ParseRequestBlueprints(bytes.NewBufferString("$PRE{\n  req.skip()\n}\n\nGET http://localhost/ HTTP/1.1\r\n\r\n"), "skip.sinq")
 	if err != nil {
 		t.Fatalf("Failed to parse skip request: %v", err)
 	}
 
-	failBP, err := scenario.ParseRequestBlueprint(bytes.NewBufferString("GET http://localhost/ HTTP/1.1\r\n\r\n$ASSERT{\n  sinq.assert.fail(\"assertion failed\")\n}\n"), "fail.sinq")
+	failBP, err := scenario.ParseRequestBlueprints(bytes.NewBufferString("GET http://localhost/ HTTP/1.1\r\n\r\n$ASSERT{\n  sinq.assert.fail(\"assertion failed\")\n}\n"), "fail.sinq")
 	if err != nil {
 		t.Fatalf("Failed to parse fail request: %v", err)
 	}
@@ -244,13 +244,13 @@ func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
 				ReqTimeout:    scenario.Duration{Duration: 1 * time.Second},
 				ScriptTimeout: scenario.Duration{Duration: 1 * time.Second},
 			},
-			Requests: []*scenario.RequestBlueprint{skipBP, failBP},
+			Requests: []*scenario.RequestBlueprint{skipBP[0], failBP[0]},
 		},
 		workspace: &mockWorkspace{},
 		env:       map[string]any{"base_url": "http://localhost"},
 		labels:    []string{},
 	}
-	
+
 	resCh := make(chan ScenarioResult, 1)
 	errorCh := make(chan error, 1)
 	w.resCh = resCh

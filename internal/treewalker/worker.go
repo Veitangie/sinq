@@ -22,7 +22,7 @@ type worker struct {
 	taskCh                  <-chan []string
 	errorCh                 chan<- error
 	resultCh                chan<- scenario.ScenarioBlueprint
-	requestCache            map[string]*scenario.RequestBlueprint
+	requestCache            map[string][]*scenario.RequestBlueprint
 	scenarioConfigCache     map[string]scenario.ScenarioConfig
 	requestCacheLock        *sync.RWMutex
 	scenarioConfigCacheLock *sync.RWMutex
@@ -89,7 +89,7 @@ func getDefaultScenarioNameFromPath(lastFilePath string) string {
 func (t *Treewalker) runWorkers(ctx context.Context, fileSystem fs.FS, taskCh <-chan []string, errorCh chan<- error) (*sync.WaitGroup, chan scenario.ScenarioBlueprint) {
 	wg := sync.WaitGroup{}
 	wg.Add(t.cfg.Workers)
-	requestCache := make(map[string]*scenario.RequestBlueprint)
+	requestCache := make(map[string][]*scenario.RequestBlueprint)
 	requestCacheLock := sync.RWMutex{}
 	scenarioConfigCache := make(map[string]scenario.ScenarioConfig)
 	scenarioConfigCacheLock := sync.RWMutex{}
@@ -155,9 +155,9 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 
 func (w *worker) handleRequestFile(requestBlueprints *[]*scenario.RequestBlueprint, filePath string) {
 
-	if cachedRequest, isFound := readCache(filePath, w.requestCache, w.requestCacheLock); isFound {
+	if cachedRequests, isFound := readCache(filePath, w.requestCache, w.requestCacheLock); isFound {
 		w.t.logger.Debug("[Treewalker] There was a cache hit", "filePath", filePath)
-		*requestBlueprints = append(*requestBlueprints, cachedRequest)
+		*requestBlueprints = append(*requestBlueprints, cachedRequests...)
 		return
 	}
 
@@ -169,16 +169,16 @@ func (w *worker) handleRequestFile(requestBlueprints *[]*scenario.RequestBluepri
 	}
 	defer file.Close()
 
-	requestBlueprint, err := w.t.parseRequest(file, filePath)
+	newRequestBlueprints, err := w.t.parseRequest(file, filePath)
 	if err != nil {
 		w.t.logger.Error("[Treewalker] Error occurred while parsing file", "error", err, "filePath", filePath)
 		w.errorCh <- fmt.Errorf("Error occurred while parsing file %s: %w", filePath, err)
 		return
 	}
 
-	*requestBlueprints = append(*requestBlueprints, requestBlueprint)
+	*requestBlueprints = append(*requestBlueprints, newRequestBlueprints...)
 
-	updateCache(filePath, requestBlueprint, w.requestCache, w.requestCacheLock)
+	updateCache(filePath, newRequestBlueprints, w.requestCache, w.requestCacheLock)
 }
 
 func readCache[K comparable, V any](k K, cache map[K]V, lock *sync.RWMutex) (V, bool) {

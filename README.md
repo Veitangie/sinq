@@ -312,7 +312,7 @@ More detailed explanation of the algorithm can be found in the [Treewalker docum
 
 ## The `.sinq` Format
 
-A `.sinq` file is a standard HTTP request with optional embedded Lua scripts. 
+A `.sinq` file is a standard HTTP request with optional embedded Lua scripts. You can also define multiple requests in a single `.sinq` file by separating them with the `###` delimiter. 
 
 There are two categories of scripts within a `.sinq` file:
 1. **General/Inline Scripts:** `$MY_VAR`, `$` (unnamed). These are evaluated to dynamically generate the outgoing HTTP request. The return value is injected directly into the request payload or headers. If a general script fails, `sinq` attempts to automatically prepend `return ` and retry, enabling simple string interpolations like `${env.HOST}`.
@@ -436,7 +436,7 @@ To reduce the risk of accidental exposure, some error messages intentionally omi
 
 ## Usage
 
-Point `sinq` at a directory containing your `.sinq` files. `sinq` will automatically sort them in natural order, bundle them into scenarios and execute them concurrently.
+Point `sinq` at a directory containing your `.sinq` files. `sinq` will automatically sort them in natural order, bundle them into scenarios and execute them concurrently. You can also point `sinq` to a single `.sinq` file to execute just that file as its own standalone scenario.
 
 ```bash
 # Run a standard test suite
@@ -447,6 +447,9 @@ sinq -f junit -o report.xml ./tests/integration
 
 # Ignore self-signed TLS certificates and enable verbose debug logging
 sinq -iV ./tests/local
+
+# Run a single file as a standalone scenario
+sinq ./tests/integration/001-auth/01-login.sinq
 ```
 
 ### Options

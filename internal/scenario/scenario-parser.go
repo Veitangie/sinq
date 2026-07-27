@@ -18,6 +18,7 @@ type parser struct {
 	offsetNumber      int
 	currentScriptName string
 	unnamedScriptIdx  int
+	delimiterToken    Token
 }
 
 func (p *parser) advance() {
@@ -40,6 +41,13 @@ func (p *parser) read() (byte, error) {
 		return 0b0, io.EOF
 	}
 	return p.source[p.current], nil
+}
+
+func (p *parser) previous() byte {
+	if p.current-1 < 0 || p.current-1 >= len(p.source) {
+		return 0b0
+	}
+	return p.source[p.current-1]
 }
 
 func (p *parser) match(expected byte) error {
@@ -97,6 +105,12 @@ func (bp *RequestBlueprint) setScript(t Token) error {
 }
 
 func (p *parser) lexToken() (Token, error) {
+	if p.delimiterToken.Type == Delimiter {
+		res := p.delimiterToken
+		p.delimiterToken = Token{}
+		return res, nil
+	}
+
 	b, err := p.read()
 	if err != nil {
 		return Token{Type: EOF, Line: p.lineNumber, Offset: p.offsetNumber, PayloadStart: -1, PayloadEnd: -1}, nil
@@ -133,11 +147,13 @@ func (p *parser) parseText() (Token, error) {
 			}
 			return res, err
 		}
+
 		if isEscaped {
 			isEscaped = false
 			p.advance()
 			continue
 		}
+
 		switch b {
 		case '\\':
 			isEscaped = true
@@ -147,7 +163,84 @@ func (p *parser) parseText() (Token, error) {
 			res.PayloadEnd = p.current
 			res.HasEscapes = hasEscapes
 			return res, nil
+		case '#':
+			maybeEnd := p.current
+			maybeToken := p.parseDelimiter()
+
+			if maybeToken.Type == Delimiter {
+				if res.Start >= maybeEnd-1 {
+					return maybeToken, nil
+				}
+
+				res.End = maybeEnd - 1
+				res.PayloadEnd = maybeEnd - 1
+				res.HasEscapes = hasEscapes
+
+				p.delimiterToken = maybeToken
+				return res, nil
+			}
+
+			isEscaped = p.previous() == '\\'
+			res.HasEscapes = maybeToken.HasEscapes || isEscaped
+			continue
 		}
+
+		p.advance()
+	}
+}
+
+func (p *parser) parseDelimiter() Token {
+	res := Token{
+		Start: p.current - 1,
+		// This is a hack technically, since the actual delimiter starts at the new line, but for better UX we want
+		// to report it as starting at the first #, so Line and Offset should match that in the result
+		Line:   p.lineNumber,
+		Offset: p.offsetNumber,
+	}
+
+	prev := p.previous()
+
+	for range 3 {
+		b, err := p.read()
+		if err != nil {
+			return res
+		}
+
+		if b != '#' {
+			return res
+		}
+
+		p.advance()
+	}
+
+	if prev != '\n' && prev != 0b0 {
+		return res
+	}
+
+	for {
+		b, err := p.read()
+
+		if err != nil {
+			return res
+		}
+
+		if b == '\n' {
+			res.End = p.current
+			res.Type = Delimiter
+			return res
+		}
+
+		if !unicode.IsSpace(rune(b)) {
+			if res.PayloadStart == 0 {
+				res.PayloadStart = p.current
+			}
+
+			if b == '\\' {
+				res.HasEscapes = true
+			}
+			res.PayloadEnd = p.current + 1
+		}
+
 		p.advance()
 	}
 }

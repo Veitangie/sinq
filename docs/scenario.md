@@ -20,6 +20,19 @@ When a worker picks up a scenario, it executes the requests sequentially. For a 
 
 A `.sinq` file is parsed using a custom lexer that separates raw HTTP text from Lua scripts. 
 
+### Multiple Requests per File
+You can define multiple requests sequentially in a single `.sinq` file using the `###` delimiter. The delimiter must be on its own line and can optionally be followed by a comment which becomes the request's name in logs and reports. For example:
+
+```text
+### Setup Request
+POST /api/auth
+{"user": "admin"}
+
+### Get Data
+GET /api/data
+```
+The first request does not need a leading `###` delimiter, but you can provide one if you want to explicitly name it. To send a literal `###` in a request body, escape it with a backslash: `\###`.
+
 ### Unnamed Scripts & Interpolation
 The syntax `${env.BASE_URL}` is syntactic sugar. When the parser encounters a `$` followed immediately by `{`, it creates an **Unnamed Script**. 
 
@@ -32,13 +45,15 @@ Under the hood, `sinq` takes the contents of that script, prepends the `return` 
 To maintain high performance, `sinq` compiles all Lua scripts into bytecode (AST) and caches them in memory. The cache key is tied to the physical byte-offset of the script in the file. This means you can have 1,000 workers executing the same scenario concurrently, and the Lua engine will only compile the bytecode once. Furthermore, if multiple workers attempt to process identical requests simultaneously, `sinq` can use a `singleflight` mechanism to collapse the execution. This is strictly **opt-in per request** by calling `req.cache(true)` in the `$PRE` block. When enabled, the first worker performs the processing, while all other waiting workers receive the cached result instantly when the first finishes.
 
 ### Escape Sequences
-If you need to send a literal `$PRE{` or `${` string in a JSON payload without `sinq` attempting to execute it as Lua, use the backslash escape character `\`.
+If you need to send a literal `$PRE{`, `${`, or `###` string in a JSON payload without `sinq` attempting to execute it as Lua or split the file, use the backslash escape character `\`.
 
 ```text
 POST /comments
 Content-Type: text/plain
 
 User said: \$PRE{ this is not a script }
+And this is not a delimiter:
+\###
 ```
 
 ## Scenario Configuration

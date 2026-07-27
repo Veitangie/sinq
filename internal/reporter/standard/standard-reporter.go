@@ -120,7 +120,6 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 				requestMark = markSkipped
 			case runner.Aborted:
 				requestMark = markAborted
-				ranRequests += 1
 			case runner.Success:
 				successfulRequests += 1
 				ranRequests += 1

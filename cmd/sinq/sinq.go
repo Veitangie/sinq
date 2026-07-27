@@ -110,7 +110,7 @@ func sinq(args []string) int {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	logger.Debug("[sinq] Initialization complete", "duration", mainTimer.Time())
 
-	walker, err := treewalker.NewTreewalker(cfg, *logger, scenario.ParseRequestBlueprint, scenario.ParseConfig)
+	walker, err := treewalker.NewTreewalker(cfg, *logger, scenario.ParseRequestBlueprints, scenario.ParseConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to construct treewalker: %s\n", err.Error())
 		return 1
@@ -125,9 +125,20 @@ func sinq(args []string) int {
 
 	allScenarios := []runner.ScenarioBundle{}
 	for _, path := range cfg.Paths {
-		fs, err := NewOSRootWorkspace(path)
+		stat, err := os.Stat(path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to open filetree at %s: %s\n", path, err.Error())
+			fmt.Fprintf(os.Stderr, "Failed to stat %s: %s\n", path, err.Error())
+			continue
+		}
+
+		wsPath := path
+		if !stat.IsDir() {
+			wsPath = filepath.Dir(path)
+		}
+
+		fs, err := NewOSRootWorkspace(wsPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open filetree at %s: %s\n", wsPath, err.Error())
 			continue
 		}
 		defer func(path string) {
@@ -135,14 +146,27 @@ func sinq(args []string) int {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to close filetree at %s: %s\n", path, err.Error())
 			}
-		}(path)
+		}(wsPath)
 
-		newCtx := context.WithValue(ctx, treewalker.PathCtxKey, path)
-		res, err := walker.ParseFiletree(newCtx, fs)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: Failed to parse filetree from %s: %s\n", path, err.Error())
-			continue
+		var res []scenario.ScenarioBlueprint
+		if stat.IsDir() {
+			var err error
+			newCtx := context.WithValue(ctx, treewalker.PathCtxKey, path)
+			res, err = walker.ParseFiletree(newCtx, fs)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: Failed to parse filetree from %s: %s\n", path, err.Error())
+				continue
+			}
+		} else {
+			resOne, err := walker.ParseSingleFile(fs, path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: Failed to parse %s: %s\n", path, err.Error())
+				continue
+			}
+
+			res = []scenario.ScenarioBlueprint{resOne}
 		}
+
 		allScenarios = slices.Grow(allScenarios, len(res))
 		for _, scenarioBlueprint := range res {
 			allScenarios = append(allScenarios, runner.ScenarioBundle{ScenarioBlueprint: scenarioBlueprint, Workspace: fs})
@@ -369,7 +393,6 @@ For full documentation and examples, visit: https://github.com/Veitangie/sinq/do
 Or read the manual: man 1 sinq`
 
 var versionConstPart = "sinq dev - "
-
 
 var sinqMeaning []string = []string{
 	"The Spanish Inquisition",
