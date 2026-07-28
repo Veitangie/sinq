@@ -226,12 +226,12 @@ func (r *requestParser) scanHeaders(dest *http.Request) error {
 
 		value, _ := r.scanLine()
 
-		if string(bytes.ToLower(name)) == "host" {
+		if bytes.EqualFold(name, []byte("host")) {
 			dest.Host = string(value)
 			continue
 		}
 
-		if string(bytes.ToLower(name)) == "user-agent" {
+		if bytes.EqualFold(name, []byte("user-agent")) {
 			dest.Header.Set(string(name), string(value))
 			continue
 		}

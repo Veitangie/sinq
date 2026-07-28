@@ -1,0 +1,60 @@
+site_name: sinq
+site_description: Concurrent integration and end-to-end HTTP testing tool for stateful workflows.
+site_url: https://sinq.veitangie.dev
+
+theme:
+  name: material
+  icon:
+    logo: material/api
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+repo_name: Veitangie/sinq
+repo_url: https://github.com/Veitangie/sinq
+
+nav:
+  - Home: index.md
+  - Getting Started: runner.md
+  - Scenarios & Config: scenario.md
+  - Writing Tests:
+    - Treewalker: treewalker.md
+    - Environment Matrix: env-matrix.md
+  - Lua API: lua-api.md
+  - CI/CD Integration: ci-cd-integration.md
+  - Manpage: man.md
+  - Additional Information:
+    - Alternatives & Comparisons: alternatives.md
+    - FAQ: faq.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true 

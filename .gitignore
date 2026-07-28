@@ -8,3 +8,5 @@ out.xml
 TODO*
 .DS_Store
 sinq.1
+.venv/
+site/

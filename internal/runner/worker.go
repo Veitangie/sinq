@@ -290,7 +290,12 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 }
 
 func (w *worker) materializeRequest(ctx context.Context, req *scenario.RequestBlueprint, executionTimeout time.Duration) ([]byte, error) {
-	materialized := bytes.Buffer{}
+	if req == nil || len(req.Content) == 0 {
+		return []byte{}, nil
+	}
+
+	materialized := bytes.NewBuffer(make([]byte, 0, req.Content[len(req.Content)-1].End-req.Content[0].Start))
+
 	for _, token := range req.Content {
 		if ctx.Err() != nil {
 			return materialized.Bytes(), errors.New("Context cancelled")
@@ -303,7 +308,7 @@ func (w *worker) materializeRequest(ctx context.Context, req *scenario.RequestBl
 			if err != nil {
 				return []byte{}, err
 			}
-			materialized.Write([]byte(value.String()))
+			materialized.WriteString(value.String())
 		case scenario.IncompleteToken:
 			return []byte{}, fmt.Errorf("%s#%d:%d: Failed to materialize request: incomplete token", req.Filename, token.Line, token.Offset)
 		case scenario.Delimiter:
@@ -311,6 +316,7 @@ func (w *worker) materializeRequest(ctx context.Context, req *scenario.RequestBl
 		case scenario.EOF:
 		}
 	}
+
 	return materialized.Bytes(), nil
 }
 
