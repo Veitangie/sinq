@@ -1,9 +1,3 @@
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Coverage](https://codecov.io/github/Veitangie/sinq/graph/badge.svg?token=MVHIV761LR)](https://codecov.io/github/Veitangie/sinq)
-[![CodeFactor](https://www.codefactor.io/repository/github/veitangie/sinq/badge)](https://www.codefactor.io/repository/github/veitangie/sinq)
-[![Code Quality](https://app.codacy.com/project/badge/Grade/bd32a7efb2b444f78e55cd2f351c613c)](https://app.codacy.com/gh/Veitangie/sinq/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-![Pipeline Status](https://github.com/Veitangie/sinq/actions/workflows/ci.yml/badge.svg)
-![Release Version](https://img.shields.io/github/v/release/Veitangie/sinq?include_prereleases&logo=github)
 
 Have you ever felt the pain of wiring up a bunch of independent requests into one stateful flow from start to finish? I have, and while manageable, one thing always bugged me. Why do we treat end-to-end API tests as a bunch of independent requests that we have to somehow bundle together, when they actually are much closer to stateful workflows? That's why this tool was born. It is designed to do one job - execute sequences of requests to walk through different workflow scenarios. Instead of maintaining large request collections or YAML-heavy test definitions, I wanted to describe real user workflows directly in files and let `sinq` compile them into executable scenarios. And make it natively parallel, why not? So I present to you:
 
@@ -486,21 +480,5 @@ Choose another tool when:
 ---
 
 ## Useful Links
-
-- [Documentation](index.md)
 - [Tree-sitter Grammar](https://github.com/Veitangie/tree-sitter-sinq) - syntax highlighting for tree-sitter compatible editors
 - [VSCode Extension](https://marketplace.visualstudio.com/items?itemName=Veitangie.sinq-helper) - syntax highlighting for VSCode
-
----
-
-## Acknowledgments & Credits
-This project includes natural sorting logic adapted from [facette/natsort](https://github.com/facette/natsort), which is distributed under the 3-Clause BSD License.
-Copyright (c) 2015, Vincent Batoufflet and Marc Falzon. All rights reserved.
-
-Big thanks to [yuin](https://github.com/yuin) for his [gopher-lua](https://github.com/yuin/gopher-lua) project.
-
----
-
-## License
-Copyright (C) 2026 Veitangie.
-Distributed under the terms of the [GNU General Public License v3 (GPLv3)](https://github.com/Veitangie/sinq/blob/main/LICENSE.md).

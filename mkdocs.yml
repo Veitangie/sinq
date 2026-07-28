@@ -36,9 +36,8 @@ nav:
   - Home: index.md
   - Getting Started: runner.md
   - Scenarios & Config: scenario.md
-  - Writing Tests:
-    - Treewalker: treewalker.md
-    - Environment Matrix: env-matrix.md
+  - Treewalker: treewalker.md
+  - Environment Matrix: env-matrix.md
   - Lua API: lua-api.md
   - CI/CD Integration: ci-cd-integration.md
   - Manpage: man.md

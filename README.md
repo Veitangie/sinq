@@ -303,7 +303,7 @@ Running `sinq ./tests` identifies **two leaf directories** (`users/` and `paymen
 
 *Notice how `01_auth.sinq` is executed independently at the start of both scenarios. They do not share the same Lua VM instance; they just inherit the same structure.*
 
-More detailed explanation of the algorithm can be found in the [Treewalker documentation](docs/treewalker.md)
+More detailed explanation of the algorithm can be found in the [Treewalker documentation](https://sinq.veitangie.dev/treewalker)
 
 > Currently, leaf directories are expected to contain at least one `.sinq` or `.scenario` file.
 > Directories that contain neither `.sinq`/`.scenario` files nor subdirectories are not considered valid scenario definitions.
@@ -367,7 +367,7 @@ There are two categories of scripts within a `.sinq` file:
 * Functions: `decode(token)`, `verify(token, key, algo?)`, `sign(claimsTable, key, method?)`
 
 **Fake Data API (`sinq.fake`)**
-* Functions: See [lua-api.md](docs/lua-api.md) for a comprehensive suite of fake data generators (`sinq.fake.uuid()`, `sinq.fake.email()`, `sinq.fake.company()`, etc.) to generate random, realistic payloads for endpoints.
+* Functions: See the [Lua API documentation](https://sinq.veitangie.dev/lua-api) for a comprehensive suite of fake data generators (`sinq.fake.uuid()`, `sinq.fake.email()`, `sinq.fake.company()`, etc.) to generate random, realistic payloads for endpoints.
 
 ### Responses
 All completed responses are stored in the global `sinq.responses` table. Lua is 1-indexed, so the response to the first request is `sinq.responses[1]`.
@@ -421,7 +421,7 @@ Default configuration that can be overridden in `.scenario` files:
 * **`max_retries`**: The maximum amount of times any request in the scenario can be retried upon retry script returning a valid non-negative number.
 * **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
 * **`max_body`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
-* **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](docs/env-matrix.md).
+* **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](https://sinq.veitangie.dev/env-matrix).
 * **`tags`**: Tags or labels assigned to scenarios containing this `.scenario` file. They get collected into one list for the resulting scenario.
 
 ---
@@ -499,7 +499,7 @@ Choose another tool when:
 
 ## Useful Links
 
-- [Documentation](docs/)
+- [Documentation](https://sinq.veitangie.dev/)
 - [Tree-sitter Grammar](https://github.com/Veitangie/tree-sitter-sinq) - syntax highlighting for tree-sitter compatible editors
 - [VSCode Extension](https://marketplace.visualstudio.com/items?itemName=Veitangie.sinq-helper) - syntax highlighting for VSCode
 
