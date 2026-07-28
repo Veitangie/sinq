@@ -12,6 +12,7 @@ Write requests as near-raw HTTP, add Lua where logic is needed, and organize fil
 ## Why sinq?
 
 `sinq` is:
+
 * **Workflow-Oriented:**
     - Build authentication, creation, processing and verification flows as file trees.
     - Shared setup lives in parent directories.
@@ -467,12 +468,14 @@ sinq ./tests/integration/001-auth/01-login.sinq
 ## When To Choose Sinq
 
 Choose `sinq` when:
+
 - You need stateful integration workflows with minimal setup.
 - You prefer files over GUI collections.
 - You don't need the whole JS runtime to make http requests.
 - You run tests primarily in CI or CLI interfaces.
 
 Choose another tool when:
+
 - You need a graphical API explorer.
 - You need browser automation.
 - You need fully custom test frameworks written in a general-purpose language.
