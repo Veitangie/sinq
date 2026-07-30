@@ -5,6 +5,7 @@
 ## Exit Codes
 
 `sinq` communicates test status to the CI runner via standard UNIX exit codes:
+
 * **`0` (Success):** All discovered scenarios executed successfully, all network calls completed, and no `$ASSERT` blocks triggered a failure.
 * **`1` (Failure):** One or more scenarios failed an assertion, encountered a network timeout, crashed, or the CLI received invalid arguments.
 

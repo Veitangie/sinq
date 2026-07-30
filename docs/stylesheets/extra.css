@@ -1,0 +1,17 @@
+:root, [data-md-color-scheme="slate"] {
+  /* Primary Theme Color */
+  --md-primary-fg-color: #002b59;
+  --md-primary-fg-color--light: #335c8b;
+  --md-primary-fg-color--dark: #000030;
+  
+  /* Make inline links the same color as the default 'note' admonition border */
+  --md-typeset-a-color: #448aff;
+}
+
+/* Force active navigation links and tabs to use the accent color */
+.md-nav__link--active,
+.md-nav__link--active:hover,
+.md-tabs__link--active,
+.md-tabs__link--active:hover {
+  color: var(--md-accent-fg-color) !important;
+}

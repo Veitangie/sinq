@@ -178,7 +178,7 @@ ParsingLoop:
 				currentRes = &RequestBlueprint{Source: source, Filename: filename}
 				res = append(res, currentRes)
 			}
-			currentRes.Name = fmt.Sprintf("%s#%s", filename, currentRes.ExtractPayload(t))
+			currentRes.Name = string(currentRes.ExtractPayload(t))
 			parser.consumeWhitespace()
 		case EOF:
 			break ParsingLoop

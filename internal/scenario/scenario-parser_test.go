@@ -561,7 +561,7 @@ func TestParseDelimiter_CommentAsFilename(t *testing.T) {
 		t.Fatalf("Expected 2 blueprints, got %d", len(blueprints))
 	}
 
-	expectedName := "test.sinq#Setup Request"
+	expectedName := "Setup Request"
 	if string(blueprints[1].Name) != expectedName {
 		t.Errorf("Expected the second blueprint to have the comment as its Name, want: %q, got: %q", expectedName, blueprints[1].Name)
 	}
@@ -579,12 +579,12 @@ func TestParseDelimiter_CommentAtStartOfFile(t *testing.T) {
 		t.Fatalf("Expected 2 blueprints (no ghost requests), got %d", len(blueprints))
 	}
 
-	expectedName1 := "test.sinq#Request one"
+	expectedName1 := "Request one"
 	if string(blueprints[0].Name) != expectedName1 {
 		t.Errorf("Expected the first blueprint to be named %q, got: %q", expectedName1, blueprints[0].Name)
 	}
 
-	expectedName2 := "test.sinq#Request two"
+	expectedName2 := "Request two"
 	if string(blueprints[1].Name) != expectedName2 {
 		t.Errorf("Expected the second blueprint to be named %q, got: %q", expectedName2, blueprints[1].Name)
 	}

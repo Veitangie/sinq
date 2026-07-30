@@ -86,7 +86,7 @@ func (r StandardReporter) Report(source <-chan runner.ScenarioResult, timer <-ch
 		case config.Failed:
 			if result.Status != runner.Failure && result.Status != runner.Error {
 				for _, request := range result.RequestResults {
-					if request.Status != runner.Skipped {
+					if request.Status != runner.Skipped && request.Status != runner.Aborted {
 						ranRequests += 1
 					}
 

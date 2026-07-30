@@ -7,20 +7,12 @@ theme:
   icon:
     logo: material/api
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: indigo
-      accent: indigo
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: indigo
-      accent: indigo
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
+    - scheme: slate
+      primary: custom
+      accent: cyan
+  font:
+    text: Roboto
+    code: Fira Code
   features:
     - navigation.tabs
     - navigation.sections
@@ -29,18 +21,23 @@ theme:
     - search.highlight
     - content.code.copy
 
+extra_css:
+  - stylesheets/extra.css
+
 repo_name: Veitangie/sinq
 repo_url: https://github.com/Veitangie/sinq
 
 nav:
   - Home: index.md
-  - Getting Started: runner.md
-  - Scenarios & Config: scenario.md
-  - Treewalker: treewalker.md
-  - Environment Matrix: env-matrix.md
+  - Getting Started: getting-started.md
   - Lua API: lua-api.md
+  - Scenarios & Config: scenario.md
+  - Environment Matrix: env-matrix.md
+  - Architecture & Components:
+    - Overview: overview.md
+    - Treewalker: treewalker.md
+    - Execution Runner: runner.md
   - CI/CD Integration: ci-cd-integration.md
-  - Manpage: man.md
   - Additional Information:
     - Alternatives & Comparisons: alternatives.md
     - FAQ: faq.md

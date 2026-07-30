@@ -22,7 +22,7 @@ $POST{
 
 In subsequent requests, you can inject it using inline scripts:
 
-```text
+```http
 GET ${env.BASE_URL}/protected-route
 Authorization: Bearer ${AUTH_TOKEN}
 ```
@@ -47,7 +47,7 @@ Never hardcode secrets (like API keys or passwords) in your `.sinq` files. Inste
 
 You can then access them safely in your Lua scripts via the `secrets` table:
 
-```text
+```http
 POST ${env.BASE_URL}/login
 
 {
@@ -60,7 +60,7 @@ POST ${env.BASE_URL}/login
 
 To send raw file contents as the request body, use the `$PRE` hook's `req.attach()` method. This instructs `sinq` to stream the file directly from disk into the HTTP request body.
 
-```text
+```http
 POST ${env.BASE_URL}/upload
 Content-Type: application/octet-stream
 
@@ -71,7 +71,7 @@ $PRE{ req.attach("path/to/my_file.bin") }
 
 By default, `sinq` fires every request fresh. However, if you have an expensive endpoint that returns the same data and you want to speed up local testing, you can opt-in to caching using the `$PRE` hook:
 
-```text
+```http
 GET ${env.BASE_URL}/expensive-lookup
 
 $PRE{ req.cache(true) }
@@ -82,7 +82,7 @@ $PRE{ req.cache(true) }
 
 Yes. If you determine during the `$PRE` hook that a request is not needed (e.g., you already have the data or an environment variable disables it), you can mark it to be skipped.
 
-```text
+```http
 POST ${env.BASE_URL}/optional-step
 
 $PRE{ 
@@ -103,7 +103,7 @@ If a response exceeds this limit, `sinq` safely truncates it and flags the respo
 
 If you *expect* a massive payload and want to save it without buffering it in memory (or hitting the `max_body` limit), you can stream it straight to disk using the `$PRE` hook:
 
-```text
+```http
 GET ${env.BASE_URL}/download-report
 
 $PRE{ req.saveResponseTo("path/to/report.pdf") }
@@ -114,7 +114,7 @@ When using `saveResponseTo`, the `res.bodyRaw` and `res.bodyJson` fields will re
 
 You can write retry policies inside the `$RETRY` hook. It executes immediately after the response is received. It must return the number of milliseconds to wait before retrying, or a negative number to stop retrying.
 
-```text
+```http
 GET ${env.BASE_URL}/job-status
 
 $RETRY{ 

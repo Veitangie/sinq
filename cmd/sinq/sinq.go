@@ -244,7 +244,11 @@ func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config) {
 		}
 
 		for idx, rqBp := range scBp.Requests {
-			fmt.Fprintf(os.Stdout, "  - %d: %s\n", idx+1, rqBp.Filename)
+			maybeName := rqBp.Filename
+			if rqBp.Name != "" {
+				maybeName = rqBp.Name
+			}
+			fmt.Fprintf(os.Stdout, "  - %d: %s\n", idx+1, maybeName)
 		}
 	}
 }

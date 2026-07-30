@@ -39,6 +39,8 @@ Write requests as near-raw HTTP, add Lua where logic is needed, and organize fil
 * **Fully scriptable:** Pass JWTs, correlation IDs, and dynamic payloads between chained requests, manage execution flow, run scripts on lifecycle hooks and more.
 * **Lightweight & built for CI/CD:** Distributed both as a lightweight binary and a container, requires minimal setup to run. Native support for JUnit XML reporting.
 
+![sinq performance: 30000 requests across 15000 scenarios in 5.08s](docs/assets/performance.png)
+
 ### Show Don't Tell: A Simple Healthcheck
 
 Here is what a simple one-off request looks like in `sinq`.

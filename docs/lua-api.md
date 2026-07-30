@@ -22,6 +22,7 @@ A table containing sensitive values passed to `sinq` via the `-s` / `--secret` /
 
 ### `req` and `res` (Current Request Context)
 Shorthands for the *current* request and response being processed. 
+
 * `req`: Used in `$PRE` to modify the outgoing request (e.g., `req.attach()`).
 * `res`: A direct reference to `sinq.responses[%current%]`.
 
@@ -56,14 +57,17 @@ You can name them (e.g., `$MY_SCRIPT{...}`) or leave them anonymous (`${...}`).
 
 **Single-line Interpolation:**
 If an inline script fails to compile, `sinq` automatically prepends `return ` and retries. This allows for clean, single-line variable interpolation:
-```text
+```http
 GET ${env.BASE_URL}/users/${CREATED_USER_ID}
 Authorization: Bearer ${secrets.API_KEY}
 ```
 
+!!! note
+    Calling functions inside an inline script can make it ambiguous for the compiler to determine if a `return` should be prepended. In those cases, you must explicitly write `return`.
+
 **Multi-line Dynamic Generation:**
 For complex logic, use explicit returns:
-```text
+```http
 POST ${env.BASE_URL}/users
 Content-Type: application/json
 
@@ -75,7 +79,9 @@ Content-Type: application/json
     "role": "admin"
 }
 ```
-*Note: Inline scripts must return a value. Returning nothing will fail the request materialization.*
+
+!!! note
+    Inline scripts must return a value. Returning nothing will fail the request materialization.
 
 ---
 
@@ -85,48 +91,50 @@ The following APIs are dynamically injected and destroyed depending on the execu
 
 ### `$PRE` (Setup Phase)
 Executes before the HTTP request is materialized. Used for file I/O operations.
-* **`req.attach(filepath)`**: Replaces the request body with the contents of the specified file. *Note: Fails if a textual body is already defined in the `.sinq` file.*
-* **`req.saveResponseTo(filepath)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. Automatically creates missing directories in the filepath. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
-* **`req.cache(bool?)`**: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo). The parameter defaults to `true` if omitted.
-* **`req.skip(bool?)`**: Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
 
-> *Both of the file functions expect the path to be relative to the current file. Passing in an absolute path will fail*
+* **`req.attach(filepath string)`**: Replaces the request body with the contents of the specified file. *Note: Fails if a textual body is already defined in the `.sinq` file.*
+* **`req.saveResponseTo(filepath string)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. Automatically creates missing directories in the filepath. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
+* **`req.cache(enable bool?)`**: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo). The parameter defaults to `true` if omitted.
+* **`req.skip(enable bool?)`**: Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
+
+!!! note
+    Both of the file functions expect the path to be relative to the current file. Passing in an absolute path will fail.
 
 ### `$RETRY` (Polling Phase)
 Executes after receiving a response. The script **must** return a number indicating how many milliseconds to wait before retrying, or a negative number to stop.
 
 * **`sinq.retry.stop`**: A constant (`-1`) indicating the retry loop should break immediately.
-* **`sinq.retry.when(condition, delay?)`**
-  * Retries if `condition` is true. `delay` defaults to `500ms`.
-* **`sinq.retry.whenExponential(condition, base?, constant?)`**
-  * Retries if `condition` is true, using exponential backoff (`base ^ attempt * constant`).
-  * `base` defaults to `2` (Max `10`). `constant` defaults to `500ms`.
-* **`sinq.retry.withJitter(condition, range?, delegate?, delegate_args...)`**
-  * Adds randomized jitter to a retry calculation to prevent thundering herd problems.
-  * `range` defaults to `50` (±50ms jitter). `delegate` defaults to `sinq.retry.when`, delegate will be passed condition and delegate_args when called.
-  * Usage is: `sinq.retry.withJitter(res.code ~= 200, 100, sinq.retry.when, 2 * sinq.second)` - jitter conditional retry with range of [-100:100]
+* **`sinq.retry.when(condition boolean, delay number?)`**
+    * Retries if `condition` is true. `delay` defaults to `500ms`.
+* **`sinq.retry.whenExponential(condition boolean, base number?, constant number?)`**
+    * Retries if `condition` is true, using exponential backoff (`base ^ attempt * constant`).
+    * `base` defaults to `2` (Max `10`). `constant` defaults to `500ms`.
+* **`sinq.retry.withJitter(condition boolean, range number?, delegate function?, delegate_args any...)`**
+    * Adds randomized jitter to a retry calculation to prevent thundering herd problems.
+    * `range` defaults to `50` (±50ms jitter). `delegate` defaults to `sinq.retry.when`, delegate will be passed condition and delegate_args when called.
+    * Usage is: `sinq.retry.withJitter(res.code ~= 200, 100, sinq.retry.when, 2 * sinq.second)` - jitter conditional retry with range of [-100:100]
 
 ### `$ASSERT` (Validation Phase)
 Executes after the retry loop finishes. Used to validate the final state of the response.
 
-* **`sinq.assert.fail(reason)`**: Marks the test as failed with the provided reason. **Note: This does not halt Lua execution.** The rest of the `$ASSERT` block will continue to run, allowing you to collect multiple failure reasons for a single request.
-  ```lua
-  $ASSERT{
-      local data = res.json()
-      if data.id == nil then
-          sinq.assert.fail("ID is missing")
-      end
-      if data.status ~= "active" then
-          sinq.assert.fail("User is not active") 
-      end
-      -- If both conditions are met, the report will show TWO failures for this request.
-  }
-  ```
-* **`sinq.assert.code(expectedHttpCode, message?)`**: Fails if the actual status code does not match.
-* **`sinq.assert.equals(actual, expected)`**: Fails if `actual` does not equal `expected`. When comparing tables, checks that every key-value pair in `expected` recursively matches those in `actual`, but ignores pairs from `actual` not present in `expected`.
-* **`sinq.assert.contains(string, substring, message?)`**: Fails if the string does not contain the specified substring.
-* **`sinq.assert.isTrue(condition, message?)`**: Fails if the condition resolves to `false` or `nil`.
-* **`sinq.assert.fileMatches(filepath)`**: Fails if the response previously saved using `req.saveResponseTo()` does not exactly match the contents of `filepath`. Fails immediately if `req.saveResponseTo()` was not called.
+* **`sinq.assert.fail(reason string)`**: Marks the test as failed with the provided reason. **Note: This does not halt Lua execution.** The rest of the `$ASSERT` block will continue to run, allowing you to collect multiple failure reasons for a single request.
+    ```lua
+    $ASSERT{
+        local data = res.json()
+        if data.id == nil then
+            sinq.assert.fail("ID is missing")
+        end
+        if data.status ~= "active" then
+            sinq.assert.fail("User is not active") 
+        end
+        -- If both conditions are met, the report will show TWO failures for this request.
+    }
+    ```
+* **`sinq.assert.code(expectedHttpCode number, message string?)`**: Fails if the actual status code does not match.
+* **`sinq.assert.equals(actual any, expected any)`**: Fails if `actual` does not equal `expected`. When comparing tables, checks that every key-value pair in `expected` recursively matches those in `actual`, but ignores pairs from `actual` not present in `expected`.
+* **`sinq.assert.contains(source string, substring string, message string?)`**: Fails if the string does not contain the specified substring.
+* **`sinq.assert.isTrue(condition boolean, message string?)`**: Fails if the condition resolves to `false` or `nil`.
+* **`sinq.assert.fileMatches(filepath string)`**: Fails if the response previously saved using `req.saveResponseTo()` does not exactly match the contents of `filepath`. Fails immediately if `req.saveResponseTo()` was not called.
 
 ### `$POST` (State Extraction Phase)
 Executes after a successful `$ASSERT` phase. Typically used to parse the final response payload and store relevant data in the global sandbox for subsequent requests. No special scoped APIs are injected here.
@@ -137,7 +145,8 @@ Executes after a successful `$ASSERT` phase. Typically used to parse the final r
 
 When an HTTP request completes, `sinq` parses the response and injects it into the `sinq.responses` table at the index corresponding to the request number. Lua is 1-indexed, meaning the response to the first request in your scenario is accessed via `sinq.responses[1]`.
 
-> **Note:** A response object only exists *after* the request has been executed. Accessing `sinq.responses[2]` or the alias `res` during the `$PRE` hook of the second request will return nil.
+!!! note
+    A response object only exists *after* the request has been executed. Accessing `sinq.responses[2]` or the alias `res` during the `$PRE` hook of the second request will return nil.
 
 ### Response Object Structure
 * `attempt` *(number)*: The current execution attempt (useful during `$RETRY`).
@@ -145,76 +154,78 @@ When an HTTP request completes, `sinq` parses the response and injects it into t
 * `oversized` *(boolean | nil)*: `true` if the payload exceeded the scenario's `max_body` limit and was safely truncated.
 
 ### Body Access Methods
-*Note: These are only available if `req.saveResponseTo()` was NOT used in the `$PRE` hook.*
+
+!!! note
+    These are only available if `req.saveResponseTo()` was NOT used in the `$PRE` hook.
 
 * `bodyRaw` *(string)*: The raw string of the response payload.
 * `extractBodyJson()` *(function)*: Safely attempts to parse `bodyRaw` into a Lua table.
-  * **Returns:** `(table, error)`
+    * **Returns:** `(result table, error string)`
 * `json()` *(function)*: An unsafe convenience wrapper around `extractBodyJson`. 
-  * **Returns:** `table` directly. 
-  * **Throws:** Calls a fatal `error()` if the body is not valid JSON, failing the scenario immediately.
+    * **Returns:** `table` directly. 
+    * **Throws:** Calls a fatal `error()` if the body is not valid JSON, failing the scenario immediately.
 
 ### HTTP Headers Translation
 HTTP headers are complex because a single key can have multiple values. `sinq` handles this translation automatically.
 
 * **Single Value Headers:** Translated to a standard Lua string.
-  ```lua
-  local contentType = res.headers["Content-Type"]
-  ```
+    ```lua
+    local contentType = res.headers["Content-Type"]
+    ```
 * **Multi-Value Headers:** Translated to a 1-indexed Lua table (array) of strings.
-  ```lua
-  local firstCookie = res.headers["Set-Cookie"][1]
-  ```
+    ```lua
+    local firstCookie = res.headers["Set-Cookie"][1]
+    ```
 
-### The JSON Blindspot (1-Indexed Arrays)
-In Go and in general, arrays are `0-indexed`. In Lua, tables are `1-indexed`. 
-If your API returns a top-level JSON array, `sinq` translates it into a Lua table starting at index 1.
-
-**API Response:**
-```json
-[
-  {"id": 42},
-  {"id": 99}
-]
-```
-
-**Lua Assertion:**
-```lua
-$ASSERT{
-    -- Correct: Access the first element at index 1
-    local data = res.json()
-    local first_id = data[1].id
+!!! note "JSON Blindspot (1-Indexed Arrays)"
+    In Go and in general, arrays are `0-indexed`. In Lua, tables are `1-indexed`. 
+    If your API returns a top-level JSON array, `sinq` translates it into a Lua table starting at index 1.
     
-    if first_id ~= 42 then 
-        sinq.assert.fail("ID mismatch") 
-    end
-}
-```
+    **API Response:**
+    ```json
+    [
+      {"id": 42},
+      {"id": 99}
+    ]
+    ```
+    
+    **Lua Assertion:**
+    ```lua
+    $ASSERT{
+        -- Correct: Access the first element at index 1
+        local data = res.json()
+        local first_id = data[1].id
+        
+        if first_id ~= 42 then 
+            sinq.assert.fail("ID mismatch") 
+        end
+    }
+    ```
 
 ---
 
 ## 6. Extensions Quick Reference
 
-* `sinq.time.ms`, `sinq.time.second`, `sinq.time.minute`, `sinq.time.hour`
-* `sinq.time.now()`
-* `sinq.time.fromString(str, format?)`
-* `sinq.time.toString(ms, format?)`
-* `sinq.crypto.base64Encode(string)`
-* `sinq.crypto.base64Decode(string)`
-* `sinq.crypto.base64UrlEncode(string)`
-* `sinq.crypto.base64UrlDecode(string)`
-* `sinq.crypto.hexEncode(string)`
-* `sinq.crypto.hexDecode(string)`
-* `sinq.crypto.md5(string, encoding?)`
-* `sinq.crypto.sha1(string, encoding?)`
-* `sinq.crypto.sha256(string, encoding?)`
-* `sinq.crypto.sha512(string, encoding?)`
-* `sinq.crypto.hmac(source, algo?, key?, encoding?)`
-* `sinq.jwt.decode(token)`
-* `sinq.jwt.verify(token, key, algo?)`
-* `sinq.jwt.sign(claimsTable, key, method?)`
-* `sinq.json.parse(string)`
-* `sinq.json.serialize(table, indent?)`
+* [`sinq.time.ms`](#constants) / [`sinq.time.second`](#constants) / [`sinq.time.minute`](#constants) / [`sinq.time.hour`](#constants)
+* [`sinq.time.now()`](#functions)
+* [`sinq.time.fromString(str string, format string?)`](#functions)
+* [`sinq.time.toString(ms number, format string?)`](#functions)
+* [`sinq.crypto.base64Encode(source string)`](#encoding)
+* [`sinq.crypto.base64Decode(source string)`](#encoding)
+* [`sinq.crypto.base64UrlEncode(source string)`](#encoding)
+* [`sinq.crypto.base64UrlDecode(source string)`](#encoding)
+* [`sinq.crypto.hexEncode(source string)`](#encoding)
+* [`sinq.crypto.hexDecode(source string)`](#encoding)
+* [`sinq.crypto.md5(source string, encoding string?)`](#hashing)
+* [`sinq.crypto.sha1(source string, encoding string?)`](#hashing)
+* [`sinq.crypto.sha256(source string, encoding string?)`](#hashing)
+* [`sinq.crypto.sha512(source string, encoding string?)`](#hashing)
+* [`sinq.crypto.hmac(source string, algo string?, key string?, encoding string?)`](#hashing)
+* [`sinq.jwt.decode(token string)`](#9-jwt-api-sinqjwt)
+* [`sinq.jwt.verify(token string, key string, algo string?)`](#9-jwt-api-sinqjwt)
+* [`sinq.jwt.sign(claimsTable table, key string, method string?)`](#9-jwt-api-sinqjwt)
+* [`sinq.json.parse(source string)`](#10-json-utilities-sinqjson)
+* [`sinq.json.serialize(tbl table, indent string?)`](#10-json-utilities-sinqjson)
 
 ---
 
@@ -228,17 +239,18 @@ Built-in constants and functions to make time-based logic and parsing possible.
 * **`sinq.time.minute`** (60000)
 * **`sinq.time.hour`** (3600000)
 
-> **Note:** Lua uses `float64` for numbers. When converting a timestamp from milliseconds to another unit (e.g., seconds) using division, use `math.floor` to ensure a clean integer: `math.floor(sinq.time.now() / sinq.time.second)`.
+!!! note
+    Lua uses `float64` for numbers. When converting a timestamp from milliseconds to another unit (e.g., seconds) using division, use `math.floor` to ensure a clean integer: `math.floor(sinq.time.now() / sinq.time.second)`.
 
 ### Functions
 * **`sinq.time.now()`**: Returns the current UNIX timestamp.
-  * **Returns:** `number` (milliseconds since epoch).
-* **`sinq.time.fromString(str, format?)`**: Parses a time string into a UNIX timestamp (milliseconds). The `format` string is optional.
-  * **Returns:** `(number, error)`
-  * **Format Rules:** Uses [Go's time layout rules](https://pkg.go.dev/time#pkg-constants). If omitted, defaults to ISO8601 (`2006-01-02T15:04:05.000Z07:00`).
-* **`sinq.time.toString(ms, format?)`**: Formats a UNIX timestamp (milliseconds) into a time string. The `format` string is optional.
-  * **Returns:** `string`
-  * **Format Rules:** Uses [Go's time layout rules](https://pkg.go.dev/time#pkg-constants). If omitted, defaults to ISO8601.
+    * **Returns:** `number` (milliseconds since epoch).
+* **`sinq.time.fromString(str string, format string?)`**: Parses a time string into a UNIX timestamp (milliseconds).
+    * **Returns:** `(result number, error string)`
+    * **Format Rules:** Uses [Go's time layout rules](https://pkg.go.dev/time#pkg-constants). If omitted, defaults to ISO8601 (`2006-01-02T15:04:05.000Z07:00`).
+* **`sinq.time.toString(ms number, format string?)`**: Formats a UNIX timestamp (milliseconds) into a time string.
+    * **Returns:** `string`
+    * **Format Rules:** Uses [Go's time layout rules](https://pkg.go.dev/time#pkg-constants). If omitted, defaults to ISO8601.
 
 ---
 
@@ -247,29 +259,30 @@ Built-in constants and functions to make time-based logic and parsing possible.
 Provides standard cryptographic encoding and hashing functions.
 
 ### Encoding
-* **`sinq.crypto.base64Encode(string)`**: Encodes a string into standard Base64.
-  * **Returns:** `string`
-* **`sinq.crypto.base64Decode(string)`**: Decodes a standard Base64 string.
-  * **Returns:** `(string, error)`
-* **`sinq.crypto.base64UrlEncode(string)`**: Encodes a string into URL-safe Base64.
-  * **Returns:** `string`
-* **`sinq.crypto.base64UrlDecode(string)`**: Decodes a URL-safe Base64 string.
-  * **Returns:** `(string, error)`
-* **`sinq.crypto.hexEncode(string)`**: Encodes a string into a hexadecimal representation.
-  * **Returns:** `string`
-* **`sinq.crypto.hexDecode(string)`**: Decodes a hexadecimal string.
-  * **Returns:** `(string, error)`
+* **`sinq.crypto.base64Encode(source string)`**: Encodes a string into standard Base64.
+    * **Returns:** `string`
+* **`sinq.crypto.base64Decode(source string)`**: Decodes a standard Base64 string.
+    * **Returns:** `(result string, error string)`
+* **`sinq.crypto.base64UrlEncode(source string)`**: Encodes a string into URL-safe Base64.
+    * **Returns:** `string`
+* **`sinq.crypto.base64UrlDecode(source string)`**: Decodes a URL-safe Base64 string.
+    * **Returns:** `(result string, error string)`
+* **`sinq.crypto.hexEncode(source string)`**: Encodes a string into a hexadecimal representation.
+    * **Returns:** `string`
+* **`sinq.crypto.hexDecode(source string)`**: Decodes a hexadecimal string.
+    * **Returns:** `(result string, error string)`
 
 ### Hashing
-* **`sinq.crypto.md5(string, encoding?)`**, **`sinq.crypto.sha1(string, encoding?)`**, **`sinq.crypto.sha256(string, encoding?)`**, **`sinq.crypto.sha512(string, encoding?)`**: Computes the cryptographic hash of the input string.
-  * **Returns:** `(string, error)`
-  * **Parameters:** `encoding` defaults to `"hex"`. Supported values are `"hex"`, `"base64"`, `"base64url"`, and `"raw"`.
-  * **Note:** Since it defaults to `"hex"`, the output is safe to print and transmit. If `"raw"` is used, the function returns the raw bytes.
-  * **Throws:** Returns an error string as the second value if an unknown encoding string is provided.
-* **`sinq.crypto.hmac(source, algo?, key?, encoding?)`**: Computes the HMAC of the source string.
-  * **Returns:** `(string, error)`
-  * **Parameters:** `algo` defaults to `"sha256"`. Supported values are `"sha256"`, `"sha1"`, `"sha512"`, and `"md5"`. `key` defaults to `""`. `encoding` defaults to `"hex"`. Supported values are `"hex"`, `"base64"`, `"base64url"`, and `"raw"`.
-  * **Throws:** Returns an error string as the second value if an unknown algorithm or encoding string is provided.
+* **`sinq.crypto.md5(source string, encoding string?)`**, **`sinq.crypto.sha1(source string, encoding string?)`**, **`sinq.crypto.sha256(source string, encoding string?)`**, **`sinq.crypto.sha512(source string, encoding string?)`**: Computes the cryptographic hash of the input string.
+    * **Returns:** `(result string, error string)`
+    * **Parameters:** `encoding` string defaults to `"hex"`. Supported values are `"hex"`, `"base64"`, `"base64url"`, and `"raw"`.
+    
+    !!! note
+        Since it defaults to `"hex"`, the output is safe to print and transmit. If `"raw"` is used, the function returns the raw bytes.
+
+* **`sinq.crypto.hmac(source string, algo string?, key string?, encoding string?)`**: Computes the HMAC of the source string.
+    * **Returns:** `(result string, error string)`
+    * **Parameters:** `algo` string defaults to `"sha256"`. Supported values are `"sha256"`, `"sha1"`, `"sha512"`, and `"md5"`. `key` string defaults to `""`. `encoding` string defaults to `"hex"`. Supported values are `"hex"`, `"base64"`, `"base64url"`, and `"raw"`.
 
 ---
 
@@ -277,18 +290,26 @@ Provides standard cryptographic encoding and hashing functions.
 
 Allows for generation, decoding, and validation of JSON Web Tokens natively within your scenario flow.
 
-* **`sinq.jwt.decode(token)`**: Decodes a JWT token without validating its signature. 
-  * **Returns:** `(table, error)`
-  * **Table Structure:** Contains `header`(table), `claims` (table), `signature` (string), and `method` (string).
-* **`sinq.jwt.verify(token, key, algo?)`**: Verifies the token using the provided key and optional algorithm constraint.
-  * **Returns:** `(table, error)`
-  > **Note:** Symmetric algorithms (`HS*`) use raw string keys. Asymmetric algorithms (`RS*`, `ES*`, `EdDSA`) require PEM-encoded public keys.
-* **`sinq.jwt.sign(claimsTable, key, method?)`**: Creates a signed JWT string. Returns `string, error`.
-  * `claimsTable`: A Lua table representing the JWT payload.
-  * `key`: The signing key string.
-  * `method?`: The signing algorithm. Defaults to `HS256`. 
-  > **Note:** The `claimsTable` must have strictly string keys. Mixing list-style (integer) indices with string keys in Lua will cause parsing to fail and return an error. Asymmetric algorithms require PEM-encoded private keys.
-  > **Warning:** Passing a cyclic table as the `claimsTable` will result in a serialization error being returned as a second return value (`nil, "Failed to serialize..."`). It is safe and will not crash the runner, but the token will not be generated.
+* **`sinq.jwt.decode(token string)`**: Decodes a JWT token without validating its signature. 
+    * **Returns:** `(result table, error string)`
+    * **Table Structure:** Contains `header`(table), `claims` (table), `signature` (string), and `method` (string).
+* **`sinq.jwt.verify(token string, key string, algo string?)`**: Verifies the token using the provided key and optional algorithm constraint.
+    * **Returns:** `(result table, error string)`
+    
+    !!! note
+        Symmetric algorithms (`HS*`) use raw string keys. Asymmetric algorithms (`RS*`, `ES*`, `EdDSA`) require PEM-encoded public keys.
+
+* **`sinq.jwt.sign(claimsTable table, key string, method string?)`**: Creates a signed JWT string.
+    * **Returns:** `(result string, error string)`
+    * `claimsTable`: A Lua table representing the JWT payload.
+    * `key` string: The signing key string.
+    * `method` string?: The signing algorithm. Defaults to `HS256`. 
+    
+    !!! note
+        The `claimsTable` must have strictly string keys. Mixing list-style (integer) indices with string keys in Lua will cause parsing to fail and return an error. Asymmetric algorithms require PEM-encoded private keys.
+    
+    !!! warning
+        Passing a cyclic table as the `claimsTable` will result in a serialization error being returned as a second return value (`nil, "Failed to serialize..."`). It is safe and will not crash the runner, but the token will not be generated.
 
 ---
 
@@ -296,10 +317,15 @@ Allows for generation, decoding, and validation of JSON Web Tokens natively with
 
 The `sinq.json` table provides explicit methods to parse and serialize JSON data from Lua.
 
-* **`sinq.json.parse(string)`**: Parses a JSON string into a Lua table. Returns `table, error`.
-* **`sinq.json.serialize(table, indent?)`**: Serializes a Lua table into a JSON string. Returns `string, error`.
-  * `indent?`: Optional string used for formatting (e.g., `"  "`). If omitted, produces compact JSON. If present, also introduces newlines between object and array entries.
-  > **Note:** Passing a cyclic table will immediately return an error (`"Cycle detected, unable to serialize"`).
+* **`sinq.json.parse(source string)`**: Parses a JSON string into a Lua table.
+    * **Returns:** `(result table, error string)`
+* **`sinq.json.serialize(tbl table, indent string?)`**: Serializes a Lua table into a JSON string.
+    * **Returns:** `(result string, error string)`
+    * `indent` string?: Optional string used for formatting (e.g., `"  "`). If omitted, produces compact JSON. If present, also introduces newlines between object and array entries.
+    
+    !!! note
+        Passing a cyclic table will immediately return an error (`"Cycle detected, unable to serialize"`).
+
 * **`sinq.json.null`**: A special constant representing a JSON `null` value, allowing Lua tables to explicitly serialize `null` properties (since standard Lua drops `nil` table keys). Tables, parsed from JSON will also include this constant to represent explicit `null`. Can be compared with standard `==` operator (`sinq.assert.isTrue(res.json().myNull == sinq.json.null)`)
 
 ---
@@ -348,6 +374,9 @@ The `sinq.fake` table exposes deterministic fake data generators. All generators
 
 `sinq` does not load two of common core Lua libraries - `io` and `os` by default. This is done in order to prevent `.sinq` scripts from becoming a safety concern when run without due diligence. To enable these libraries in Lua scripts use `--unrestricted` flag, and only run trusted scripts with this flag.
 
-`sinq` allows users to import external Lua packages. For them to be accessible via the `require("package")` calls, path to the directory containing the files for the package should be passed to `sinq` via the environment variable `SINQ_LUA_PATH` or via the `--plugins` flag. If both present, the flag takes precedence. The path is expected to consist of plain paths to the directories joined with `:` on Linux and MacOS, `;` on Windows. Several `--plugins` flags can be passed on startup, which will result in an aggregated list of all paths within them.
+`sinq` allows you to import external Lua packages. To make them accessible via `require("package")`, you must provide the directory paths containing those packages.
 
-> Note: All paths passed to `sinq` as positional arguments and the current working directory also get appended to the end of path for the purposes of searching for Lua plugins. So if you run `sinq` from a directory containing a file `my-module.lua`, `require("my-module")` will work for all `.sinq` files.
+You can do this using the `SINQ_LUA_PATH` environment variable or the `--plugins` CLI flag (which takes precedence). Multiple paths should be separated by a colon (`:`) on macOS/Linux, or a semicolon (`;`) on Windows. You can also pass the `--plugins` flag multiple times to aggregate paths.
+
+!!! note
+    All paths passed to `sinq` as positional arguments and the current working directory also get appended to the end of path for the purposes of searching for Lua plugins. So if you run `sinq` from a directory containing a file `my-module.lua`, `require("my-module")` will work for all `.sinq` files.

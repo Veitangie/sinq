@@ -201,7 +201,11 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	w.env.logger.Debug("[Runner] Starting scenario", w.loggingContext(ctx)...)
 	requestResults := make([]RequestResult, len(bundle.Requests))
 	for idx, req := range bundle.Requests {
-		requestResults[idx].Name = fmt.Sprintf("%s#%s", req.Filename, req.Name)
+		name := req.Filename
+		if req.Name != "" {
+			name = req.Name
+		}
+		requestResults[idx].Name = name
 	}
 	scenarioTimer := timer.NewTimer(w.env.clock)
 	result := ScenarioResult{
