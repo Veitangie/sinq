@@ -321,6 +321,19 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **1**
 : Failure. One or more scenarios failed an assertion, encountered a network timeout, crashed, or the CLI received invalid arguments.
 
+## AUTO-COMPLETION
+To load completions dynamically in your current session:
+- **Bash/Zsh:** `source <(sinq --completion)`
+- **Fish:** `sinq --completion | source`
+- **PowerShell:** `sinq --completion | Invoke-Expression`
+
+To install completions permanently, save the output to your shell's completions directory:
+- **Bash:** `sinq --completion > ~/.local/share/bash-completion/completions/sinq`
+- **Zsh:** `sinq --completion > ~/.zfunc/_sinq` (and add `fpath+=~/.zfunc` before `compinit` in `.zshrc`)
+- **Fish:** `sinq --completion > ~/.config/fish/completions/sinq.fish`
+- **PowerShell:** Add `sinq --completion | Invoke-Expression` to your PowerShell profile.
+
+
 ## EXAMPLES
 Run tests in the current directory with 20 concurrent workers:
     $ sinq --workers 20 .

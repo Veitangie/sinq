@@ -4,7 +4,7 @@
 #   /usr/share/fish/vendor_completions.d/sinq.fish  (system-wide)
 #   ~/.config/fish/completions/sinq.fish             (user-level)
 
-complete -c sinq -f
+complete -c sinq
 
 complete -c sinq -s v -l version    -d 'Print the current sinq version and exit'
 complete -c sinq -s h -l help       -d 'Print this help message and exit'
@@ -26,11 +26,9 @@ complete -c sinq -s w -l workers        -r -d 'Number of concurrent workers'
 complete -c sinq -s s -l secret         -r -d 'Key=value overrides for scenario secrets'
 complete -c sinq -s e -l env            -r -d 'Key=value overrides for all scenario environments'
 complete -c sinq -s t -l tag            -r -d 'Execute only scenarios that have the tag'
-complete -c sinq -s n -l name           -r -d 'Execute only scenarios which names match the regex'
+complete -c sinq -s n -l name           -r -d 'Execute only scenarios which names match the regular expression'
 complete -c sinq      -l skip-tag       -r -d 'Do not execute scenarios that have the tag'
-complete -c sinq      -l skip-name      -r -d 'Do not execute scenarios which names match the regex'
+complete -c sinq      -l skip-name      -r -d 'Do not execute scenarios which names match the regular expression'
 complete -c sinq      -l plugins        -r -d 'Paths to lua plugin directory entries'
 complete -c sinq      -l max-cache-size -r -d 'Global maximum response size for cached requests'
 complete -c sinq      -l cache-timeout  -r -d 'Global timeout for the cached requests'
-
-complete -c sinq -a '(__fish_complete_directories)'

@@ -34,13 +34,30 @@ For quick command-line installation, choose your preferred package manager:
     ```bash
     curl -sL https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh | bash
     ```
-    For shell auto-completion, add to your shell profile: `source <(sinq --completion)`
 
 === "Go Install"
     ```bash
     go install github.com/Veitangie/sinq/cmd/sinq@latest
     ```
-    For shell auto-completion, add to your shell profile: `source <(sinq --completion)`
+
+<details>
+<summary><strong>Setting up shell auto-completion</strong></summary>
+
+*(Note: If you installed `sinq` via native Linux packages (`.deb`, `.rpm`, `.apk`), the AUR, or the Homebrew Formula (`brew install Veitangie/tap/sinq`), completions are installed automatically and you can skip this step. For all other methods like the Homebrew Cask (`sinq-bin`), `scoop`, the install script, or `go install`, you'll need to set them up manually).*
+
+`sinq` supports auto-completion for Bash, Zsh, Fish, and PowerShell. 
+
+To load completions dynamically in your current session:
+- **Bash/Zsh:** `source <(sinq --completion)`
+- **Fish:** `sinq --completion | source`
+- **PowerShell:** `sinq --completion | Invoke-Expression`
+
+To install completions permanently, save the output to your shell's completions directory:
+- **Bash:** `sinq --completion > ~/.local/share/bash-completion/completions/sinq`
+- **Zsh:** `sinq --completion > ~/.zfunc/_sinq` (and add `fpath+=~/.zfunc` before `compinit` in `.zshrc`)
+- **Fish:** `sinq --completion > ~/.config/fish/completions/sinq.fish`
+- **PowerShell:** Add `sinq --completion | Invoke-Expression` to your PowerShell profile.
+</details>
 
 ## IDE Integration
 

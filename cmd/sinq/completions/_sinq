@@ -15,23 +15,32 @@ _sinq() {
         '(-l --list)'{-l,--list}'[Parse and list scenarios at specified directories]' \
         '(-u --unrestricted)'{-u,--unrestricted}'[Load lua "os" and "io" modules for scripts]' \
         '--dump-on-failure[Print full request and response data on failed assertion]' \
-        '(-w --workers)'{-w,--workers}'[Number of concurrent workers]:workers:' \
-        '*'{-s,--secret}'[Key=value overrides for scenario secrets]:secret (KEY=VALUE):' \
-        '*'{-e,--env}'[Key=value overrides for all scenario environments]:env (KEY=VALUE):' \
+        '(-w --workers)'{-w,--workers}'[Number of concurrent workers]:workers' \
+        '*'{-s,--secret}'[Key=value overrides for scenario secrets]:secret (KEY=VALUE)' \
+        '*'{-e,--env}'[Key=value overrides for all scenario environments]:env (KEY=VALUE)' \
         '(-o --out)'{-o,--out}'[Path to write the output file]:file:_files' \
         '(-L --log-level)'{-L,--log-level}'[Log level to use: debug, info, warn or error]:log level:(debug info warn error)' \
         '(-f --format)'{-f,--format}'[Output format: std or junit]:format:(std junit)' \
         '(-c --color)'{-c,--color}'[Terminal colors: always, never, auto]:color mode:(always never auto)' \
         '(-S --show)'{-S,--show}'[Which results to show in the output: all, no-skip, failed]:show filter:(all no-skip failed)' \
-        '*'{-t,--tag}'[Execute only scenarios that have the tag]:tag name:' \
-        '*'{-n,--name}'[Execute only scenarios which names match the regular expression]:test name:' \
+        '*'{-t,--tag}'[Execute only scenarios that have the tag]:tag name' \
+        '*'{-n,--name}'[Execute only scenarios which names match the regular expression]:test name' \
         '--secrets-file[Path to JSON-formatted secrets file]:file:_files' \
-        '*--skip-tag[Do not execute scenarios that have the tag]:tag name:' \
-        '*--skip-name[Do not execute scenarios which names match the regular expression]:test name:' \
-        '--plugins[Paths to lua plugin directory entries]:plugins:' \
-        '--max-cache-size[Global maximum response size for cached requests]:cache size:' \
-        '--cache-timeout[Global timeout for the cached requests]:timeout:' \
-        '*:dir:_directories'
+        '*--skip-tag[Do not execute scenarios that have the tag]:tag name' \
+        '*--skip-name[Do not execute scenarios which names match the regular expression]:test name' \
+        '--plugins[Paths to lua plugin directory entries]:plugins' \
+        '--max-cache-size[Global maximum response size for cached requests]:cache size' \
+        '--cache-timeout[Global timeout for the cached requests]:timeout' \
+        '*:file:_files'
 }
 
-_sinq "$@"
+if [ "$funcstack[1]" = "_sinq" ]; then
+    _sinq "$@"
+else
+    if ! type compdef >/dev/null 2>&1; then
+        echo "sinq completion error: Zsh compinit has not been loaded." >&2
+        echo "Please add 'autoload -Uz compinit; compinit' to your ~/.zshrc before sourcing this script." >&2
+        return 1
+    fi
+    compdef _sinq sinq
+fi

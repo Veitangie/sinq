@@ -72,7 +72,7 @@ _sinq_completions() {
         return 0
     fi
 
-    COMPREPLY=( $(compgen -d -- "$cur") )
+    COMPREPLY=( $(compgen -f -- "$cur") )
 }
 
 complete -F _sinq_completions sinq
