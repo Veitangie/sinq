@@ -245,11 +245,13 @@ go build -ldflags="-w -s" -o sinq ./cmd/sinq/
 `sinq` supports auto-completion for Bash, Zsh, Fish, and PowerShell. 
 
 To load completions dynamically in your current session:
+
 - **Bash/Zsh:** `source <(sinq --completion)`
 - **Fish:** `sinq --completion | source`
 - **PowerShell:** `sinq --completion | Invoke-Expression`
 
 To install completions permanently, save the output to your shell's completions directory:
+
 - **Bash:** `sinq --completion > ~/.local/share/bash-completion/completions/sinq`
 - **Zsh:** `sinq --completion > ~/.zfunc/_sinq` (and add `fpath+=~/.zfunc` before `compinit` in `.zshrc`)
 - **Fish:** `sinq --completion > ~/.config/fish/completions/sinq.fish`
