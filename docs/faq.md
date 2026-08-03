@@ -43,7 +43,7 @@ When you point `sinq` at a root directory, it recursively scans for files. **Eve
 
 ## How do I handle secrets securely?
 
-Never hardcode secrets (like API keys or passwords) in your `.sinq` files. Instead, use the `--secrets-file` argument to point to a JSON file containing your secrets, or pass them inline using `-s KEY=VALUE`. 
+Never hardcode secrets (like API keys or passwords) in your `.sinq` files. Instead, use the `--secrets-file` argument to point to a JSON file containing your secrets, or pass them inline using `-s KEY=VALUE` (supports dot-notation and JSON values, e.g. `-s API.KEY=123`). 
 
 You can then access them safely in your Lua scripts via the `secrets` table:
 
@@ -127,3 +127,17 @@ $RETRY{
 }
 ```
 You can also use the built-in helpers like `sinq.retry.when(condition, delay)` for cleaner code!
+
+## How do I override a deeply nested env/secret key or value?
+
+If you have a complex configuration object and you need to override a specific nested key from the command line, you can use dot-notation. `sinq` will automatically expand the dots into a nested JSON object structure.
+
+```bash
+sinq -e "API.TIMEOUT=500" -s "DB.CREDENTIALS.PASSWORD=secret123"
+```
+
+Additionally, because the CLI arguments are unmarshaled via JSON under the hood, you can pass entire JSON objects or arrays as values:
+
+```bash
+sinq -e 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]'
+```

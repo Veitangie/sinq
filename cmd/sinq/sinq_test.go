@@ -469,3 +469,22 @@ func TestSinq_EndToEnd_StupidFilename(t *testing.T) {
 		t.Fatalf("BUG FOUND: Expected sinq to succeed even with slashes in the request name, but got exit code %d", exitCode)
 	}
 }
+
+func TestOSWorkspaceMkDirall(t *testing.T) {
+	ws, err := NewOSRootWorkspace(t.TempDir())
+	if err != nil {
+		t.Fatalf("Failed to create workspace: %v", err)
+	}
+	
+	err = ws.MkDirall("sinq_mkdir_test")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	ws2 := OSWorkspace{}
+	err = ws2.MkDirall(filepath.Join(os.TempDir(), "sinq_scenario_mkdir_test"))
+	if err != nil {
+		t.Errorf("Unexpected error in OSWorkspace: %v", err)
+	}
+}
+

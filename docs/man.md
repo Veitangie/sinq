@@ -124,6 +124,9 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **--dump-on-failure**
 : Print full request and response data on failed assertion
 
+**--completion**
+: Output shell completion script for the detected shell (bash, zsh, fish, or powershell)
+
 ## ENVIRONMENTAL VARIABLES
 
 `sinq` reads the following environment variables:
@@ -321,6 +324,9 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 ## EXAMPLES
 Run tests in the current directory with 20 concurrent workers:
     $ sinq --workers 20 .
+
+Override a deeply nested environment key using dot-notation, and pass a JSON array as a value:
+    $ sinq -e 'API.HOSTS=["localhost", "127.0.0.1"]' .
 
 Run tests against specific directories with a secrets file and save JUnit output:
     $ sinq --secrets-file=prod.json --format=junit --out=results.xml ./auth ./billing

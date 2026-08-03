@@ -396,7 +396,7 @@ func TestTreewalker_ParseSecrets(t *testing.T) {
 		_ = os.WriteFile(secFile, []byte(`{"TOKEN": "123", "KEEP": "456"}`), 0644)
 		tw, _ := treewalker.NewTreewalker(config.Config{Treewalker: config.TreewalkerConfig{
 			SecretsFile: secFile,
-			Secret: map[string]string{
+			Secrets: map[string]any{
 				"TOKEN": "789",
 				"NEW":   "000",
 			},
@@ -413,7 +413,7 @@ func TestTreewalker_ParseSecrets(t *testing.T) {
 
 	t.Run("Inline Only", func(t *testing.T) {
 		tw, _ := treewalker.NewTreewalker(config.Config{Treewalker: config.TreewalkerConfig{
-			Secret: map[string]string{
+			Secrets: map[string]any{
 				"TOKEN": "789",
 			},
 		}}, *slog.Default(), mockParseRequest, mockParseConfig)

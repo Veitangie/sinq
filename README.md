@@ -215,6 +215,9 @@ curl -sL https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/instal
 ```
 > *Note: This script targets stable releases by default. To install a specific version (like a release candidate), pass the version tag as an argument:*
 > `curl -sL .../install.sh | bash -s v1.0.0-rc.3`
+
+> *For shell auto-completion, add the following to your shell profile:*
+> `source <(sinq --completion)`
 </details>
 
 <details>
@@ -226,6 +229,9 @@ If you have a Go environment set up, you can compile and install directly from t
 go install github.com/Veitangie/sinq/cmd/sinq@latest
 ```
 > *Note: Ensure your `$(go env GOPATH)/bin` directory is in your system `$PATH`.*
+
+> *For shell auto-completion, add the following to your shell profile:*
+> `source <(sinq --completion)`
 </details>
 
 <details>
@@ -236,6 +242,8 @@ git clone git@github.com:Veitangie/sinq.git
 cd sinq
 go build -ldflags="-w -s" -o sinq ./cmd/sinq/
 ```
+> *For shell auto-completion, add the following to your shell profile:*
+> `source <(sinq --completion)`
 </details>
 
 <details>
@@ -452,6 +460,9 @@ sinq -iV ./tests/local
 
 # Run a single file as a standalone scenario
 sinq ./tests/integration/001-auth/01-login.sinq
+
+# Override deeply nested environment keys using dot-notation and JSON values
+sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
 ```
 
 ### Options

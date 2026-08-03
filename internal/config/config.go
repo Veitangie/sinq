@@ -19,6 +19,7 @@ type Config struct {
 	Version       bool
 	Help          bool
 	List          bool
+	Completion    bool
 	DumpOnFailure bool
 	Unrestricted  bool
 
@@ -66,8 +67,8 @@ func (c Config) ShouldInclude(tags map[string]bool, name string) bool {
 type TreewalkerConfig struct {
 	Strict      bool
 	SecretsFile string
-	Secret      map[string]string
-	Env         map[string]string
+	Secrets     map[string]any
+	Env         map[string]any
 }
 
 type WhenColor int
@@ -193,6 +194,7 @@ func SaneDefaults() Config {
 		Version:       false,
 		Help:          false,
 		List:          false,
+		Completion:    false,
 		DumpOnFailure: false,
 		Unrestricted:  false,
 		LogLevel:      slog.LevelWarn,
@@ -205,8 +207,8 @@ func SaneDefaults() Config {
 		Treewalker: TreewalkerConfig{
 			Strict:      true,
 			SecretsFile: "",
-			Secret:      map[string]string{},
-			Env:         map[string]string{},
+			Secrets:     map[string]any{},
+			Env:         map[string]any{},
 		},
 		Reporter: ReporterConfig{
 			Verbose: false,

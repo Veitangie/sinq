@@ -92,6 +92,12 @@ func TestParser_Parse(t *testing.T) {
 			wantErrs: 0,
 		},
 		{
+			name:       "Completion",
+			flags:      []string{"--completion"},
+			wantConfig: func() Config { c := SaneDefaults(); c.Completion = true; return c }(),
+			wantErrs:   0,
+		},
+		{
 			name:       "Color Never",
 			flags:      []string{"-c", "never"},
 			wantConfig: func() Config { c := SaneDefaults(); c.Reporter.Color = Never; return c }(),
@@ -286,8 +292,8 @@ func TestParser_Parse(t *testing.T) {
 			flags: []string{"-s", "API_KEY=123", "-s", "TOKEN=abc"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
-				c.Treewalker.Secret["API_KEY"] = "123"
-				c.Treewalker.Secret["TOKEN"] = "abc"
+				c.Treewalker.Secrets["API_KEY"] = float64(123)
+				c.Treewalker.Secrets["TOKEN"] = "abc"
 				return c
 			}(),
 			wantErrs: 0,
@@ -304,7 +310,7 @@ func TestParser_Parse(t *testing.T) {
 			wantConfig: func() Config {
 				c := SaneDefaults()
 				c.Treewalker.Env["HOST"] = "localhost"
-				c.Treewalker.Env["PORT"] = "8080"
+				c.Treewalker.Env["PORT"] = float64(8080)
 				return c
 			}(),
 			wantErrs: 0,
@@ -315,6 +321,34 @@ func TestParser_Parse(t *testing.T) {
 			wantConfig: func() Config {
 				c := SaneDefaults()
 				c.Treewalker.Env["HOST"] = "localhost=80"
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Env Inline Nested Dot",
+			flags: []string{"-e", "one.two.three=four"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Treewalker.Env["one"] = map[string]any{
+					"two": map[string]any{
+						"three": "four",
+					},
+				}
+				return c
+			}(),
+			wantErrs: 0,
+		},
+		{
+			name:  "Secret Inline Nested JSON",
+			flags: []string{"-s", `one={"two":{"three":"four"}}`},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Treewalker.Secrets["one"] = map[string]any{
+					"two": map[string]any{
+						"three": "four",
+					},
+				}
 				return c
 			}(),
 			wantErrs: 0,

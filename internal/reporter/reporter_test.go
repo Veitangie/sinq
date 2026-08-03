@@ -4,6 +4,7 @@
 package reporter
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -60,3 +61,35 @@ func TestReporterPool_ConcurrencyRaceAndDelivery(t *testing.T) {
 		t.Errorf("Reporter 3 dropped payloads. Expected %d, got %d", payloadCount, rep3.receivedCount.Load())
 	}
 }
+
+func TestReporterPool_Register(t *testing.T) {
+	pool := NewPool()
+	
+	err := pool.Register(nil)
+	if err == nil {
+		t.Error("Expected error when registering nil reporter")
+	}
+
+	var wg sync.WaitGroup
+	numReporters := 100
+	
+	for i := 0; i < numReporters; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			err := pool.Register(&mockReporter{id: id})
+			if err != nil {
+				t.Errorf("Unexpected error when registering valid reporter: %v", err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	pool.lock.RLock()
+	defer pool.lock.RUnlock()
+	if len(pool.reporters) != numReporters {
+		t.Errorf("Expected pool to have %d reporters, got %d", numReporters, len(pool.reporters))
+	}
+}
+

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Veitangie/sinq/internal/envs"
 	"github.com/Veitangie/sinq/internal/scenario"
 )
 
@@ -70,9 +71,7 @@ func (w *worker) runTask(task []string) {
 		}
 	}
 
-	for key, val := range w.t.cfg.Treewalker.Env {
-		scenarioConfig.Env[key] = val
-	}
+	envs.DeepMerge(scenarioConfig.Env, w.t.cfg.Treewalker.Env)
 
 	res := scenario.ScenarioBlueprint{Requests: requestBlueprints, Config: &scenarioConfig}
 	w.resultCh <- res
@@ -123,7 +122,7 @@ func (t *Treewalker) runWorkers(ctx context.Context, fileSystem fs.FS, taskCh <-
 func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfig, filePath string) {
 	if cachedScenarioConfig, isFound := readCache(filePath, w.scenarioConfigCache, w.scenarioConfigCacheLock); isFound {
 		*scenarioConfig = cachedScenarioConfig
-		scenarioConfig.Env = maps.Clone(cachedScenarioConfig.Env)
+		scenarioConfig.Env = envs.DeepCopy(cachedScenarioConfig.Env)
 		scenarioConfig.EnvMatrix = slices.Clone(cachedScenarioConfig.EnvMatrix)
 		scenarioConfig.Tags = maps.Clone(cachedScenarioConfig.Tags)
 		scenarioConfig.TagsList = slices.Clone(cachedScenarioConfig.TagsList)
@@ -146,7 +145,7 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 	}
 
 	newConfig := *scenarioConfig
-	newConfig.Env = maps.Clone(scenarioConfig.Env)
+	newConfig.Env = envs.DeepCopy(scenarioConfig.Env)
 	newConfig.EnvMatrix = slices.Clone(scenarioConfig.EnvMatrix)
 	newConfig.Tags = maps.Clone(scenarioConfig.Tags)
 	newConfig.TagsList = slices.Clone(scenarioConfig.TagsList)

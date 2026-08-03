@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -84,6 +86,14 @@ func sinq(args []string) int {
 		for _, err := range errs {
 			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		}
+		return 1
+	}
+
+	if cfg.Completion {
+		if handleCompletion() {
+			return 0
+		}
+
 		return 1
 	}
 
@@ -356,6 +366,56 @@ func countOneScenario(scBp runner.ScenarioBundle) int {
 		}
 	}
 	return mod
+}
+
+//go:embed completions/sinq.ps1
+var ps1Comp string
+
+//go:embed completions/sinq.bash
+var bashComp string
+
+//go:embed completions/_sinq
+var zshComp string
+
+//go:embed completions/sinq.fish
+var fishComp string
+
+func detectActiveShell() (string, error) {
+	ppid := os.Getppid()
+	exePath, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", ppid))
+	if err != nil {
+		cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", ppid))
+		if err != nil {
+			return "", err
+		}
+		return string(cmdline), nil
+	}
+
+	return filepath.Base(exePath), nil
+}
+
+func handleCompletion() bool {
+	if runtime.GOOS == "windows" {
+		fmt.Fprint(os.Stdout, ps1Comp)
+		return true
+	}
+
+	shell, err := detectActiveShell()
+	if err != nil {
+		shell = filepath.Base(os.Getenv("SHELL"))
+	}
+
+	switch strings.ToLower(shell) {
+	case "bash":
+		fmt.Fprint(os.Stdout, bashComp)
+	case "zsh":
+		fmt.Fprint(os.Stdout, zshComp)
+	case "fish":
+		fmt.Fprint(os.Stdout, fishComp)
+	default:
+		return false
+	}
+	return true
 }
 
 func ponderSinqMeaning() string {

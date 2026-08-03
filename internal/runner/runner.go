@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Veitangie/sinq/internal/config"
+	"github.com/Veitangie/sinq/internal/envs"
 	"github.com/Veitangie/sinq/internal/scenario"
 	"github.com/Veitangie/sinq/internal/timer"
 	"golang.org/x/sync/singleflight"
@@ -44,9 +45,9 @@ func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle
 			for path := range totalPaths {
 
 				labels := takePath(path, allLabels)
-				totalEnv := deepCopy(sc.Config.Env)
+				totalEnv := envs.DeepCopy(sc.Config.Env)
 				for idx, label := range labels {
-					deepMerge(totalEnv, sc.Config.EnvMatrix[idx][label])
+					envs.DeepMerge(totalEnv, sc.Config.EnvMatrix[idx][label])
 				}
 
 				bundle := taskBundle{

@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/Veitangie/sinq/internal/config"
+	"github.com/Veitangie/sinq/internal/envs"
 	"github.com/Veitangie/sinq/internal/natsort"
 	"github.com/Veitangie/sinq/internal/scenario"
 	"github.com/Veitangie/sinq/internal/timer"
@@ -149,9 +150,7 @@ func (t *Treewalker) ParseSingleFile(fileSystem fs.FS, filename string) (scenari
 
 	cfg := scenario.SaneDefaultConfig()
 	cfg.Name = getDefaultScenarioNameFromPath(filename)
-	for key, value := range t.cfg.Treewalker.Env {
-		cfg.Env[key] = value
-	}
+	envs.DeepMerge(cfg.Env, t.cfg.Treewalker.Env)
 
 	res.Config = &cfg
 
@@ -225,9 +224,7 @@ func (t *Treewalker) ParseSecrets() (map[string]any, error) {
 		}
 	}
 
-	for key, val := range t.cfg.Treewalker.Secret {
-		secrets[key] = val
-	}
+	envs.DeepMerge(secrets, t.cfg.Treewalker.Secrets)
 
 	return secrets, nil
 }

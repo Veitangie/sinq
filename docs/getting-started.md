@@ -34,11 +34,13 @@ For quick command-line installation, choose your preferred package manager:
     ```bash
     curl -sL https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh | bash
     ```
+    For shell auto-completion, add to your shell profile: `source <(sinq --completion)`
 
 === "Go Install"
     ```bash
     go install github.com/Veitangie/sinq/cmd/sinq@latest
     ```
+    For shell auto-completion, add to your shell profile: `source <(sinq --completion)`
 
 ## IDE Integration
 

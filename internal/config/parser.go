@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -214,7 +215,7 @@ func (p *Parser) parseEnv() {
 		return
 	}
 
-	p.result.Treewalker.Env[keyValSlice[0]] = keyValSlice[1]
+	parseKeyVal(p.result.Treewalker.Env, keyValSlice[0], keyValSlice[1])
 }
 
 func (p *Parser) parseSecret() {
@@ -235,7 +236,31 @@ func (p *Parser) parseSecret() {
 		return
 	}
 
-	p.result.Treewalker.Secret[keyValSlice[0]] = keyValSlice[1]
+	parseKeyVal(p.result.Treewalker.Secrets, keyValSlice[0], keyValSlice[1])
+}
+
+func parseKeyVal(target map[string]any, key, value string) {
+	keySlice := strings.Split(key, ".")
+	for _, key := range keySlice[:len(keySlice)-1] {
+		if found, ok := target[key]; ok {
+			if typedFound, ok := found.(map[string]any); ok {
+				target = typedFound
+				continue
+			}
+		}
+
+		newMap := map[string]any{}
+		target[key] = newMap
+		target = newMap
+	}
+
+	var maybeValue any
+	err := json.Unmarshal([]byte(value), &maybeValue)
+	if err != nil {
+		target[keySlice[len(keySlice)-1]] = value
+	} else {
+		target[keySlice[len(keySlice)-1]] = maybeValue
+	}
 }
 
 func (p *Parser) parseOutFormat() {
@@ -439,6 +464,8 @@ func (p *Parser) parseLongOnlyFlag() {
 		}
 
 		p.result.CacheTimeout = timeout
+	case "--completion":
+		p.result.Completion = true
 	default:
 		p.accumulateError(fmt.Errorf("Unknown long flag: %s. See 'sinq --help'", flag))
 	}
