@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Veitangie/sinq/internal/envs"
 )
 
 type parserState int
@@ -259,7 +261,13 @@ func parseKeyVal(target map[string]any, key, value string) {
 	if err != nil {
 		target[keySlice[len(keySlice)-1]] = value
 	} else {
-		target[keySlice[len(keySlice)-1]] = maybeValue
+		valueTable, valueIsTable := maybeValue.(map[string]any)
+		existingTable, existingIsTable := target[keySlice[len(keySlice)-1]].(map[string]any)
+		if valueIsTable && existingIsTable {
+			envs.DeepMerge(existingTable, valueTable)
+		} else {
+			target[keySlice[len(keySlice)-1]] = maybeValue
+		}
 	}
 }
 

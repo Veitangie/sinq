@@ -496,6 +496,19 @@ func TestParser_Parse(t *testing.T) {
 			}(),
 			wantErrs: 1,
 		},
+		{
+			name:  "Env Inline Deep Merge JSON",
+			flags: []string{"-e", `API={"HOST":"localhost"}`, "-e", `API={"PORT":8080}`},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Treewalker.Env["API"] = map[string]any{
+					"HOST": "localhost",
+					"PORT": float64(8080),
+				}
+				return c
+			}(),
+			wantErrs: 0,
+		},
 	}
 
 	for _, tt := range tests {
