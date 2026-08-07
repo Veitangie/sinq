@@ -28,9 +28,11 @@ type reportData struct {
 	totalScenarios         int
 	ranScenarios           int
 	successfulScenarios    int
+	abortedScenarios       int
 	totalRequests          int
 	ranRequests            int
 	successfulRequests     int
+	abortedRequests        int
 	prefixedScenarioWriter *prefixedWriter
 	prefixedRequestWriter  *prefixedWriter
 	prefixedVerboseWriter  *prefixedWriter
@@ -70,37 +72,20 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 
 	scenarioMark := rd.markSuccess
 	switch result.Status {
+	case runner.Unset:
+		fallthrough
 	case runner.Skipped:
 		scenarioMark = rd.markSkipped
 	case runner.Aborted:
 		scenarioMark = rd.markAborted
-	case runner.Success:
-		rd.successfulScenarios += 1
 		rd.ranScenarios += 1
+		rd.abortedScenarios += 1
+	case runner.Success:
+		rd.ranScenarios += 1
+		rd.successfulScenarios += 1
 	default:
 		scenarioMark = rd.markFail
 		rd.ranScenarios += 1
-	}
-
-	switch rd.cfg.Show {
-	case config.NoSkip:
-		if result.Status == runner.Skipped {
-			return nil
-		}
-	case config.Failed:
-		if result.Status != runner.Failure && result.Status != runner.Error {
-			for _, request := range result.RequestResults {
-				if request.Status != runner.Skipped && request.Status != runner.Aborted {
-					rd.ranRequests += 1
-				}
-
-				if request.Status == runner.Success {
-					rd.successfulRequests += 1
-				}
-			}
-			return nil
-		}
-	case config.All:
 	}
 
 	scenarioTackOn := ""
@@ -110,6 +95,7 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 
 	ranRequestsScenario := 0
 	successfulRequestsScenario := 0
+	abortedRequestsScenario := 0
 	for _, request := range result.RequestResults {
 		rd.totalRequests += 1
 		switch request.Status {
@@ -120,18 +106,43 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 			fallthrough
 		case runner.Error:
 			ranRequestsScenario += 1
+		case runner.Aborted:
+			abortedRequestsScenario += 1
+			ranRequestsScenario += 1
 		default:
 		}
 	}
+
 	rd.ranRequests += ranRequestsScenario
 	rd.successfulRequests += successfulRequestsScenario
+	rd.abortedRequests += abortedRequestsScenario
+	skippedRequestsScenario := len(result.RequestResults) - ranRequestsScenario
+	failedRequestsScenario := ranRequestsScenario - successfulRequestsScenario - abortedRequestsScenario
 
-	_, err := fmt.Fprintf(rd.writer, " %s Scenario: %s (%d%s %d%s %d%s in %s)%s\n",
+	switch rd.cfg.Show {
+	case config.NoSkip:
+		if result.Status == runner.Unset || result.Status == runner.Skipped {
+			return nil
+		}
+	case config.Failed:
+		if result.Status != runner.Failure && result.Status != runner.Error {
+			return nil
+		}
+	case config.All:
+	}
+
+	successfulString := mkStringSpaceRight(successfulRequestsScenario, rd.markSuccess)
+	failedString := mkStringSpaceRight(failedRequestsScenario, rd.markFail)
+	abortedString := mkStringSpaceRight(abortedRequestsScenario, rd.markAborted)
+	skippedString := mkStringSpaceRight(skippedRequestsScenario, rd.markSkipped)
+
+	_, err := fmt.Fprintf(rd.writer, " %s Scenario: %s (%s%s%s%sin %s)%s\n",
 		scenarioMark,
 		result.Name,
-		successfulRequestsScenario, rd.markSuccess,
-		ranRequestsScenario-successfulRequestsScenario, rd.markFail,
-		len(result.RequestResults)-ranRequestsScenario, rd.markAborted,
+		successfulString,
+		failedString,
+		abortedString,
+		skippedString,
 		fmtDuration(result.TotalDuration),
 		scenarioTackOn,
 	)
@@ -144,7 +155,7 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 		return err
 	}
 
-	if !rd.cfg.Verbose && result.Status == runner.Success || result.Status == runner.Skipped {
+	if !rd.cfg.Verbose && result.Status == runner.Success || result.Status == runner.Unset {
 		return nil
 	}
 
@@ -155,6 +166,20 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 		}
 	}
 	return nil
+}
+
+func mkStringSpaceRight(num int, mark string) string {
+	if num == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d%s ", num, mark)
+}
+
+func mkStringSpaceLeft(num int, mark string) string {
+	if num == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" %d%s", num, mark)
 }
 
 func (rd *reportData) reportOutput(result runner.ScenarioResult) error {
@@ -179,6 +204,8 @@ func (rd *reportData) reportOutput(result runner.ScenarioResult) error {
 func (rd *reportData) reportRequest(request runner.RequestResult) error {
 	requestMark := rd.markSuccess
 	switch request.Status {
+	case runner.Unset:
+		fallthrough
 	case runner.Skipped:
 		requestMark = rd.markSkipped
 	case runner.Aborted:
@@ -275,21 +302,39 @@ func (rd *reportData) reportDurations(request runner.RequestResult) error {
 func (rd *reportData) reportEnd(duration time.Duration) error {
 	finalMark := rd.markSuccess
 	statusText := "PASSED"
+	missingScenarios := (rd.size - rd.totalScenarios)
+	abortedScenarios := rd.abortedScenarios + missingScenarios
+	skippedScenarios := rd.size - rd.ranScenarios - missingScenarios
+	failedScenarios := rd.ranScenarios - rd.successfulScenarios - rd.abortedScenarios
 
-	if rd.successfulScenarios != rd.ranScenarios {
+	if failedScenarios != 0 {
 		finalMark = rd.markFail
 		statusText = "FAILED"
 	}
-	skippedScenarios := rd.size - rd.ranScenarios
-	failedScenarios := rd.size - rd.successfulScenarios - skippedScenarios
-	_, err := fmt.Fprintf(rd.writer, "\n %s %s in %s | Scenarios: %d%s %d%s %d%s (%d) | %d requests sent\n",
+
+	if abortedScenarios != 0 {
+		finalMark = rd.markAborted
+		statusText = "ABORTED"
+	}
+
+	if skippedScenarios == rd.size {
+		finalMark = rd.markSkipped
+		statusText = "SKIPPED"
+	}
+
+	successfulString := mkStringSpaceLeft(rd.successfulScenarios, rd.markSuccess)
+	failedString := mkStringSpaceLeft(failedScenarios, rd.markFail)
+	abortedString := mkStringSpaceLeft(abortedScenarios, rd.markAborted)
+	skippedString := mkStringSpaceLeft(skippedScenarios, rd.markSkipped)
+
+	_, err := fmt.Fprintf(rd.writer, "\n %s %s in %s | Scenarios:%s%s%s%s | %d requests sent\n",
 		finalMark,
 		statusText,
 		fmtDuration(duration),
-		rd.successfulScenarios, rd.markSuccess,
-		failedScenarios, rd.markFail,
-		skippedScenarios, rd.markAborted,
-		rd.size,
+		successfulString,
+		failedString,
+		abortedString,
+		skippedString,
 		rd.ranRequests,
 	)
 	return err

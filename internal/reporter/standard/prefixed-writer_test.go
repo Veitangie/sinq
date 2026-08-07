@@ -26,3 +26,31 @@ func TestPrefixedWriter(t *testing.T) {
 		t.Errorf("Prefixed writer failed empty line preservation.\nExpected:\n%q\nGot:\n%q", expected, buf.String())
 	}
 }
+
+func TestUnsafeSplit(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{"Empty string", "", []string{""}},
+		{"No newline", "hello", []string{"hello"}},
+		{"Trailing newline", "hello\n", []string{"hello\n", ""}},
+		{"Multiple newlines", "hello\nworld\n", []string{"hello\n", "world\n", ""}},
+		{"Only newlines", "\n\n", []string{"\n", "\n", ""}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := unsafeSplit([]byte(tt.input))
+			if len(res) != len(tt.expected) {
+				t.Fatalf("Expected %d chunks, got %d", len(tt.expected), len(res))
+			}
+			for i, chunk := range res {
+				if string(chunk) != tt.expected[i] {
+					t.Errorf("Chunk %d mismatch. Expected %q, got %q", i, tt.expected[i], string(chunk))
+				}
+			}
+		})
+	}
+}

@@ -115,7 +115,14 @@ func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 					Type:    "RuntimeError",
 				}
 			}
-			if requestResult.Status == runner.Skipped || requestResult.Status == runner.Aborted {
+			if requestResult.Status == runner.Aborted {
+				suite.Errors += 1
+				suite.TestCases[len(suite.TestCases)-1].Error = &JUnitFailure{
+					Message: "Request was interrupted",
+					Type:    "RuntimeError",
+				}
+			}
+			if requestResult.Status == runner.Unset || requestResult.Status == runner.Skipped {
 				suite.TestCases[len(suite.TestCases)-1].Skipped = &JUnitSkipped{}
 			}
 		}

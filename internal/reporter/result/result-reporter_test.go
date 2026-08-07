@@ -14,6 +14,7 @@ func TestResultReporter(t *testing.T) {
 	tests := []struct {
 		name        string
 		results     []runner.ScenarioResult
+		size        int
 		wantSuccess bool
 	}{
 		{
@@ -52,7 +53,7 @@ func TestResultReporter(t *testing.T) {
 			wantSuccess: false,
 		},
 		{
-			name: "Aborted counts as success",
+			name: "Request Aborted counts as failure",
 			results: []runner.ScenarioResult{
 				{
 					RequestResults: []runner.RequestResult{
@@ -60,7 +61,28 @@ func TestResultReporter(t *testing.T) {
 					},
 				},
 			},
-			wantSuccess: true,
+			wantSuccess: false,
+		},
+		{
+			name: "Scenario Aborted counts as failure",
+			results: []runner.ScenarioResult{
+				{
+					Status: runner.Aborted,
+				},
+			},
+			wantSuccess: false,
+		},
+		{
+			name: "Missing scenarios count as failure",
+			results: []runner.ScenarioResult{
+				{
+					RequestResults: []runner.RequestResult{
+						{Status: runner.Success},
+					},
+				},
+			},
+			size:        2,
+			wantSuccess: false,
 		},
 	}
 
@@ -77,7 +99,11 @@ func TestResultReporter(t *testing.T) {
 			timerCh <- 1 * time.Millisecond
 			close(timerCh)
 
-			err := rep.Report(sourceCh, timerCh, len(tt.results))
+			size := tt.size
+			if size == 0 {
+				size = len(tt.results)
+			}
+			err := rep.Report(sourceCh, timerCh, size)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}

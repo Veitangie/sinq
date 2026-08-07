@@ -40,7 +40,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{" ✓ Scenario: Test Scenario", " ✓ PASSED in 100ms | Scenarios: 1✓ 0✗ 0○ (1) | 1 requests sent"},
+			wantOutput: []string{" ✓ Scenario: Test Scenario", " ✓ PASSED in 100ms | Scenarios: 1✓ | 1 requests sent"},
 		},
 		{
 			name: "Output with Color",
@@ -54,7 +54,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{ui.Red + "✗" + ui.Reset + " Scenario: Color Scenario", "   " + ui.Red + "✗" + ui.Reset + " ReqColor", "     " + ui.Red + "✗" + ui.Reset + " Error: boom", ui.Red + "✗" + ui.Reset + " FAILED in 100ms | Scenarios: 0" + ui.Green + "✓" + ui.Reset + " 1" + ui.Red + "✗" + ui.Reset + " 0" + ui.Yellow + "○" + ui.Reset + " (1) | 1 requests sent"},
+			wantOutput: []string{ui.Red + "✗" + ui.Reset + " Scenario: Color Scenario", "   " + ui.Red + "✗" + ui.Reset + " ReqColor", "     " + ui.Red + "✗" + ui.Reset + " Error: boom", ui.Red + "✗" + ui.Reset + " FAILED in 100ms | Scenarios: 1" + ui.Red + "✗" + ui.Reset + " | 1 requests sent"},
 		},
 		{
 			name: "Verbose Timings and Assertions",
@@ -110,13 +110,13 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 			results: []runner.ScenarioResult{
 				{
 					Name:   "Skipped Scenario",
-					Status: runner.Skipped,
+					Status: runner.Unset,
 					RequestResults: []runner.RequestResult{
-						{Name: "ReqS", Status: runner.Skipped},
+						{Name: "ReqS", Status: runner.Unset},
 					},
 				},
 			},
-			wantOutput: []string{ui.Gray + "-" + ui.Reset + " Scenario: Skipped Scenario", " " + ui.Green + "✓" + ui.Reset + " PASSED in 100ms"},
+			wantOutput: []string{ui.Gray + "-" + ui.Reset + " Scenario: Skipped Scenario", " " + ui.Gray + "-" + ui.Reset + " SKIPPED in 100ms | Scenarios: 1" + ui.Gray + "-" + ui.Reset + " | 0 requests sent"},
 		},
 		{
 			name: "Show NoSkip filters Skipped",
@@ -124,7 +124,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 			results: []runner.ScenarioResult{
 				{
 					Name:   "Skipped Scenario",
-					Status: runner.Skipped,
+					Status: runner.Unset,
 				},
 				{
 					Name:   "Success Scenario",
@@ -139,14 +139,14 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 			results: []runner.ScenarioResult{
 				{
 					Name:   "Skipped Scenario",
-					Status: runner.Skipped,
+					Status: runner.Unset,
 				},
 				{
 					Name:   "Success Scenario",
 					Status: runner.Success,
 				},
 			},
-			wantOutput: []string{" ✓ PASSED in 100ms | Scenarios: 1✓ 0✗ 1○ (2) | 0 requests sent"},
+			wantOutput: []string{" ✓ PASSED in 100ms | Scenarios: 1✓ 1- | 0 requests sent"},
 		},
 		{
 			name: "Show Failures filters Success and Skipped",
@@ -154,14 +154,14 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 			results: []runner.ScenarioResult{
 				{
 					Name:   "Skipped Scenario",
-					Status: runner.Skipped,
+					Status: runner.Unset,
 				},
 				{
 					Name:   "Success Scenario",
 					Status: runner.Success,
 					RequestResults: []runner.RequestResult{
 						{Name: "Req1", Status: runner.Success},
-						{Name: "Req2", Status: runner.Skipped},
+						{Name: "Req2", Status: runner.Unset},
 					},
 				},
 				{

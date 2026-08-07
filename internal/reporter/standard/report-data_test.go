@@ -95,8 +95,9 @@ func TestReportData_ErrorRequestTallyingBug(t *testing.T) {
 
 	_ = rep.Report(sourceCh, timerCh, 1)
 
-	expectedHeader := " ✗ Scenario: Error Scenario (0✓ 1✗ 0○ in 1ms)"
-	if !strings.Contains(buf.String(), expectedHeader) {
-		t.Errorf("Error request was not tallied as a failure (✗). Expected to contain %q\nGot:\n%s", expectedHeader, buf.String())
+	outStr := buf.String()
+	expectedStr := " ✗ Scenario: Error Scenario (1✗ in 1ms)"
+	if !strings.Contains(outStr, expectedStr) {
+		t.Errorf("Error request was not tallied as a failure (✗). Expected to contain %q\nGot:\n%s", expectedStr, outStr)
 	}
 }

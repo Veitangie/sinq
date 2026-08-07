@@ -26,7 +26,7 @@ const (
 	Magenta      = "\033[0;35m"
 	Gray         = "\033[90m"
 	LightGray    = "\033[38;5;244m"
-	ClearSpinner = HideCursor + "\r" + ClearLine + ShowCursor
+	ClearSpinner = "\r" + ClearLine
 )
 
 var SpinnerStates []string = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -35,12 +35,13 @@ var ClearSpinnerBytes []byte = []byte(ClearSpinner)
 
 type spinnerState struct {
 	needClearing bool
+	canWrite     bool
 	writer       io.Writer
 	state        []byte
 }
 
 func (c *spinnerState) clear() error {
-	if c.needClearing {
+	if c.needClearing && c.canWrite {
 		_, err := c.writer.Write(ClearSpinnerBytes)
 		c.needClearing = false
 		return err
@@ -49,7 +50,7 @@ func (c *spinnerState) clear() error {
 }
 
 func (c *spinnerState) restore() error {
-	if c.needClearing {
+	if c.needClearing || !c.canWrite {
 		return nil
 	}
 
@@ -107,7 +108,9 @@ func (w *UIWriter) Write(data []byte) (int, error) {
 		return written, err
 	}
 
+	w.spinnerState.canWrite = false
 	if written == len(data) && data[len(data)-1] == '\n' {
+		w.spinnerState.canWrite = true
 		return written, w.spinnerState.restore()
 	}
 	return written, err
@@ -123,10 +126,6 @@ func (w *SpinnerWriter) Close() error {
 }
 
 func (w *SpinnerWriter) StartSpinner(ctx context.Context, clock timer.Clock) {
-	w.wg.Add(1)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	duration := timer.NewTimer(clock)
-	duration.Start()
 	idx := 0
 	color := 0
 	colorSlice := []string{""}
@@ -136,26 +135,52 @@ func (w *SpinnerWriter) StartSpinner(ctx context.Context, clock timer.Clock) {
 		reset = Reset
 	}
 
-	go func() {
+	w.mut.Lock()
+	w.spinnerState.canWrite = true
+	err := w.spinnerState.set(
+		fmt.Appendf(
+			nil,
+			" %s%s%s Running (0.0s)",
+			colorSlice[color],
+			SpinnerStates[idx],
+			reset,
+		),
+	)
+	idx = (idx + 1) % len(SpinnerStates)
+	if idx == 0 {
+		color = (color + 1) % len(colorSlice)
+	}
 
-		defer w.wg.Done()
+	w.mut.Unlock()
+	if err != nil {
+		return
+	}
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	duration := timer.NewTimer(clock)
+	duration.Start()
+
+	w.wg.Go(func() {
+		defer ticker.Stop()
 	Loop:
 		for {
 			select {
 			case <-ticker.C:
 				w.mut.Lock()
-				err := w.spinnerState.clear()
-				if err != nil {
-					w.mut.Unlock()
-					break Loop
-				}
-				err = w.spinnerState.set(fmt.Appendf(nil, " %s%s%s Running (%.1fs)", colorSlice[color], SpinnerStates[idx], reset, duration.Time().Seconds()))
+				err := w.spinnerState.set(
+					fmt.Appendf(
+						nil,
+						" %s%s%s Running (%.1fs)",
+						colorSlice[color],
+						SpinnerStates[idx],
+						reset, duration.Time().Seconds(),
+					),
+				)
 				idx = (idx + 1) % len(SpinnerStates)
 				if idx == 0 {
 					color = (color + 1) % len(colorSlice)
 				}
 
-				w.spinnerState.needClearing = true
 				w.mut.Unlock()
 				if err != nil {
 					break Loop
@@ -165,5 +190,5 @@ func (w *SpinnerWriter) StartSpinner(ctx context.Context, clock timer.Clock) {
 				break Loop
 			}
 		}
-	}()
+	})
 }

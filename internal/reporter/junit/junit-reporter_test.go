@@ -83,7 +83,7 @@ func TestJUnitReporter_Comprehensive(t *testing.T) {
 			{Name: "SuccessReq", Status: runner.Success},
 			{Name: "ErrorReq", Status: runner.Error, ErrorMessage: "runtime err"},
 			{Name: "FailReq", Status: runner.Failure, FailedAssertions: []string{"bad body"}},
-			{Name: "SkipReq", Status: runner.Skipped},
+			{Name: "SkipReq", Status: runner.Unset},
 			{Name: "AbortReq", Status: runner.Aborted},
 		},
 	}
@@ -127,8 +127,8 @@ func TestJUnitReporter_Comprehensive(t *testing.T) {
 	if suite.TestCases[3].Skipped == nil {
 		t.Errorf("Expected SkippedReq to be skipped")
 	}
-	if suite.TestCases[4].Skipped == nil {
-		t.Errorf("Expected AbortReq to be skipped")
+	if suite.TestCases[4].Error == nil || suite.TestCases[4].Error.Message != "Request was interrupted" {
+		t.Errorf("Expected AbortReq to report an interruption error, got %v", suite.TestCases[4].Error)
 	}
 }
 

@@ -16,8 +16,25 @@ type prefixedWriter struct {
 
 var _ io.Writer = &prefixedWriter{}
 
+func unsafeSplit(data []byte) [][]byte {
+	if len(data) == 0 {
+		return [][]byte{{}}
+	}
+	res := make([][]byte, 0, bytes.Count(data, []byte{'\n'})+1)
+	start := 0
+	for idx, b := range data {
+		if b == '\n' {
+			res = append(res, data[start:idx+1])
+			start = idx + 1
+		}
+	}
+	res = append(res, data[start:])
+
+	return res
+}
+
 func (tw *prefixedWriter) Write(data []byte) (int, error) {
-	split := bytes.Split(data, []byte{'\n'})
+	split := unsafeSplit(data)
 	total := 0
 	var err error
 	for idx, toWrite := range split {
@@ -38,15 +55,6 @@ func (tw *prefixedWriter) Write(data []byte) (int, error) {
 		}
 		if err != nil {
 			return total, err
-		}
-
-		if idx != len(split)-1 {
-			written, err = tw.underlying.Write([]byte{'\n'})
-
-			total += written
-			if err == nil && written == 1 {
-				tw.lastWritten = '\n'
-			}
 		}
 	}
 	return total, err

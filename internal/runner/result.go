@@ -12,7 +12,8 @@ import (
 type ResultStatus int
 
 const (
-	Skipped ResultStatus = iota
+	Unset ResultStatus = iota
+	Skipped
 	Aborted
 	Success
 	Error
@@ -49,6 +50,8 @@ type ScenarioResult struct {
 
 func (s ResultStatus) String() string {
 	switch s {
+	case Unset:
+		fallthrough
 	case Skipped:
 		return "Skipped"
 	case Aborted:

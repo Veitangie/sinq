@@ -45,9 +45,14 @@ type RequestProcessor struct {
 
 func (p *RequestProcessor) handleError(err error) error {
 	if err != nil {
-		*p.status = Error
-		p.result.Status = Error
-		p.result.ErrorMessage = err.Error()
+		if errors.Is(err, context.Canceled) {
+			*p.status = Aborted
+			p.result.Status = Aborted
+		} else {
+			*p.status = Error
+			p.result.Status = Error
+			p.result.ErrorMessage = err.Error()
+		}
 	}
 	return err
 }
@@ -177,9 +182,7 @@ func (p *RequestProcessor) run() error {
 				continue
 			case <-p.ctx.Done():
 				timer.Stop()
-				*p.status = Aborted
-				p.result.Status = Aborted
-				return errors.New("Context aborted while waiting for retry")
+				return p.handleError(p.ctx.Err())
 			}
 		}
 	}
@@ -284,10 +287,8 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 			result = res.Val.(intermediate)
 
 		case <-p.ctx.Done():
-			*p.status = Aborted
-			p.result.Status = Aborted
-			p.result.Execution = p.requestTimer.Time()
-			return result, errors.New("Context aborted while waiting for request to complete")
+			p.result.Execution += p.requestTimer.Time()
+			return result, p.handleError(p.ctx.Err())
 		}
 		p.result.Execution += p.requestTimer.Time()
 	}
@@ -360,7 +361,7 @@ func (p *RequestProcessor) runPost() error {
 }
 
 func (p *RequestProcessor) finalize() {
-	if p.result.Status == Skipped {
+	if p.result.Status == Unset {
 		p.result.Status = Success
 	}
 	p.result.Total = p.totalRequestTimer.Time()

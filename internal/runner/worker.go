@@ -96,7 +96,9 @@ func (w *worker) loggingContextWithErr(ctx context.Context, err error) []any {
 
 func (w *worker) reportResult(ctx context.Context, scenarioTimer timer.Timer, result ScenarioResult) {
 	result.TotalDuration = scenarioTimer.Time()
-	result.Output = w.lc.Printer
+	if w.lc != nil {
+		result.Output = w.lc.Printer
+	}
 	select {
 	case w.resCh <- result:
 	case <-ctx.Done():
@@ -128,11 +130,19 @@ Scenarios:
 }
 
 func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.ScenarioBlueprint, requestIdx int, client *http.Client, status *ResultStatus, result *RequestResult) (bool, error) {
-	if ctx.Err() != nil {
-		*status = Aborted
-		result.Status = Aborted
-		return false, errors.New("Context aborted")
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.Canceled) {
+
+			*status = Aborted
+			result.Status = Aborted
+		} else {
+
+			*status = Error
+			result.Status = Error
+		}
+		return false, ctx.Err()
 	}
+	result.Status = Unset
 
 	w.lc.SetupRequestEnvironment(requestIdx)
 
@@ -158,7 +168,7 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 	}
 
 	if processor.skip {
-		result.Status = Aborted
+		result.Status = Skipped
 		return true, nil
 	}
 
@@ -215,7 +225,7 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 		Tags:           bundle.Config.TagsList,
 		StartedAt:      scenarioTimer.StartedAt(),
 		RequestResults: requestResults,
-		Status:         Skipped,
+		Status:         Unset,
 	}
 
 	if !w.env.cfg.ShouldInclude(bundle.Config.Tags, bundle.Config.Name) {

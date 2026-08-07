@@ -79,8 +79,8 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err == nil || err.Error() != "Context aborted while waiting for retry" {
-			t.Fatalf("Expected context abort error, got: %v", err)
+		if err == nil || err.Error() != "context canceled" {
+			t.Fatalf("Expected context canceled error, got: %v", err)
 		}
 		if *processor.status != Aborted {
 			t.Errorf("Expected processor status to be Aborted, got %v", *processor.status)
@@ -90,6 +90,29 @@ func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("RequestProcessor ignored context cancellation and deadlocked in retry loop")
+	}
+}
+
+func TestRequestProcessor_HandleError(t *testing.T) {
+	processor := &RequestProcessor{
+		status: new(ResultStatus),
+		result: &RequestResult{},
+	}
+
+	processor.handleError(context.Canceled)
+	if *processor.status != Aborted {
+		t.Errorf("Expected processor status to be Aborted, got %v", *processor.status)
+	}
+	if processor.result.Status != Aborted {
+		t.Errorf("Expected request result status to be Aborted, got %v", processor.result.Status)
+	}
+
+	processor.handleError(context.DeadlineExceeded)
+	if *processor.status != Error {
+		t.Errorf("Expected processor status to be Error, got %v", *processor.status)
+	}
+	if processor.result.Status != Error {
+		t.Errorf("Expected request result status to be Error, got %v", processor.result.Status)
 	}
 }
 
@@ -734,7 +757,7 @@ func TestRequestProcessor_SingleFlight_ContextIndependence(t *testing.T) {
 
 	wg.Wait()
 
-	if err1 == nil || err1.Error() != "Context aborted while waiting for request to complete" {
+	if err1 == nil || err1.Error() != "context deadline exceeded" {
 		t.Errorf("Expected Worker 1 to abort due to timeout, got: %v", err1)
 	}
 

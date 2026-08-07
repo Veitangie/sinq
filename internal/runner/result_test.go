@@ -15,7 +15,7 @@ func TestResultStatus_String(t *testing.T) {
 		status ResultStatus
 		want   string
 	}{
-		{Skipped, "Skipped"},
+		{Unset, "Skipped"},
 		{Aborted, "Aborted"},
 		{Success, "Success"},
 		{Failure, "Failure"},

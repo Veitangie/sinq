@@ -24,9 +24,14 @@ func (r *ResultReporter) Report(source <-chan runner.ScenarioResult, timer <-cha
 			continue
 		}
 
+		if result.Status == runner.Failure || result.Status == runner.Error || result.Status == runner.Aborted {
+			r.success = false
+			continue
+		}
+
 		count += 1
 		for _, reqResult := range result.RequestResults {
-			if reqResult.Status == runner.Failure || reqResult.Status == runner.Error {
+			if reqResult.Status == runner.Failure || reqResult.Status == runner.Error || reqResult.Status == runner.Aborted {
 				r.success = false
 				break
 			}

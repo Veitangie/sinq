@@ -157,27 +157,23 @@ func sinq(args []string) int {
 	}
 
 	if cfg.Help {
-		fmt.Print(helpPrefix)
-		fmt.Println(ponderSinqMeaning())
-		fmt.Println(helpSuffix)
-		return 0
+		return printHelp()
 	}
 
 	if cfg.Version {
-		fmt.Print(versionConstPart)
-		fmt.Println(ponderSinqMeaning())
-		return 0
+		return printVersion()
 	}
 
 	fi, err := os.Stdout.Stat()
 	inTermOut := err == nil && fi.Mode()&os.ModeCharDevice != 0
+	wantColorOut := cfg.Reporter.Color == config.Always || (cfg.Reporter.Color == config.Auto && !isInCi && inTermOut)
 
 	fi, err = os.Stderr.Stat()
 	inTermErr := err == nil && fi.Mode()&os.ModeCharDevice != 0
+	wantColorErr := cfg.Reporter.Color == config.Always || (cfg.Reporter.Color == config.Auto && !isInCi && inTermErr)
 
 	if !cfg.NoSpinner {
-		wantColor := cfg.Reporter.Color == config.Always || (cfg.Reporter.Color == config.Auto && !isInCi && inTermErr)
-		stopSpinner := setupSpinner(inTermErr, inTermOut, wantColor, ctx)
+		stopSpinner := setupSpinner(inTermErr, inTermOut, wantColorErr, ctx)
 		defer stopSpinner()
 	}
 
@@ -221,6 +217,10 @@ func sinq(args []string) int {
 			}
 		}(fs)
 
+		if ctx.Err() != nil {
+			fmt.Fprint(stderr, "Received interrupt signal, shutting down\n")
+			return 1
+		}
 		allScenarios = slices.Grow(allScenarios, len(res))
 		for _, scenarioBlueprint := range res {
 			allScenarios = append(allScenarios, runner.ScenarioBundle{ScenarioBlueprint: scenarioBlueprint, Workspace: fs})
@@ -229,7 +229,7 @@ func sinq(args []string) int {
 	logger.Debug("[sinq] Discovery complete", "duration", discoveryTimer.Time())
 
 	if cfg.List {
-		listScenarios(allScenarios, cfg, inTermOut)
+		listScenarios(allScenarios, cfg, wantColorOut)
 		return 0
 	}
 
@@ -270,15 +270,43 @@ func sinq(args []string) int {
 
 	resultCh, durationCh, errorCh := rn.RunScenarios(ctx, allScenarios, secrets, &mainTimer)
 
-	code := handleReporting(cfg, logger, resultCh, durationCh, errorCh, scenarioCount, inTermErr, inTermOut)
+	code := handleReporting(cfg, logger, resultCh, durationCh, errorCh, scenarioCount, wantColorErr, wantColorOut)
 
 	return code
 }
 
-func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config, inTerm bool) {
+func printVersion() int {
+	_, err := fmt.Fprint(stdout, versionConstPart)
+	if err != nil {
+		return 1
+	}
+	_, err = fmt.Fprintln(stdout, ponderSinqMeaning())
+	if err != nil {
+		return 1
+	}
+	return 0
+}
+
+func printHelp() int {
+	_, err := fmt.Fprint(stdout, helpPrefix)
+	if err != nil {
+		return 1
+	}
+	_, err = fmt.Fprintln(stdout, ponderSinqMeaning())
+	if err != nil {
+		return 1
+	}
+	_, err = fmt.Fprintln(stdout, helpSuffix)
+	if err != nil {
+		return 1
+	}
+	return 0
+}
+
+func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config, wantColor bool) {
 	cyan := ""
 	reset := ""
-	if cfg.Reporter.Color == config.Always || cfg.Reporter.Color == config.Auto && !isInCi && inTerm {
+	if wantColor {
 		cyan = ui.Cyan
 		reset = ui.Reset
 	}
@@ -320,14 +348,14 @@ func handleReporting(
 	durationCh <-chan time.Duration,
 	errorCh <-chan error,
 	scenarioCount int,
-	inTermErr, inTermOut bool,
+	wantColorErr, wantColorOut bool,
 ) int {
 
 	resultReporter := result.NewResultReporter()
 
 	report := reporter.NewPool(resultReporter)
 	if cfg.Out != "" {
-		err := report.Register(createReporter(cfg, stderr, inTermErr))
+		err := report.Register(createReporter(cfg, stderr, wantColorErr))
 		if err != nil {
 			logger.Warn("[sinq] Failed to attach reporter", "error", err)
 		}
@@ -357,7 +385,7 @@ func handleReporting(
 			}
 		}
 	} else {
-		err := report.Register(createReporter(cfg, stdout, inTermOut))
+		err := report.Register(createReporter(cfg, stdout, wantColorOut))
 		if err != nil {
 			logger.Warn("[sinq] Failed to attach reporter", "error", err)
 		}
@@ -390,7 +418,7 @@ func handleReporting(
 	return 1
 }
 
-func createReporter(cfg config.Config, out io.Writer, inTerm bool) reporter.Reporter {
+func createReporter(cfg config.Config, out io.Writer, wantColor bool) reporter.Reporter {
 	switch cfg.Format {
 	case "junit":
 		return junit.NewReporter(out)
@@ -398,10 +426,10 @@ func createReporter(cfg config.Config, out io.Writer, inTerm bool) reporter.Repo
 		reporterCfg := cfg.Reporter
 
 		if reporterCfg.Color == config.Auto {
-			if !inTerm || isInCi {
-				reporterCfg.Color = config.Never
-			} else {
+			if wantColor {
 				reporterCfg.Color = config.Always
+			} else {
+				reporterCfg.Color = config.Never
 			}
 		}
 		return standard.NewReporter(reporterCfg, out)
