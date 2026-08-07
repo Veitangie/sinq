@@ -51,10 +51,10 @@ func TestRequestBlueprintString(t *testing.T) {
 
 func TestToken_IsEmpty(t *testing.T) {
 	tests := []struct {
-		name       string
-		start      int
-		end        int
-		wantEmpty  bool
+		name      string
+		start     int
+		end       int
+		wantEmpty bool
 	}{
 		{"Empty (diff 0)", 10, 10, true},
 		{"Empty (diff 1)", 10, 11, true},

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"io"
 	"log/slog"
 	"os"
 	"reflect"
@@ -18,13 +19,13 @@ func TestParser_Parse(t *testing.T) {
 		name       string
 		flags      []string
 		wantConfig Config
-		wantErrs   int
+		wantErr    bool
 	}{
 		{
 			name:       "Empty Flags (Sane Defaults)",
 			flags:      []string{},
 			wantConfig: SaneDefaults(),
-			wantErrs:   0,
+			wantErr:    false,
 		},
 		{
 			name:  "Basic Worker Override (Short)",
@@ -34,7 +35,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Workers = 5
 				return c
 			}(),
-			wantErrs: 0,
+			wantErr: false,
 		},
 		{
 			name:  "Basic Worker Override (Long)",
@@ -44,7 +45,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Workers = 20
 				return c
 			}(),
-			wantErrs: 0,
+			wantErr: false,
 		},
 		{
 			name:  "Boolean Flags Chaining",
@@ -55,7 +56,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Insecure = true
 				return c
 			}(),
-			wantErrs: 0,
+			wantErr: false,
 		},
 		{
 			name:  "Color Options",
@@ -65,7 +66,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Reporter.Color = Always
 				return c
 			}(),
-			wantErrs: 0,
+			wantErr: false,
 		},
 		{
 			name:  "Double Dash Positional Terminator",
@@ -76,7 +77,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Paths = []string{"-d", "--workers"}
 				return c
 			}(),
-			wantErrs: 0,
+			wantErr: false,
 		},
 		{
 			name:  "Chained Booleans Exhaustive",
@@ -89,85 +90,81 @@ func TestParser_Parse(t *testing.T) {
 				c.Reporter.Verbose = true
 				return c
 			}(),
-			wantErrs: 0,
+			wantErr: false,
 		},
 		{
 			name:       "Completion",
 			flags:      []string{"--completion"},
 			wantConfig: func() Config { c := SaneDefaults(); c.Completion = true; return c }(),
-			wantErrs:   0,
+			wantErr:    false,
 		},
 		{
 			name:       "Print Flag",
 			flags:      []string{"--print"},
 			wantConfig: func() Config { c := SaneDefaults(); c.Print = true; return c }(),
-			wantErrs:   0,
+			wantErr:    false,
 		},
 		{
 			name:       "No Spinner Flag",
 			flags:      []string{"--no-spinner"},
 			wantConfig: func() Config { c := SaneDefaults(); c.NoSpinner = true; return c }(),
-			wantErrs:   0,
-		},
+			wantErr:    false},
 		{
 			name:       "Color Never",
 			flags:      []string{"-c", "never"},
 			wantConfig: func() Config { c := SaneDefaults(); c.Reporter.Color = Never; return c }(),
-			wantErrs:   0,
-		},
+			wantErr:    false},
 		{
 			name:       "Log Level Debug",
 			flags:      []string{"-L", "Debug"},
 			wantConfig: func() Config { c := SaneDefaults(); c.LogLevel = slog.LevelDebug; return c }(),
-			wantErrs:   0,
-		},
+			wantErr:    false},
 		{
 			name:       "Double Dash Stop Parsing",
 			flags:      []string{"--"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   0,
-		},
+			wantErr:    false},
 		{
 			name:       "Chained Boolean with Invalid Char",
 			flags:      []string{"-lvX"},
 			wantConfig: func() Config { c := SaneDefaults(); c.List = true; c.Version = true; return c }(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Invalid Color",
 			flags:      []string{"-c", "magenta"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Missing Worker Value",
 			flags:      []string{"-w"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Unknown Short Flag",
 			flags:      []string{"-x"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Unknown Long Flag",
 			flags:      []string{"--unknown"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Missing Value for Output",
 			flags:      []string{"-o"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Invalid Worker Type",
 			flags:      []string{"-w", "five"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:  "Invalid Output Format",
@@ -177,13 +174,13 @@ func TestParser_Parse(t *testing.T) {
 				c.Format = "std"
 				return c
 			}(),
-			wantErrs: 1,
+			wantErr: true,
 		},
 		{
 			name:       "Invalid Log Level",
 			flags:      []string{"-L", "custom"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:  "Show All (Long)",
@@ -193,8 +190,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Reporter.Show = All
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Show No-Skip (Short)",
 			flags: []string{"-S", "no-skip"},
@@ -203,8 +199,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Reporter.Show = NoSkip
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Show Failures",
 			flags: []string{"--show", "failed"},
@@ -213,19 +208,18 @@ func TestParser_Parse(t *testing.T) {
 				c.Reporter.Show = Failed
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:       "Show Invalid",
 			flags:      []string{"--show", "invalid"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Show Missing Value",
 			flags:      []string{"-s"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:  "Tag Include (Short)",
@@ -235,8 +229,7 @@ func TestParser_Parse(t *testing.T) {
 				c.TagsInclude = []string{"api"}
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Tag Include Multiple (Long)",
 			flags: []string{"--tag", "api", "--tag", "ui"},
@@ -245,8 +238,7 @@ func TestParser_Parse(t *testing.T) {
 				c.TagsInclude = []string{"api", "ui"}
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Name Include Regex",
 			flags: []string{"--name", "^Test"},
@@ -255,39 +247,36 @@ func TestParser_Parse(t *testing.T) {
 				c.NamesInclude = append(c.NamesInclude, *regexp.MustCompile("^Test"))
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:       "Name Include Regex Invalid",
 			flags:      []string{"--name", "([invalid"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:  "Tag Exclude",
-			flags: []string{"--skip-tag", "slow"},
+			flags: []string{"--no-tag", "slow"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
 				c.TagsExclude = []string{"slow"}
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Name Exclude Regex",
-			flags: []string{"--skip-name", "Fail$"},
+			flags: []string{"--no-name", "Fail$"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
 				c.NamesExclude = append(c.NamesExclude, *regexp.MustCompile("Fail$"))
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:       "Name Exclude Regex Invalid",
-			flags:      []string{"--skip-name", "([invalid"},
+			flags:      []string{"--no-name", "([invalid"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:  "Dump On Failure",
@@ -297,8 +286,7 @@ func TestParser_Parse(t *testing.T) {
 				c.DumpOnFailure = true
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Secret Inline (Short)",
 			flags: []string{"-s", "API_KEY=123", "-s", "TOKEN=abc"},
@@ -308,13 +296,12 @@ func TestParser_Parse(t *testing.T) {
 				c.Treewalker.Secrets["TOKEN"] = "abc"
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:       "Secret Inline Invalid (No Equal)",
 			flags:      []string{"-s", "API_KEY123"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:  "Env Inline (Short)",
@@ -325,8 +312,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Treewalker.Env["PORT"] = float64(8080)
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Env Inline (Long)",
 			flags: []string{"--env", "HOST=localhost=80"},
@@ -335,8 +321,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Treewalker.Env["HOST"] = "localhost=80"
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Env Inline Nested Dot",
 			flags: []string{"-e", "one.two.three=four"},
@@ -349,8 +334,7 @@ func TestParser_Parse(t *testing.T) {
 				}
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Secret Inline Nested JSON",
 			flags: []string{"-s", `one={"two":{"three":"four"}}`},
@@ -363,8 +347,7 @@ func TestParser_Parse(t *testing.T) {
 				}
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Secrets File (Long)",
 			flags: []string{"--secrets-file", "path/to/secrets.json"},
@@ -373,8 +356,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Treewalker.SecretsFile = "path/to/secrets.json"
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Plugins Flag",
 			flags: []string{"--plugins", "path/to/plugins" + string(os.PathListSeparator) + "path/to/more"},
@@ -383,8 +365,7 @@ func TestParser_Parse(t *testing.T) {
 				c.LuaPaths = []string{"path/to/plugins", "path/to/more"}
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Unrestricted Mode (Short)",
 			flags: []string{"-u"},
@@ -393,8 +374,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Unrestricted = true
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Unrestricted Mode (Long)",
 			flags: []string{"--unrestricted"},
@@ -403,8 +383,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Unrestricted = true
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:  "Max Cache Size",
 			flags: []string{"--max-cache-size", "10MB"},
@@ -413,19 +392,18 @@ func TestParser_Parse(t *testing.T) {
 				c.MaxCacheSize = DataSize{ByteAmount: 10 * (1 << 20), Unit: MiByte}
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:       "Max Cache Size Invalid",
 			flags:      []string{"--max-cache-size", "invalid"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Max Cache Size Missing Value",
 			flags:      []string{"--max-cache-size"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:  "Cache Timeout",
@@ -435,68 +413,61 @@ func TestParser_Parse(t *testing.T) {
 				c.CacheTimeout = 5 * time.Second
 				return c
 			}(),
-			wantErrs: 0,
-		},
+			wantErr: false},
 		{
 			name:       "Cache Timeout Invalid",
 			flags:      []string{"--cache-timeout", "invalid"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Cache Timeout Missing Value",
 			flags:      []string{"--cache-timeout"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Cache Timeout Negative",
 			flags:      []string{"--cache-timeout", "-5s"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Env Missing Value (Short)",
 			flags:      []string{"-e"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
+			wantErr:    true,
 		},
 		{
 			name:       "Env Missing Equals",
 			flags:      []string{"-e", "MY_KEY"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
-		},
+			wantErr:    true},
 		{
 			name:       "Env Empty Key",
 			flags:      []string{"-e", "=123"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
-		},
+			wantErr:    true},
 		{
 			name:       "Secret Missing Equals",
 			flags:      []string{"-s", "MY_SECRET"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
-		},
+			wantErr:    true},
 		{
 			name:       "Secret Empty Key",
 			flags:      []string{"-s", "=abc"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
-		},
+			wantErr:    true},
 		{
 			name:       "Log Level Missing Value",
 			flags:      []string{"-L"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
-		},
+			wantErr:    true},
 		{
 			name:       "Color Missing Value",
 			flags:      []string{"-c"},
 			wantConfig: SaneDefaults(),
-			wantErrs:   1,
-		},
+			wantErr:    true},
 		{
 			name:  "Unknown Boolean Chained",
 			flags: []string{"-viX"},
@@ -506,8 +477,7 @@ func TestParser_Parse(t *testing.T) {
 				c.Insecure = true
 				return c
 			}(),
-			wantErrs: 1,
-		},
+			wantErr: true},
 		{
 			name:  "Env Inline Deep Merge JSON",
 			flags: []string{"-e", `API={"HOST":"localhost"}`, "-e", `API={"PORT":8080}`},
@@ -519,21 +489,55 @@ func TestParser_Parse(t *testing.T) {
 				}
 				return c
 			}(),
-			wantErrs: 0,
+			wantErr: false},
+		{
+			name:  "POSIX: Glued Short Flag Value (-w100)",
+			flags: []string{"-w100"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Workers = 100
+				return c
+			}(),
+			wantErr: false},
+		{
+			name:  "POSIX: Long Flag with Equals (--dump-on-failure=true)",
+			flags: []string{"--dump-on-failure=true"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.DumpOnFailure = true
+				return c
+			}(),
+			wantErr: false},
+		{
+			name:  "POSIX: Long Flag with Equals (--format=junit)",
+			flags: []string{"--format=junit"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Format = "junit"
+				return c
+			}(),
+			wantErr: false},
+		{
+			name:  "POSIX: Chained Boolean Into Value (-VSall)",
+			flags: []string{"-VSall"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Reporter.Verbose = true
+				c.Reporter.Show = All
+				return c
+			}(),
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := NewParser()
-			p.Parse(tt.flags)
-			gotConfig, gotErrs := p.Result()
+			p := NewParser(io.Discard)
+			gotErr := p.Parse(tt.flags)
+			gotConfig := p.Result()
 
-			if len(gotErrs) != tt.wantErrs {
-				t.Errorf("Expected %d errors, got %d", tt.wantErrs, len(gotErrs))
-				for _, err := range gotErrs {
-					t.Logf("Encountered error: %v", err)
-				}
+			if (gotErr != nil) != tt.wantErr {
+				t.Errorf("Expected errors: %t, got %v", tt.wantErr, gotErr)
 			}
 
 			if !reflect.DeepEqual(gotConfig, tt.wantConfig) {
@@ -543,16 +547,42 @@ func TestParser_Parse(t *testing.T) {
 	}
 }
 
-func TestParser_CommaFormatterLogic(t *testing.T) {
-	p := NewParser()
-	p.Parse([]string{"-f", "invalid_format"})
-	_, errs := p.Result()
+func TestValues_RegexSliceValue_String_Bug(t *testing.T) {
+	regexes := []regexp.Regexp{*regexp.MustCompile("test")}
+	v := RegexSliceValue{target: &regexes}
 
-	if len(errs) == 0 {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("String() panicked! Likely due to make([]string, len, 0) bug: %v", r)
+		}
+	}()
+
+	_ = v.String()
+}
+
+func TestValues_FormatValue_Set_Bug(t *testing.T) {
+	var target string
+	v := FormatValue{target: &target}
+
+	err := v.Set("sTd")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if target != "std" {
+		t.Fatalf("Expected target to be 'std' but got '%s'. Formatting should be normalized to lowercase.", target)
+	}
+}
+
+func TestParser_CommaFormatterLogic(t *testing.T) {
+	p := NewParser(io.Discard)
+	err := p.Parse([]string{"-f", "invalid_format"})
+
+	if err == nil {
 		t.Fatal("Expected an error for invalid format, got none")
 	}
 
-	errMsg := errs[0].Error()
+	errMsg := err.Error()
 	if strings.Contains(errMsg, ", stdjunit") || strings.Contains(errMsg, ", junitstd") {
 		t.Errorf("Comma formatter bug detected in error string: %s", errMsg)
 	}

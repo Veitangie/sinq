@@ -5,249 +5,77 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
-	"log/slog"
-	"path/filepath"
-	"regexp"
-	"slices"
-	"strconv"
+	"io"
 	"strings"
-	"time"
 
 	"github.com/Veitangie/sinq/internal/envs"
+	"github.com/spf13/pflag"
 )
-
-type parserState int
-
-const (
-	Flags parserState = iota
-	Positional
-	Finalized
-)
-
-var outFormats map[string]bool = map[string]bool{
-	"junit": true,
-	"std":   true,
-}
-
-var longToShort map[string]string = map[string]string{
-	"--workers":      "-w",
-	"--insecure":     "-i",
-	"--secret":       "-s",
-	"--env":          "-e",
-	"--out":          "-o",
-	"--log-level":    "-L",
-	"--format":       "-f",
-	"--verbose":      "-V",
-	"--color":        "-c",
-	"--help":         "-h",
-	"--version":      "-v",
-	"--list":         "-l",
-	"--tag":          "-t",
-	"--name":         "-n",
-	"--show":         "-S",
-	"--unrestricted": "-u",
-	"--print":        "-p",
-}
 
 type Parser struct {
-	result            Config
-	state             parserState
-	accumulatedErrors []error
-	curIdx            int
-	currentFlags      []string
+	result  *Config
+	flagSet *pflag.FlagSet
+	writer  io.Writer
 }
 
-func NewParser() Parser {
-	return Parser{result: SaneDefaults()}
+func setupReporterConfig(flagSet *pflag.FlagSet, result *ReporterConfig) {
+	flagSet.BoolVarP(&result.Verbose, "verbose", "V", false, "-V")
+	flagSet.VarP(WhenColorValue{&result.Color}, "color", "c", "-c always")
+	flagSet.VarP(WhatShowValue{&result.Show}, "show", "S", "-S all")
 }
 
-func (p *Parser) Parse(flags []string) {
-	p.currentFlags = slices.Clone(flags)
-	p.curIdx = 0
-
-	for p.curIdx < len(p.currentFlags) {
-		p.parsePositional()
-		p.getNext()
-	}
-
-	p.currentFlags = nil
-	p.curIdx = 0
+func setupTreewalkerConfig(flagSet *pflag.FlagSet, result *TreewalkerConfig) {
+	flagSet.StringVar(&result.SecretsFile, "secrets-file", "", "--secrets-file path/to/file")
+	flagSet.VarP(&EnvMapValue{result.Env, false}, "env", "e", "-e key=value")
+	flagSet.VarP(&EnvMapValue{result.Secrets, true}, "secret", "s", "-s key=value")
 }
 
-func (p *Parser) Result() (Config, []error) {
-	p.state = Finalized
-	return p.result, p.accumulatedErrors
+func NewParser(writer io.Writer) Parser {
+	result := SaneDefaults()
+	flagSet := pflag.NewFlagSet("sinq", pflag.ContinueOnError)
+	flagSet.SetOutput(writer)
+
+	flagSet.VarP(PositiveIntValue{&result.Workers}, "workers", "w", "-w 100")
+	flagSet.BoolVarP(&result.Insecure, "insecure", "i", false, "-i")
+	flagSet.BoolVarP(&result.Version, "version", "v", false, "-v")
+	flagSet.BoolVarP(&result.Help, "help", "h", false, "-h")
+	flagSet.BoolVarP(&result.List, "list", "l", false, "-l")
+	flagSet.BoolVar(&result.Completion, "completion", false, "--completion")
+	flagSet.MarkHidden("completion") //nolint:errcheck
+	flagSet.BoolVar(&result.DumpOnFailure, "dump-on-failure", false, "--dump-on-failure")
+	flagSet.BoolVarP(&result.Unrestricted, "unrestricted", "u", false, "-u")
+	flagSet.BoolVarP(&result.Print, "print", "p", false, "-p")
+	flagSet.BoolVar(&result.NoSpinner, "no-spinner", false, "--no-spinner")
+
+	flagSet.VarP(LogLevelValue{&result.LogLevel}, "log-level", "L", "-L debug")
+	flagSet.VarP(FormatValue{&result.Format}, "format", "f", "-f junit")
+	flagSet.StringVarP(&result.Out, "out", "o", "", "-o path/to/file.out")
+	flagSet.Var(DataSizeValue{&result.MaxCacheSize}, "max-cache-size", "--max-cache-size 10MiB")
+	flagSet.Var(NonNegativeDurationValue{&result.CacheTimeout}, "cache-timeout", "--cache-timeout 30s")
+	flagSet.Var(LuaPathsValue{&result.LuaPaths}, "plugins", "--plugins /path/to/lua/dir")
+	flagSet.StringSliceVarP(&result.TagsInclude, "tag", "t", result.TagsInclude, "-t goodTag")
+	flagSet.StringSliceVar(&result.TagsExclude, "no-tag", result.TagsExclude, "--no-tag badTag")
+	flagSet.VarP(RegexSliceValue{&result.NamesInclude}, "name", "n", "-n '.+GoodName.+")
+	flagSet.Var(RegexSliceValue{&result.NamesExclude}, "no-name", "--no-name '.+BadName.+'")
+
+	setupTreewalkerConfig(flagSet, &result.Treewalker)
+	setupReporterConfig(flagSet, &result.Reporter)
+
+	return Parser{&result, flagSet, writer}
 }
 
-func (p *Parser) getCurrent() string {
-	if p.curIdx >= 0 && p.curIdx < len(p.currentFlags) {
-		return p.currentFlags[p.curIdx]
+func (p *Parser) Parse(arguments []string) error {
+	err := p.flagSet.Parse(arguments)
+	if err != nil && err != pflag.ErrHelp {
+		return err
 	}
-	return ""
+
+	p.result.Paths = p.flagSet.Args()
+	return nil
 }
 
-func (p *Parser) setCurrent(value string) {
-	if p.curIdx >= 0 && p.curIdx < len(p.currentFlags) {
-		p.currentFlags[p.curIdx] = value
-	}
-}
-
-func (p *Parser) getNext() string {
-	p.curIdx++
-	if p.curIdx >= 0 && p.curIdx < len(p.currentFlags) {
-		return p.currentFlags[p.curIdx]
-	}
-	return ""
-}
-
-func (p *Parser) getNextValue(message string) (string, error) {
-	p.curIdx++
-	if p.curIdx >= 0 && p.curIdx < len(p.currentFlags) {
-		return p.currentFlags[p.curIdx], nil
-	}
-	return "", errors.New(message)
-}
-
-func (p *Parser) parseOneLetter(b rune) {
-	switch b {
-	case 'i':
-		p.result.Insecure = true
-	case 'v':
-		p.result.Version = true
-	case 'V':
-		p.result.Reporter.Verbose = true
-	case 'h':
-		p.result.Help = true
-	case 'l':
-		p.result.List = true
-	case 'u':
-		p.result.Unrestricted = true
-	case 'p':
-		p.result.Print = true
-	default:
-		p.accumulateError(fmt.Errorf("Unknown boolean flag: %c. See 'sinq --help'", b))
-	}
-}
-
-func (p *Parser) parseShortFlag() {
-	flag := p.getCurrent()
-
-	if len(flag) > 2 {
-		for _, b := range flag[1:] {
-			p.parseOneLetter(b)
-		}
-		return
-	}
-
-	switch flag[1] {
-	case 'S':
-		p.parseShow()
-	case 'i':
-		p.result.Insecure = true
-	case 'v':
-		p.result.Version = true
-	case 'V':
-		p.result.Reporter.Verbose = true
-	case 'h':
-		p.result.Help = true
-	case 'l':
-		p.result.List = true
-	case 'u':
-		p.result.Unrestricted = true
-	case 'p':
-		p.result.Print = true
-	case 'w':
-		p.parseWorkerCount()
-	case 's':
-		p.parseSecret()
-	case 'e':
-		p.parseEnv()
-	case 'o':
-		path, err := p.getNextValue("No path passed for output file. Usage: --out|-o path/to/file")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-		p.result.Out = path
-	case 'L':
-		p.parseLogLevel()
-	case 'f':
-		p.parseOutFormat()
-	case 'c':
-		p.parseColorOption()
-	case 't':
-		tag, err := p.getNextValue("No tag passed for filtering by tag. Usage: --tag|-t my-tag")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-
-		p.result.TagsInclude = append(p.result.TagsInclude, tag)
-	case 'n':
-		nameRaw, err := p.getNextValue("No regex passed for filtering by name. Usage: --name|-n '^Custom Name$'")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-
-		nameRegex, err := regexp.Compile(nameRaw)
-		if err != nil {
-			p.accumulateError(fmt.Errorf("Failed to compile regex for filtering by name: %w", err))
-			return
-		}
-		if nameRegex == nil {
-			p.accumulateError(errors.New("Regex for filtering by name did not compile, but returned no errors"))
-			return
-		}
-
-		p.result.NamesInclude = append(p.result.NamesInclude, *nameRegex)
-	default:
-		p.accumulateError(fmt.Errorf("Unknown short flag: %c. See 'sinq --help'", flag[1]))
-	}
-}
-
-func (p *Parser) parseEnv() {
-	keyVal, err := p.getNextValue("No value passed for env value. Usage: --env|-e key=value")
-	if err != nil {
-		p.accumulateError(err)
-		return
-	}
-
-	keyValSlice := strings.SplitN(keyVal, "=", 2)
-	if len(keyValSlice) != 2 {
-		p.accumulateError(fmt.Errorf("Failed to parse env value %s, could not split by '='. Usage: --env|-e key=value", keyVal))
-		return
-	}
-
-	if keyValSlice[0] == "" {
-		p.accumulateError(errors.New("Empty key passed to env. Usage: --env|-e key=value"))
-		return
-	}
-
-	parseKeyVal(p.result.Treewalker.Env, keyValSlice[0], keyValSlice[1])
-}
-
-func (p *Parser) parseSecret() {
-	keyVal, err := p.getNextValue("No value passed for secret value. Usage: --secret|-s key=value")
-	if err != nil {
-		p.accumulateError(err)
-		return
-	}
-
-	keyValSlice := strings.SplitN(keyVal, "=", 2)
-	if len(keyValSlice) != 2 {
-		p.accumulateError(errors.New("Failed to parse secret value, could not split by '='. Usage: --secret|-s key=value"))
-		return
-	}
-
-	if keyValSlice[0] == "" {
-		p.accumulateError(errors.New("Empty key passed to secret. Usage: --secret|-s key=value"))
-		return
-	}
-
-	parseKeyVal(p.result.Treewalker.Secrets, keyValSlice[0], keyValSlice[1])
+func (p *Parser) Result() Config {
+	return *p.result
 }
 
 func parseKeyVal(target map[string]any, key, value string) {
@@ -278,238 +106,4 @@ func parseKeyVal(target map[string]any, key, value string) {
 			target[keySlice[len(keySlice)-1]] = maybeValue
 		}
 	}
-}
-
-func (p *Parser) parseOutFormat() {
-	format, err := p.getNextValue("No format passed for output. Usage: --format|-f junit")
-	if err != nil {
-		p.accumulateError(err)
-		return
-	}
-	if !outFormats[format] {
-
-		sb := strings.Builder{}
-		hack := false
-		for known := range outFormats {
-			if hack {
-				sb.WriteString(", ")
-			}
-			sb.WriteString(known)
-			hack = true
-		}
-
-		p.accumulateError(fmt.Errorf("Unknown output format: %s, expected one of: %s", format, sb.String()))
-	} else {
-		p.result.Format = format
-	}
-}
-
-func (p *Parser) parseWorkerCount() {
-	valueStr, err := p.getNextValue("No count passed for workers. Usage: --workers|-w 5")
-	if err != nil {
-		p.accumulateError(err)
-		return
-	}
-
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		p.accumulateError(fmt.Errorf("Failed to parse worker count: %v", err))
-		return
-	}
-	if value <= 0 {
-		p.accumulateError(fmt.Errorf("Invalid worker count: %d", value))
-		return
-	}
-	p.result.Workers = value
-}
-
-func (p *Parser) parseColorOption() {
-	value, err := p.getNextValue("No color option passed for output. Usage: --color|-c always")
-	if err != nil {
-		p.accumulateError(err)
-		return
-	}
-
-	switch strings.ToLower(value) {
-	case "never":
-		p.result.Reporter.Color = Never
-	case "always":
-		p.result.Reporter.Color = Always
-	case "auto":
-		p.result.Reporter.Color = Auto
-	default:
-		p.accumulateError(fmt.Errorf("Unknown color option: %s, expected one of: never, auto, always", value))
-	}
-}
-
-func (p *Parser) parseLogLevel() {
-	value, err := p.getNextValue("No log level passed. Usage: --log-level|-L debug")
-	if err != nil {
-		p.accumulateError(err)
-		return
-	}
-
-	switch strings.ToLower(value) {
-	case "debug":
-		p.result.LogLevel = slog.LevelDebug
-	case "info":
-		p.result.LogLevel = slog.LevelInfo
-	case "warn":
-		p.result.LogLevel = slog.LevelWarn
-	case "error":
-		p.result.LogLevel = slog.LevelError
-	default:
-		p.accumulateError(fmt.Errorf("Unknown log level: %s, expected one of: debug, info, warn, error", value))
-	}
-}
-
-func (p *Parser) parseShow() {
-	value, err := p.getNextValue("No show option passed. Usage: --show|-S all")
-	if err != nil {
-		p.accumulateError(err)
-		return
-	}
-
-	switch strings.ToLower(value) {
-	case "all":
-		p.result.Reporter.Show = All
-	case "no-skip":
-		p.result.Reporter.Show = NoSkip
-	case "failed":
-		p.result.Reporter.Show = Failed
-	default:
-		p.accumulateError(fmt.Errorf("Unknown show option: %s, expected one of: all, no-skip, failed", value))
-	}
-}
-
-func (p *Parser) parseLongFlag() {
-	flag := p.getCurrent()
-
-	if strings.HasPrefix(flag, "--") {
-		if len(flag) == 2 {
-			p.state = Positional
-			return
-		}
-
-		short := longToShort[flag]
-		if short == "" {
-			p.parseLongOnlyFlag()
-			return
-		}
-		p.setCurrent(short)
-	}
-
-	p.parseShortFlag()
-}
-
-func (p *Parser) parseLongOnlyFlag() {
-	flag := p.getCurrent()
-	switch flag {
-	case "--skip-tag":
-		tag, err := p.getNextValue("No tag passed for filtering by tag. Usage: --skip-tag my-tag")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-
-		p.result.TagsExclude = append(p.result.TagsExclude, tag)
-	case "--skip-name":
-		nameRaw, err := p.getNextValue("No regex passed for filtering by name. Usage: --skip-name '^Custom Name$'")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-
-		nameRegex, err := regexp.Compile(nameRaw)
-		if err != nil {
-			p.accumulateError(fmt.Errorf("Failed to compile regex for filtering by name: %w", err))
-			return
-		}
-		if nameRegex == nil {
-			p.accumulateError(errors.New("Regex for filtering by name did not compile, but returned no errors"))
-			return
-		}
-
-		p.result.NamesExclude = append(p.result.NamesExclude, *nameRegex)
-	case "--dump-on-failure":
-		p.result.DumpOnFailure = true
-	case "--secrets-file":
-		path, err := p.getNextValue("No path passed for secrets. Usage: --secrets-file path/to/file")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-		p.result.Treewalker.SecretsFile = path
-	case "--plugins":
-		path, err := p.getNextValue("No path passed for lua plugins. Usage: --plugins path/to/dir")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-		p.result.LuaPaths = append(p.result.LuaPaths, filepath.SplitList(path)...)
-	case "--max-cache-size":
-		maybeSize, err := p.getNextValue("No value passed for maximum cache size. Usage: --max-cache-size 50MB")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-
-		size, err := ParseSize(maybeSize)
-		if err != nil {
-			p.accumulateError(fmt.Errorf("--max-cache-size: %w", err))
-			return
-		}
-
-		p.result.MaxCacheSize = size
-
-	case "--cache-timeout":
-		maybeTimeout, err := p.getNextValue("No value passed for cache timeout. Usage: --cache-timeout 60s")
-		if err != nil {
-			p.accumulateError(err)
-			return
-		}
-
-		timeout, err := time.ParseDuration(maybeTimeout)
-		if err != nil {
-			p.accumulateError(fmt.Errorf("--cache-timeout: %w", err))
-			return
-		}
-
-		if timeout.Seconds() < 0 {
-			p.accumulateError(errors.New("--cache-timeout: negative value"))
-			return
-		}
-
-		p.result.CacheTimeout = timeout
-	case "--completion":
-		p.result.Completion = true
-	case "--no-spinner":
-		p.result.NoSpinner = true
-	default:
-		p.accumulateError(fmt.Errorf("Unknown long flag: %s. See 'sinq --help'", flag))
-	}
-}
-
-func (p *Parser) parsePositional() {
-	if p.state == Finalized {
-		return
-	}
-
-	flag := p.getCurrent()
-	if p.state == Flags {
-		if strings.HasPrefix(flag, "-") {
-			p.parseLongFlag()
-			return
-		}
-
-		p.state = Positional
-	}
-
-	if p.state == Positional && flag != "" {
-		p.result.Paths = append(p.result.Paths, flag)
-	}
-}
-
-func (p *Parser) accumulateError(err error) {
-	p.accumulatedErrors = append(p.accumulatedErrors, err)
 }

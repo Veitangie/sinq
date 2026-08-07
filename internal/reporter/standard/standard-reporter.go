@@ -15,17 +15,6 @@ import (
 )
 
 const (
-	Reset     = "\033[0m"
-	Red       = "\033[31m"
-	Green     = "\033[2;32m"
-	Yellow    = "\033[33m"
-	Gray      = "\033[90m"
-	Cyan      = "\033[0;36m"
-	Magenta   = "\033[0;35m"
-	LightGray = "\033[38;5;244m"
-)
-
-const (
 	checkmark = "✓"
 	cross     = "✗"
 	circle    = "○"

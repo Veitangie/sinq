@@ -12,6 +12,7 @@ import (
 
 	"github.com/Veitangie/sinq/internal/config"
 	"github.com/Veitangie/sinq/internal/runner"
+	"github.com/Veitangie/sinq/internal/ui"
 )
 
 type errorWriter struct{}
@@ -53,7 +54,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{Red + "✗" + Reset + " Scenario: Color Scenario", "   " + Red + "✗" + Reset + " ReqColor", "     " + Red + "✗" + Reset + " Error: boom", Red + "✗" + Reset + " FAILED in 100ms | Scenarios: 0" + Green + "✓" + Reset + " 1" + Red + "✗" + Reset + " 0" + Yellow + "○" + Reset + " (1) | 1 requests sent"},
+			wantOutput: []string{ui.Red + "✗" + ui.Reset + " Scenario: Color Scenario", "   " + ui.Red + "✗" + ui.Reset + " ReqColor", "     " + ui.Red + "✗" + ui.Reset + " Error: boom", ui.Red + "✗" + ui.Reset + " FAILED in 100ms | Scenarios: 0" + ui.Green + "✓" + ui.Reset + " 1" + ui.Red + "✗" + ui.Reset + " 0" + ui.Yellow + "○" + ui.Reset + " (1) | 1 requests sent"},
 		},
 		{
 			name: "Verbose Timings and Assertions",
@@ -101,7 +102,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{Yellow + "○" + Reset + " Scenario: Aborted Scenario", "   " + Yellow + "○" + Reset + " ReqA"},
+			wantOutput: []string{ui.Yellow + "○" + ui.Reset + " Scenario: Aborted Scenario", "   " + ui.Yellow + "○" + ui.Reset + " ReqA"},
 		},
 		{
 			name: "Skipped Status Formatting",
@@ -115,7 +116,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{Gray + "-" + Reset + " Scenario: Skipped Scenario", " " + Green + "✓" + Reset + " PASSED in 100ms"},
+			wantOutput: []string{ui.Gray + "-" + ui.Reset + " Scenario: Skipped Scenario", " " + ui.Green + "✓" + ui.Reset + " PASSED in 100ms"},
 		},
 		{
 			name: "Show NoSkip filters Skipped",

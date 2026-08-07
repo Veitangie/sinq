@@ -68,7 +68,6 @@ func (c Config) ShouldInclude(tags map[string]struct{}, name string) bool {
 }
 
 type TreewalkerConfig struct {
-	Strict      bool
 	SecretsFile string
 	Secrets     map[string]any
 	Env         map[string]any
@@ -208,7 +207,6 @@ func SaneDefaults() Config {
 		LuaPaths:      []string{},
 		Paths:         []string{},
 		Treewalker: TreewalkerConfig{
-			Strict:      true,
 			SecretsFile: "",
 			Secrets:     map[string]any{},
 			Env:         map[string]any{},

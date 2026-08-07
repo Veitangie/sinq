@@ -60,77 +60,77 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **-h**, **--help**
 : Print help message and exit.
 
-**-w**, **--workers** *int*
-: Number of concurrent workers (default 10).
-
 **-i**, **--insecure**
 : Disable SSL/TLS certificate verification.
 
+**-V**, **--verbose**
+: Enable verbose reporting (reports each stage duration, only affects "std" format).
+
+**-l**, **--list**
+: Parse and list scenarios at specified directories.
+
+**-u**, **--unrestricted**
+: Load lua "os" and "io" modules for scripts.
+
+**-p**, **--print**
+: Capture lua output and show it in the report.
+
+**-w**, **--workers** *int*
+: Number of concurrent workers (default 10).
+
 **-s**, **--secret** *string*
-: Key=value pair overrides for scenario secrets
+: Key=value pair overrides for scenario secrets.
 
 **-e**, **--env** *string*
-: Key=value pair overrides for all scenario environments
+: Key=value pair overrides for all scenario environments.
 
 **-o**, **--out** *path*
 : Path to write the output file (prints to stdout if omitted).
 
 **-L**, **--log-level** *string*
-: Log level to use: debug, info, warn or error (default "warn")
+: Log level to use: debug, info, warn or error (default "warn").
 
 **-f**, **--format** *string*
 : Output format: std or junit (default "std").
-
-**-V**, **--verbose**
-: Enable verbose reporting (reports each stage duration and timestamps)
 
 **-c**, **--color** *string*
 : Terminal colors: always, never, auto (default "auto").
 
 **-S**, **--show** *string*
-: Which results to show in the output: all, no-skip, failed (default "no-skip")
-
-**-l**, **--list**
-: Parse and list scenarios at specified directories.
+: Which results to show in the output: all, no-skip, failed (default "no-skip").
 
 **-t**, **--tag** *string*
-: Execute only scenarios that have the tag
+: Execute only scenarios that have at least one of passed tags.
 
 **-n**, **--name** *string*
-: Execute only scenarios which names match the regular expression
-
-**-u**, **--unrestricted**
-: Load lua "os" and "io" modules for scripts
-
-**-p**, **--print**
-: Capture lua output and show it in the report
-
-**--secrets-file** *path*
-: Path to JSON-formatted secrets file
-
-**--skip-tag** *string*
-: Do not execute scenarios that have the tag
-
-**--skip-name** *string*
-: Do not execute scenarios which names match the regular expression
-
-**--plugins** *string*
-: Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows
-
-**--max-cache-size** *string*
-: Global maximum response size for cached requests, default 5MB
-
-**--cache-timeout** *string*
-: Global timeout for the cached requests, default 10s
-
-**--dump-on-failure**
-: Print full request and response data on failed assertion
+: Execute only scenarios which names match at least one of passed regular expressions.
 
 **--no-spinner**
-: Disable spinner animation
+: Disable spinner animation.
+
+**--dump-on-failure**
+: Print full request and response data on failed assertion.
+
+**--secrets-file** *path*
+: Path to JSON-formatted secrets file.
+
+**--no-tag** *string*
+: Do not execute scenarios that have the tag.
+
+**--no-name** *string*
+: Do not execute scenarios which names match the regular expression.
+
+**--plugins** *string*
+: Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows.
+
+**--max-cache-size** *string*
+: Global maximum response size for cached requests, default 5MB.
+
+**--cache-timeout** *string*
+: Global timeout for the cached requests, default 10s.
 
 **--completion**
-: Output shell completion script for the detected shell (bash, zsh, fish, or powershell)
+: Output shell completion script for the detected shell (bash, zsh, fish, or powershell).
 
 ## ENVIRONMENTAL VARIABLES
 

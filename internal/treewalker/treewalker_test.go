@@ -55,7 +55,7 @@ func TestTreewalker_InheritanceAndLeaves(t *testing.T) {
 
 	cfg := config.Config{
 		Workers:    1,
-		Treewalker: config.TreewalkerConfig{Strict: false},
+		Treewalker: config.TreewalkerConfig{},
 	}
 
 	walker, err := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, mockParseConfig)
@@ -440,7 +440,7 @@ func (errFS) ReadDir(name string) ([]fs.DirEntry, error) {
 }
 
 func TestTreewalker_FileSystemErrors(t *testing.T) {
-	cfg := config.Config{Workers: 1, Treewalker: config.TreewalkerConfig{Strict: false}}
+	cfg := config.Config{Workers: 1, Treewalker: config.TreewalkerConfig{}}
 	walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, mockParseConfig)
 
 	_, err := walker.ParseFiletree(context.Background(), errFS{})

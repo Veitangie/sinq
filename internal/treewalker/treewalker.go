@@ -68,9 +68,6 @@ func (t *Treewalker) exploreFS(ctx context.Context, cancelCtx context.CancelCaus
 		case errorCh <- err:
 		case <-ctx.Done():
 		}
-		if t.cfg.Treewalker.Strict {
-			cancelCtx(err)
-		}
 		return
 	}
 

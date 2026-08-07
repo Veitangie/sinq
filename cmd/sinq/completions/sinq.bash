@@ -13,7 +13,6 @@ _sinq_completions() {
     COMPREPLY=()
 
     cur="${COMP_WORDS[COMP_CWORD]}"
-    prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     opts="
         -v --version
@@ -22,7 +21,7 @@ _sinq_completions() {
         -V --verbose
         -l --list
         -u --unrestricted
-        --dump-on-failure
+        -p --print
         -w --workers
         -s --secret
         -e --env
@@ -33,13 +32,17 @@ _sinq_completions() {
         -S --show
         -t --tag
         -n --name
+        --no-spinner
+        --dump-on-failure
         --secrets-file
-        --skip-tag
-        --skip-name
+        --no-tag
+        --no-name
         --plugins
         --max-cache-size
         --cache-timeout
     "
+
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     case "$prev" in
         -L|--log-level)
@@ -62,7 +65,7 @@ _sinq_completions() {
             COMPREPLY=( $(compgen -f -- "$cur") )
             return 0
             ;;
-        -w|--workers|-s|--secret|-e|--env|-t|--tag|-n|--name|--skip-tag|--skip-name|--plugins|--max-cache-size|--cache-timeout)
+        -w|--workers|-s|--secret|-e|--env|-t|--tag|-n|--name|--no-tag|--no-name|--plugins|--max-cache-size|--cache-timeout)
             return 0
             ;;
     esac

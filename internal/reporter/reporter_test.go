@@ -64,7 +64,7 @@ func TestReporterPool_ConcurrencyRaceAndDelivery(t *testing.T) {
 
 func TestReporterPool_Register(t *testing.T) {
 	pool := NewPool()
-	
+
 	err := pool.Register(nil)
 	if err == nil {
 		t.Error("Expected error when registering nil reporter")
@@ -72,8 +72,8 @@ func TestReporterPool_Register(t *testing.T) {
 
 	var wg sync.WaitGroup
 	numReporters := 100
-	
-	for i := 0; i < numReporters; i++ {
+
+	for i := range numReporters {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -92,4 +92,3 @@ func TestReporterPool_Register(t *testing.T) {
 		t.Errorf("Expected pool to have %d reporters, got %d", numReporters, len(pool.reporters))
 	}
 }
-

@@ -17,7 +17,7 @@ func TestUIWriterPair(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	stderrBuf := &bytes.Buffer{}
 
-	uiw, spw := MakePair(stdoutBuf, stderrBuf)
+	uiw, spw := MakePair(stdoutBuf, stderrBuf, false)
 	_, err := spw.Write([]byte("slog warn\n"))
 	if err != nil {
 		t.Fatalf("spw.Write error: %v", err)
@@ -65,7 +65,7 @@ func (e *errorWriter) Write(p []byte) (n int, err error) {
 
 func TestUIWriter_Errors(t *testing.T) {
 	ew := &errorWriter{err: context.DeadlineExceeded}
-	uiw, spw := MakePair(ew, ew)
+	uiw, spw := MakePair(ew, ew, false)
 
 	_, err := uiw.Write([]byte("test"))
 	if err != ew.err {
@@ -78,8 +78,8 @@ func TestUIWriter_Errors(t *testing.T) {
 	cancel()
 	spw.Close()
 
-	uiw2, _ := MakePair(ew, ew)
-	uiw2.clearer.needClearing = true
+	uiw2, _ := MakePair(ew, ew, false)
+	uiw2.spinnerState.needClearing = true
 	_, err2 := uiw2.Write([]byte("test"))
 	if err2 != ew.err {
 		t.Errorf("Expected error %v from clear(), got %v", ew.err, err2)

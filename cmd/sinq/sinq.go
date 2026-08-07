@@ -78,9 +78,9 @@ func populateConfigInRuntime(cfg *config.Config) error {
 	return nil
 }
 
-func setupSpinner(inTermErr, inTermOut bool, ctx context.Context) context.CancelFunc {
+func setupSpinner(inTermErr, inTermOut, color bool, ctx context.Context) context.CancelFunc {
 	if inTermErr && !isInCi {
-		uiWriter, spinnerWriter := ui.MakePair(stdout, stderr)
+		uiWriter, spinnerWriter := ui.MakePair(stdout, stderr, color)
 		ctxWithCancel, cancel := context.WithCancel(ctx)
 		spinnerWriter.StartSpinner(ctxWithCancel, timer.DefaultClock{})
 		stderr = spinnerWriter
@@ -89,7 +89,10 @@ func setupSpinner(inTermErr, inTermOut bool, ctx context.Context) context.Cancel
 		}
 		return func() {
 			cancel()
-			spinnerWriter.Close()
+			err := spinnerWriter.Close()
+			if err != nil {
+				fmt.Fprintf(stderr, "Failed to stop spinner writer: %s\n", err.Error())
+			}
 		}
 	}
 
@@ -137,17 +140,13 @@ func sinq(args []string) int {
 	defer stop()
 	mainTimer := timer.NewTimer(timer.DefaultClock{})
 
-	cfgParser := config.NewParser()
-	cfgParser.Parse(args)
-	cfg, errs := cfgParser.Result()
-
-	if len(errs) != 0 {
-		fmt.Fprintf(stderr, "Error: Failed to parse flags:\n")
-		for _, err := range errs {
-			fmt.Fprintf(stderr, "%s\n", err.Error())
-		}
+	cfgParser := config.NewParser(stderr)
+	err := cfgParser.Parse(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: Failed to parse flags: %s\n", err.Error())
 		return 1
 	}
+	cfg := cfgParser.Result()
 
 	if cfg.Completion {
 		if handleCompletion() {
@@ -177,7 +176,8 @@ func sinq(args []string) int {
 	inTermErr := err == nil && fi.Mode()&os.ModeCharDevice != 0
 
 	if !cfg.NoSpinner {
-		stopSpinner := setupSpinner(inTermErr, inTermOut, ctx)
+		wantColor := cfg.Reporter.Color == config.Always || (cfg.Reporter.Color == config.Auto && !isInCi && inTermErr)
+		stopSpinner := setupSpinner(inTermErr, inTermOut, wantColor, ctx)
 		defer stopSpinner()
 	}
 
@@ -229,7 +229,7 @@ func sinq(args []string) int {
 	logger.Debug("[sinq] Discovery complete", "duration", discoveryTimer.Time())
 
 	if cfg.List {
-		listScenarios(allScenarios, cfg)
+		listScenarios(allScenarios, cfg, inTermOut)
 		return 0
 	}
 
@@ -275,7 +275,13 @@ func sinq(args []string) int {
 	return code
 }
 
-func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config) {
+func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config, inTerm bool) {
+	cyan := ""
+	reset := ""
+	if cfg.Reporter.Color == config.Always || cfg.Reporter.Color == config.Auto && !isInCi && inTerm {
+		cyan = ui.Cyan
+		reset = ui.Reset
+	}
 	for _, scBp := range allScenarios {
 		if cfg.Reporter.Show == config.NoSkip && !cfg.ShouldInclude(scBp.Config.Tags, scBp.Config.Name) {
 			continue
@@ -285,7 +291,7 @@ func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config) {
 		if comboCount > 1 {
 			matrixInfo = fmt.Sprintf(" (%d matrix combinations)", comboCount)
 		}
-		fmt.Fprintf(stdout, "- %s%s\n", scBp.Config.Name, matrixInfo)
+		fmt.Fprintf(stdout, " %s%s\n", scBp.Config.Name, matrixInfo)
 		if scBp.Config.Description != "" {
 			fmt.Fprintf(stdout, "  Description: %s\n", scBp.Config.Description)
 		}
@@ -302,7 +308,7 @@ func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config) {
 			if rqBp.Name != "" {
 				maybeName = rqBp.Name
 			}
-			fmt.Fprintf(stdout, "  - %d: %s\n", idx+1, maybeName)
+			fmt.Fprintf(stdout, " %s┃%s %d: %s\n", cyan, reset, idx+1, maybeName)
 		}
 	}
 }
@@ -483,29 +489,29 @@ A concurrent HTTP functional and integration testing tool.
 Flags:
   -v, --version           Print the current sinq version and exit
   -h, --help              Print this help message and exit
-  -w, --workers int       Number of concurrent workers (default 10)
   -i, --insecure          Disable SSL/TLS certificate verification
+  -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
+  -l, --list              Parse and list scenarios at specified directories
+  -u, --unrestricted      Load lua "os" and "io" modules for scripts
+  -p, --print             Capture lua output and show it in the report
+  -w, --workers int       Number of concurrent workers (default 10)
   -s, --secret string     Key=value pair overrides for scenario secrets
   -e, --env string        Key=value pair overrides for all scenario environments
   -o, --out path          Path to write the output file (prints to stdout if omitted)
   -L, --log-level string  Log level to use: debug, info, warn or error (default "warn")
   -f, --format string     Output format: std or junit (default "std")
-  -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
   -c, --color string      Terminal colors: always, never, auto (default "auto")
   -S, --show string       Which results to show in the output: all, no-skip, failed (default "no-skip")
-  -l, --list              Parse and list scenarios at specified directories
-  -t, --tag string        Execute only scenarios that have the tag
-  -n, --name string       Execute only scenarios which names match the regular expression
-  -u, --unrestricted      Load lua "os" and "io" modules for scripts
-  -p, --print             Capture lua output and show it in the report
+  -t, --tag string        Execute only scenarios that have at least one of passed tags
+  -n, --name string       Execute only scenarios which names match at least one of passed regular expressions
+  --no-spinner            Disable spinner animation
+  --dump-on-failure       Print full request and response data on failed assertion
   --secrets-file string   Path to JSON-formatted secrets file
-  --skip-tag string       Do not execute scenarios that have the tag
-  --skip-name string      Do not execute scenarios which names match the regular expression
+  --no-tag string         Do not execute scenarios that have the tag
+  --no-name string        Do not execute scenarios which names match the regular expression
   --plugins string        Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows
   --max-cache-size string Global maximum response size for cached requests, default 5MB
   --cache-timeout string  Global timeout for the cached requests, default 10s
-  --dump-on-failure       Print full request and response data on failed assertion
-  --no-spinner            Disable spinner animation
 
 For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
 Or read the manual: man 1 sinq`
