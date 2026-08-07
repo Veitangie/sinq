@@ -48,6 +48,7 @@ var longToShort map[string]string = map[string]string{
 	"--name":         "-n",
 	"--show":         "-S",
 	"--unrestricted": "-u",
+	"--print":        "-p",
 }
 
 type Parser struct {
@@ -109,27 +110,33 @@ func (p *Parser) getNextValue(message string) (string, error) {
 	return "", errors.New(message)
 }
 
+func (p *Parser) parseOneLetter(b rune) {
+	switch b {
+	case 'i':
+		p.result.Insecure = true
+	case 'v':
+		p.result.Version = true
+	case 'V':
+		p.result.Reporter.Verbose = true
+	case 'h':
+		p.result.Help = true
+	case 'l':
+		p.result.List = true
+	case 'u':
+		p.result.Unrestricted = true
+	case 'p':
+		p.result.Print = true
+	default:
+		p.accumulateError(fmt.Errorf("Unknown boolean flag: %c. See 'sinq --help'", b))
+	}
+}
+
 func (p *Parser) parseShortFlag() {
 	flag := p.getCurrent()
 
 	if len(flag) > 2 {
 		for _, b := range flag[1:] {
-			switch b {
-			case 'i':
-				p.result.Insecure = true
-			case 'v':
-				p.result.Version = true
-			case 'V':
-				p.result.Reporter.Verbose = true
-			case 'h':
-				p.result.Help = true
-			case 'l':
-				p.result.List = true
-			case 'u':
-				p.result.Unrestricted = true
-			default:
-				p.accumulateError(fmt.Errorf("Unknown boolean flag: %c. See 'sinq --help'", b))
-			}
+			p.parseOneLetter(b)
 		}
 		return
 	}
@@ -149,6 +156,8 @@ func (p *Parser) parseShortFlag() {
 		p.result.List = true
 	case 'u':
 		p.result.Unrestricted = true
+	case 'p':
+		p.result.Print = true
 	case 'w':
 		p.parseWorkerCount()
 	case 's':
@@ -474,6 +483,8 @@ func (p *Parser) parseLongOnlyFlag() {
 		p.result.CacheTimeout = timeout
 	case "--completion":
 		p.result.Completion = true
+	case "--no-spinner":
+		p.result.NoSpinner = true
 	default:
 		p.accumulateError(fmt.Errorf("Unknown long flag: %s. See 'sinq --help'", flag))
 	}

@@ -78,7 +78,7 @@ func (w *worker) runTask(task []string) {
 }
 
 func getDefaultScenarioNameFromPath(lastFilePath string) string {
-	name := filepath.Base(lastFilePath)
+	name := filepath.Dir(lastFilePath)
 	if name == "." {
 		return lastFilePath
 	}

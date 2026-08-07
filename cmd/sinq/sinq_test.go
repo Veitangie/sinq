@@ -349,7 +349,7 @@ func TestSinq_CLI_HandleReporting_Failure(t *testing.T) {
 
 func TestSinq_CLI_CreateReporter_InvalidFormat(t *testing.T) {
 	cfg := config.Config{Format: "unknown"}
-	reporter := createReporter(cfg, os.Stdout)
+	reporter := createReporter(cfg, os.Stdout, false)
 	if reporter == nil {
 		t.Errorf("Expected createReporter to fallback to standard reporter, got nil")
 	}
@@ -475,7 +475,7 @@ func TestOSWorkspaceMkDirall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create workspace: %v", err)
 	}
-	
+
 	err = ws.MkDirall("sinq_mkdir_test")
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -487,4 +487,3 @@ func TestOSWorkspaceMkDirall(t *testing.T) {
 		t.Errorf("Unexpected error in OSWorkspace: %v", err)
 	}
 }
-

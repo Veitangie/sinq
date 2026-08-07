@@ -28,3 +28,7 @@ type Token struct {
 func (t Token) IsSpecialScript() bool {
 	return t.Name == "PRE" || t.Name == "RETRY" || t.Name == "ASSERT" || t.Name == "POST"
 }
+
+func (t Token) IsEmpty() bool {
+	return t.PayloadEnd-t.PayloadStart <= 1
+}

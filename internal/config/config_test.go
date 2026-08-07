@@ -12,14 +12,14 @@ func TestConfig_ShouldInclude(t *testing.T) {
 	tests := []struct {
 		name         string
 		config       Config
-		scenarioTags map[string]bool
+		scenarioTags map[string]struct{}
 		scenarioName string
 		want         bool
 	}{
 		{
 			name:         "No filters, should include",
 			config:       Config{},
-			scenarioTags: map[string]bool{"api": true},
+			scenarioTags: map[string]struct{}{"api": {}},
 			scenarioName: "Basic API Test",
 			want:         true,
 		},
@@ -28,7 +28,7 @@ func TestConfig_ShouldInclude(t *testing.T) {
 			config: Config{
 				TagsExclude: []string{"slow"},
 			},
-			scenarioTags: map[string]bool{"api": true, "slow": true},
+			scenarioTags: map[string]struct{}{"api": {}, "slow": {}},
 			scenarioName: "Slow API Test",
 			want:         false,
 		},
@@ -37,7 +37,7 @@ func TestConfig_ShouldInclude(t *testing.T) {
 			config: Config{
 				TagsInclude: []string{"api"},
 			},
-			scenarioTags: map[string]bool{"api": true, "fast": true},
+			scenarioTags: map[string]struct{}{"api": {}, "fast": {}},
 			scenarioName: "Fast API Test",
 			want:         true,
 		},
@@ -46,7 +46,7 @@ func TestConfig_ShouldInclude(t *testing.T) {
 			config: Config{
 				NamesInclude: []regexp.Regexp{*regexp.MustCompile("^Basic")},
 			},
-			scenarioTags: map[string]bool{"api": true},
+			scenarioTags: map[string]struct{}{"api": {}},
 			scenarioName: "Basic API Test",
 			want:         true,
 		},
@@ -55,7 +55,7 @@ func TestConfig_ShouldInclude(t *testing.T) {
 			config: Config{
 				NamesExclude: []regexp.Regexp{*regexp.MustCompile("Fail$")},
 			},
-			scenarioTags: map[string]bool{"api": true},
+			scenarioTags: map[string]struct{}{"api": {}},
 			scenarioName: "Test Will Fail",
 			want:         false,
 		},
@@ -65,7 +65,7 @@ func TestConfig_ShouldInclude(t *testing.T) {
 				TagsInclude: []string{"api"},
 				TagsExclude: []string{"broken"},
 			},
-			scenarioTags: map[string]bool{"api": true, "broken": true},
+			scenarioTags: map[string]struct{}{"api": {}, "broken": {}},
 			scenarioName: "Broken API Test",
 			want:         false,
 		},
@@ -75,7 +75,7 @@ func TestConfig_ShouldInclude(t *testing.T) {
 				NamesInclude: []regexp.Regexp{*regexp.MustCompile("^Basic")},
 				NamesExclude: []regexp.Regexp{*regexp.MustCompile("Test$")},
 			},
-			scenarioTags: map[string]bool{},
+			scenarioTags: map[string]struct{}{},
 			scenarioName: "Basic Test",
 			want:         false,
 		},
@@ -85,7 +85,7 @@ func TestConfig_ShouldInclude(t *testing.T) {
 				TagsInclude:  []string{"api", "ui"},
 				NamesInclude: []regexp.Regexp{*regexp.MustCompile("^Core")},
 			},
-			scenarioTags: map[string]bool{"ui": true},
+			scenarioTags: map[string]struct{}{"ui": {}},
 			scenarioName: "UI Login",
 			want:         false,
 		},
@@ -95,7 +95,7 @@ func TestConfig_ShouldInclude(t *testing.T) {
 				TagsInclude:  []string{"api", "ui"},
 				NamesInclude: []regexp.Regexp{*regexp.MustCompile("^Core")},
 			},
-			scenarioTags: map[string]bool{"ui": true},
+			scenarioTags: map[string]struct{}{"ui": {}},
 			scenarioName: "Core Login",
 			want:         true,
 		},
@@ -104,7 +104,7 @@ func TestConfig_ShouldInclude(t *testing.T) {
 			config: Config{
 				TagsInclude: []string{"backend"},
 			},
-			scenarioTags: map[string]bool{"frontend": true},
+			scenarioTags: map[string]struct{}{"frontend": {}},
 			scenarioName: "Frontend Test",
 			want:         false,
 		},

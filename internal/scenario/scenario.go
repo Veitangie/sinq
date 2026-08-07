@@ -76,10 +76,10 @@ func (bp RequestBlueprint) String() string {
 }
 
 type ScenarioConfig struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Tags        map[string]bool `json:"-"`
-	TagsList    []string        `json:"-"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Tags        map[string]struct{} `json:"-"`
+	TagsList    []string            `json:"-"`
 
 	Env map[string]any `json:"env"`
 
@@ -114,7 +114,7 @@ type Duration struct {
 
 func SaneDefaultConfig() ScenarioConfig {
 	return ScenarioConfig{
-		Tags:          make(map[string]bool),
+		Tags:          make(map[string]struct{}),
 		TagsList:      make([]string, 0),
 		Env:           make(map[string]any),
 		ReqTimeout:    Duration{5 * time.Second},

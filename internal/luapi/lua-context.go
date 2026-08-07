@@ -4,7 +4,10 @@
 package luapi
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"math/rand/v2"
 	"net/http"
 	"time"
@@ -31,15 +34,20 @@ type LuaContext struct {
 	fakeTable         *lua.LTable
 	RequestTable      *lua.LTable
 	ResponseTable     *lua.LTable
+	Printer           *bytes.Buffer
 }
 
-func NewLuaContext(clock timer.Clock, unrestricted bool, loader lua.LGFunction) *LuaContext {
+func NewLuaContext(clock timer.Clock, unrestricted bool, loader lua.LGFunction, printer *bytes.Buffer) *LuaContext {
 	if clock == nil {
 		clock = timer.DefaultClock{}
 	}
 	var lc LuaContext
 	if unrestricted {
 		lc = LuaContext{LState: *lua.NewState()}
+		if module, ok := lc.GetGlobal("io").(*lua.LTable); ok {
+			module.RawSetString("write", lc.NewFunction(lc.write))
+			module.RawSetString("read", lc.NewFunction(func(l *lua.LState) int { l.Error(lua.LString("io.read called in sinq sandbox"), 1); return 0 }))
+		}
 	} else {
 		lc = LuaContext{LState: *lua.NewState(lua.Options{SkipOpenLibs: true, IncludeGoStackTrace: true})}
 		lua.OpenBase(&lc.LState)
@@ -53,12 +61,15 @@ func NewLuaContext(clock timer.Clock, unrestricted bool, loader lua.LGFunction) 
 	}
 
 	lc.clock = clock
+	lc.Printer = printer
 
 	if module, ok := lc.GetGlobal("package").(*lua.LTable); ok {
 		if loaders, ok := module.RawGetString("loaders").(*lua.LTable); ok {
 			loaders.RawSetInt(2, lc.NewFunction(loader))
 		}
 	}
+
+	lc.SetGlobal("print", lc.NewFunction(lc.print))
 
 	lc.sandbox = lc.NewTable()
 	sandboxMeta := lc.NewTable()
@@ -245,4 +256,58 @@ func (lc *LuaContext) SetupAssertScript(fileMatches lua.LGFunction) {
 func (lc *LuaContext) TearDownAssertScript() {
 	lc.assertTable.RawSetString("fileMatches", lua.LNil)
 	lc.sinqTable.RawSetString("assert", lua.LNil)
+}
+
+func (lc *LuaContext) print(ls *lua.LState) int {
+	if lc.Printer == nil {
+		return 0
+	}
+
+	top := lc.GetTop()
+	for i := range top {
+		_, err := io.WriteString(lc.Printer, lc.Get(i+1).String())
+		if err != nil {
+			lc.Error(lua.LString(fmt.Sprintf("print: Failed to write: %s", err.Error())), 1)
+			return 0
+		}
+
+		if i != top-1 {
+			_, err = lc.Printer.Write([]byte{'\t'})
+		}
+		if err != nil {
+			lc.Error(lua.LString(fmt.Sprintf("print: Failed to write: %s", err.Error())), 1)
+			return 0
+		}
+	}
+	_, err := lc.Printer.Write([]byte{'\n'})
+	if err != nil {
+		lc.Error(lua.LString(fmt.Sprintf("print: Failed to write: %s", err.Error())), 1)
+	}
+	return 0
+}
+
+func (lc *LuaContext) write(ls *lua.LState) int {
+	if lc.Printer == nil {
+		return 0
+	}
+
+	top := lc.GetTop()
+	for i := range top {
+		value := lc.Get(i + 1)
+		switch typedValue := value.(type) {
+		case lua.LString:
+			_, err := io.WriteString(lc.Printer, string(typedValue))
+			if err != nil {
+				lc.Error(lua.LString(fmt.Sprintf("io.write: Failed to write: %s", err.Error())), 1)
+			}
+		case lua.LNumber:
+			_, err := io.WriteString(lc.Printer, typedValue.String())
+			if err != nil {
+				lc.Error(lua.LString(fmt.Sprintf("io.write: Failed to write: %s", err.Error())), 1)
+			}
+		default:
+			lc.Error(lua.LString(fmt.Sprintf("bad argument #%d to 'write' (string expected, got %s)", i, value.Type().String())), 1)
+		}
+	}
+	return 0
 }

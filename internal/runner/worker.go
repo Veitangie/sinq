@@ -96,6 +96,7 @@ func (w *worker) loggingContextWithErr(ctx context.Context, err error) []any {
 
 func (w *worker) reportResult(ctx context.Context, scenarioTimer timer.Timer, result ScenarioResult) {
 	result.TotalDuration = scenarioTimer.Time()
+	result.Output = w.lc.Printer
 	select {
 	case w.resCh <- result:
 	case <-ctx.Done():
@@ -151,6 +152,7 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 
 	defer processor.finalize()
 
+	result.StartedAt = w.env.clock.Now()
 	if err := processor.runPre(); err != nil {
 		return false, err
 	}

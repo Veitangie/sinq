@@ -52,7 +52,7 @@ func parseAdditionalData(target *ScenarioConfig, bytes []byte) error {
 
 	if len(helper.Tags) > 0 {
 		for _, tag := range helper.Tags {
-			target.Tags[tag] = true
+			target.Tags[tag] = struct{}{}
 		}
 	}
 

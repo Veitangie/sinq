@@ -102,6 +102,9 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **-u**, **--unrestricted**
 : Load lua "os" and "io" modules for scripts
 
+**-p**, **--print**
+: Capture lua output and show it in the report
+
 **--secrets-file** *path*
 : Path to JSON-formatted secrets file
 
@@ -120,9 +123,11 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **--cache-timeout** *string*
 : Global timeout for the cached requests, default 10s
 
-
 **--dump-on-failure**
 : Print full request and response data on failed assertion
+
+**--no-spinner**
+: Disable spinner animation
 
 **--completion**
 : Output shell completion script for the detected shell (bash, zsh, fish, or powershell)

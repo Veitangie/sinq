@@ -30,6 +30,9 @@ Shorthands for the *current* request and response being processed.
 * **`sinq.setNextRequest(index)`**: Alters execution flow. The next request executed will be the one at the specified `index` (1-based). Useful for building loops or conditional skips within a scenario.
 * **`sinq.finishScenario()`**: Alters execution flow. Tells `sinq` to finish the scenario once the current request completes its life cycle. Useful for gracefully finishing loops or conditional scenario shutdowns.
 
+### Standard Output (`print` & `io.write`)
+The standard Lua `print` function (and `io.write` if the `io` library is enabled via `--unrestricted`) is available in all scripts. However, since the runner executes all scenarios in parallel, just printing everything out results in a poor experience. To accommodate the best practices of debugging with `print` statements `sinq` provides a `-p` / `--print` flag, which buffers all the output in memory and reports it as part of the scenario result. Without the flag all the calls to these functions are discarded.
+
 ---
 
 ## 2. Variable Scoping (Local vs. Global)

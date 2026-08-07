@@ -341,7 +341,11 @@ func (w *worker) setupScenarioEnvironment(ctx context.Context, env map[string]an
 	if w.lc != nil {
 		w.lc.Close()
 	}
-	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, w.env.cfg.Unrestricted, w.env.loader.load)
+	var printer *bytes.Buffer
+	if w.env.cfg.Print {
+		printer = &bytes.Buffer{}
+	}
+	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, w.env.cfg.Unrestricted, w.env.loader.load, printer)
 
 	w.lc.SetContext(ctx)
 

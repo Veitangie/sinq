@@ -98,6 +98,18 @@ func TestParser_Parse(t *testing.T) {
 			wantErrs:   0,
 		},
 		{
+			name:       "Print Flag",
+			flags:      []string{"--print"},
+			wantConfig: func() Config { c := SaneDefaults(); c.Print = true; return c }(),
+			wantErrs:   0,
+		},
+		{
+			name:       "No Spinner Flag",
+			flags:      []string{"--no-spinner"},
+			wantConfig: func() Config { c := SaneDefaults(); c.NoSpinner = true; return c }(),
+			wantErrs:   0,
+		},
+		{
 			name:       "Color Never",
 			flags:      []string{"-c", "never"},
 			wantConfig: func() Config { c := SaneDefaults(); c.Reporter.Color = Never; return c }(),

@@ -20,30 +20,30 @@ func TestParseAdditionalData(t *testing.T) {
 		{
 			name:    "Parse tags",
 			json:    `{"tags": ["api", "slow"]}`,
-			initial: &ScenarioConfig{Tags: map[string]bool{}},
-			want:    &ScenarioConfig{Tags: map[string]bool{"api": true, "slow": true}},
+			initial: &ScenarioConfig{Tags: map[string]struct{}{}},
+			want:    &ScenarioConfig{Tags: map[string]struct{}{"api": {}, "slow": {}}},
 			wantErr: false,
 		},
 		{
 			name:    "Merge tags with existing",
 			json:    `{"tags": ["api"]}`,
-			initial: &ScenarioConfig{Tags: map[string]bool{"slow": true}},
-			want:    &ScenarioConfig{Tags: map[string]bool{"api": true, "slow": true}},
+			initial: &ScenarioConfig{Tags: map[string]struct{}{"slow": {}}},
+			want:    &ScenarioConfig{Tags: map[string]struct{}{"api": {}, "slow": {}}},
 			wantErr: false,
 		},
 		{
 			name:    "Empty tags array",
 			json:    `{"tags": []}`,
-			initial: &ScenarioConfig{Tags: map[string]bool{"slow": true}},
-			want:    &ScenarioConfig{Tags: map[string]bool{"slow": true}},
+			initial: &ScenarioConfig{Tags: map[string]struct{}{"slow": {}}},
+			want:    &ScenarioConfig{Tags: map[string]struct{}{"slow": {}}},
 			wantErr: false,
 		},
 		{
 			name:    "Parse env matrix and tags",
 			json:    `{"tags": ["api"], "env_matrix": [{"dev": {"url": "localhost"}}, {"prod": {"url": "example.com"}}]}`,
-			initial: &ScenarioConfig{Tags: map[string]bool{}},
+			initial: &ScenarioConfig{Tags: map[string]struct{}{}},
 			want: &ScenarioConfig{
-				Tags: map[string]bool{"api": true},
+				Tags: map[string]struct{}{"api": {}},
 				EnvMatrix: []map[string]map[string]any{
 					{"dev": {"url": "localhost"}},
 					{"prod": {"url": "example.com"}},
@@ -54,15 +54,15 @@ func TestParseAdditionalData(t *testing.T) {
 		{
 			name:    "Invalid env matrix",
 			json:    `{"env_matrix": [{"dev": "invalid_string"}]}`,
-			initial: &ScenarioConfig{Tags: map[string]bool{}},
-			want:    &ScenarioConfig{Tags: map[string]bool{}},
+			initial: &ScenarioConfig{Tags: map[string]struct{}{}},
+			want:    &ScenarioConfig{Tags: map[string]struct{}{}},
 			wantErr: true,
 		},
 		{
 			name:    "Invalid JSON",
 			json:    `{"tags": ["api"`,
-			initial: &ScenarioConfig{Tags: map[string]bool{}},
-			want:    &ScenarioConfig{Tags: map[string]bool{}},
+			initial: &ScenarioConfig{Tags: map[string]struct{}{}},
+			want:    &ScenarioConfig{Tags: map[string]struct{}{}},
 			wantErr: true,
 		},
 	}
@@ -97,7 +97,9 @@ func TestParseConfig_WithTags(t *testing.T) {
 		t.Errorf("Expected Name to be 'Test API', got '%s'", cfg.Name)
 	}
 
-	if len(cfg.Tags) != 2 || !cfg.Tags["api"] || !cfg.Tags["fast"] {
+	_, foundApi := cfg.Tags["api"]
+	_, foundFast := cfg.Tags["fast"]
+	if len(cfg.Tags) != 2 || !foundApi || !foundFast {
 		t.Errorf("Expected Tags to contain 'api' and 'fast', got: %v", cfg.Tags)
 	}
 }

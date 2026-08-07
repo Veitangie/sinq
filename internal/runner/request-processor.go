@@ -53,12 +53,15 @@ func (p *RequestProcessor) handleError(err error) error {
 }
 
 func (p *RequestProcessor) runPre() error {
+	if p.requestBp.Pre.IsEmpty() {
+		return nil
+	}
+
 	p.w.env.logger.Debug("[Runner] Worker running pre script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.Start()
 	filenameFrom, filenameTo, cache, skip, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.result.Pre = p.requestTimer.Time()
 	p.totalRequestTimer = p.requestTimer
-	p.result.StartedAt = p.requestTimer.StartedAt()
 
 	if err != nil {
 		p.w.env.logger.Debug("[Runner] Pre script failed", p.w.loggingContextWithErr(p.ctx, err)...)
@@ -309,6 +312,10 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 }
 
 func (p *RequestProcessor) runRetry() error {
+	if p.requestBp.Retry.IsEmpty() {
+		p.retryIn = -1
+		return nil
+	}
 	p.w.env.logger.Debug("[Runner] Worker running retry script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.Start()
 	retryIn, err := p.w.runRetryScript(p.requestBp.Retry, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
@@ -323,6 +330,9 @@ func (p *RequestProcessor) runRetry() error {
 }
 
 func (p *RequestProcessor) runAssert() error {
+	if p.requestBp.Assert.IsEmpty() {
+		return nil
+	}
 	p.w.env.logger.Debug("[Runner] Worker running assert script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.Start()
 	err := p.w.runAssertScript(p.requestBp.Assert, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration, p.filenameTo)
@@ -335,6 +345,9 @@ func (p *RequestProcessor) runAssert() error {
 }
 
 func (p *RequestProcessor) runPost() error {
+	if p.requestBp.Post.IsEmpty() {
+		return nil
+	}
 	p.w.env.logger.Debug("[Runner] Worker running post script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.Start()
 	err := p.w.runEffectfulScript(p.requestBp.Post, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)

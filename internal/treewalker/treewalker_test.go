@@ -88,6 +88,7 @@ func TestTreewalker_InheritanceAndLeaves(t *testing.T) {
 	bpA := findScenario("TEST_A")
 	if bpA == nil {
 		t.Fatal("Scenario A (TEST_A) not found")
+		return
 	}
 	if len(bpA.Requests) != 2 {
 		t.Errorf("Scenario A: Expected 2 requests (inherited setup), got %d", len(bpA.Requests))
@@ -102,6 +103,7 @@ func TestTreewalker_InheritanceAndLeaves(t *testing.T) {
 	bpB := findScenario("TEST_B")
 	if bpB == nil {
 		t.Fatal("Scenario B (TEST_B) not found")
+		return
 	}
 	if len(bpB.Requests) != 2 {
 		t.Errorf("Scenario B: Expected 2 requests, got %d", len(bpB.Requests))

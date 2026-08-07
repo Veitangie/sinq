@@ -11,7 +11,7 @@ import (
 )
 
 func TestLuaFaker(t *testing.T) {
-	lc := NewLuaContext(nil, false, nil)
+	lc := NewLuaContext(nil, false, nil, nil)
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(

@@ -22,6 +22,8 @@ type Config struct {
 	Completion    bool
 	DumpOnFailure bool
 	Unrestricted  bool
+	Print         bool
+	NoSpinner     bool
 
 	LogLevel     slog.Level
 	Format       string
@@ -39,7 +41,7 @@ type Config struct {
 	NamesExclude []regexp.Regexp
 }
 
-func (c Config) ShouldInclude(tags map[string]bool, name string) bool {
+func (c Config) ShouldInclude(tags map[string]struct{}, name string) bool {
 	for _, tag := range c.TagsExclude {
 		if _, found := tags[tag]; found {
 			return false
@@ -54,6 +56,7 @@ func (c Config) ShouldInclude(tags map[string]bool, name string) bool {
 	for _, tag := range c.TagsInclude {
 		if _, found := tags[tag]; found {
 			isInTags = true
+			break
 		}
 	}
 	for _, regex := range c.NamesInclude {

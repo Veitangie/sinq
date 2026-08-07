@@ -231,5 +231,3 @@ func TestRunner_StartDataSource_NoMatrix(t *testing.T) {
 		t.Errorf("Env map was corrupted in standard execution")
 	}
 }
-
-

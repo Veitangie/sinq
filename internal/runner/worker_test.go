@@ -186,7 +186,7 @@ func TestWorker_SandboxLeak_GlobalG(t *testing.T) {
 func TestWorker_Unrestricted_FileAccess(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.env.cfg.Unrestricted = true
-	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, w.env.cfg.Unrestricted, nil)
+	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, w.env.cfg.Unrestricted, nil, nil)
 
 	err := w.lc.DoString(`
 		if type(os) ~= "table" then
@@ -265,5 +265,33 @@ func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("Worker did not return a result")
+	}
+}
+
+func TestWorker_ReportResult_ExtractsOutput(t *testing.T) {
+	ctx := context.Background()
+	w := setupTestWorker(t, ctx)
+
+	resCh := make(chan ScenarioResult, 1)
+	w.resCh = resCh
+
+	buf := bytes.NewBufferString("hello world\n")
+	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, false, nil, buf)
+
+	scenarioTimer := timer.NewTimer(timer.DefaultClock{})
+	result := ScenarioResult{Name: "test_scenario"}
+
+	go w.reportResult(ctx, scenarioTimer, result)
+
+	select {
+	case res := <-resCh:
+		if res.Output == nil {
+			t.Fatal("Expected Output to be populated in ScenarioResult, got nil")
+		}
+		if res.Output.String() != "hello world\n" {
+			t.Errorf("Expected Output to contain 'hello world\\n', got %q", res.Output.String())
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("reportResult deadlocked")
 	}
 }

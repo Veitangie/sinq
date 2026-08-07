@@ -15,7 +15,7 @@ import (
 
 func TestCachedLoader_Load(t *testing.T) {
 	fs := fstest.MapFS{
-		"test/module.lua": &fstest.MapFile{Data: []byte("return 'hello'")},
+		"test/module.lua":     &fstest.MapFile{Data: []byte("return 'hello'")},
 		"test/other/init.lua": &fstest.MapFile{Data: []byte("return 'world'")},
 	}
 
@@ -26,7 +26,7 @@ func TestCachedLoader_Load(t *testing.T) {
 		group:     singleflight.Group{},
 	}
 
-	lc := luapi.NewLuaContext(nil, false, nil)
+	lc := luapi.NewLuaContext(nil, false, nil, nil)
 	defer lc.Close()
 
 	ls := &lc.LState

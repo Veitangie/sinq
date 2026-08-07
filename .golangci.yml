@@ -37,11 +37,6 @@ linters:
 
   exclusions:
     rules:
-      - path: standard-reporter.go
-        linters:
-          - gocognit
-          - gocyclo
-
       - path: natsort.go
         linters:
           - errcheck

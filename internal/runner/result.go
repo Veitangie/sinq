@@ -4,6 +4,7 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 )
@@ -43,6 +44,7 @@ type ScenarioResult struct {
 	TotalDuration  time.Duration
 	RequestResults []RequestResult
 	Status         ResultStatus
+	Output         *bytes.Buffer
 }
 
 func (s ResultStatus) String() string {

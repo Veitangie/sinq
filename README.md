@@ -496,6 +496,7 @@ sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
   -t, --tag string        Execute only scenarios that have the tag
   -n, --name string       Execute only scenarios which names match the regular expression
   -u, --unrestricted      Load lua "os" and "io" modules for scripts
+  -p, --print             Capture lua output and show it in the report
   --secrets-file string   Path to JSON-formatted secrets file
   --skip-tag string       Do not execute scenarios that have the tag
   --skip-name string      Do not execute scenarios which names match the regular expression
@@ -503,6 +504,7 @@ sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
   --max-cache-size string Global maximum response size for cached requests, default 5MB
   --cache-timeout string  Global timeout for the cached requests, default 10s
   --dump-on-failure       Print full request and response data on failed assertion
+  --no-spinner            Disable spinner animation
 ```
 
 ---

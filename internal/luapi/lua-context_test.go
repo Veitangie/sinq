@@ -4,6 +4,7 @@
 package luapi
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 func dummyFunc(L *lua.LState) int { return 0 }
 
 func TestLuaContext_PreScript_Lifecycle(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
 	lc.SetupRequestEnvironment(0)
 
@@ -54,7 +55,7 @@ func TestLuaContext_PreScript_Lifecycle(t *testing.T) {
 }
 
 func TestBug_SaveToLeak(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
 	lc.SetupRequestEnvironment(0)
 
@@ -68,7 +69,7 @@ func TestBug_SaveToLeak(t *testing.T) {
 }
 
 func TestLuaContext_JSONParserEquality(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
@@ -85,7 +86,7 @@ func TestLuaContext_JSONParserEquality(t *testing.T) {
 }
 
 func TestLuaContext_RecordResponse(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
@@ -114,7 +115,7 @@ func TestLuaContext_RecordResponse(t *testing.T) {
 }
 
 func TestLuaContext_SetupScripts(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
@@ -139,7 +140,7 @@ func TestLuaContext_SetupScripts(t *testing.T) {
 }
 
 func TestLuaContext_RunSandboxed(t *testing.T) {
-	lc := NewLuaContext(timer.DefaultClock{}, false, nil)
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
@@ -152,5 +153,26 @@ func TestLuaContext_RunSandboxed(t *testing.T) {
 	err = lc.RunSandboxed(fn.Proto, time.Second)
 	if err != nil {
 		t.Fatalf("RunSandboxed failed: %v", err)
+	}
+}
+
+func TestLuaContext_PrintAndWrite(t *testing.T) {
+	buf := &bytes.Buffer{}
+	lc := NewLuaContext(timer.DefaultClock{}, true, nil, buf)
+	defer lc.Close()
+	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+	err := lc.DoString(`
+		print("hello", "world")
+		io.write("foo", "bar")
+	`)
+	if err != nil {
+		t.Fatalf("Lua execution failed: %v", err)
+	}
+
+	out := buf.String()
+	expected := "hello\tworld\nfoobar"
+	if out != expected {
+		t.Errorf("Expected printed output %q, got %q", expected, out)
 	}
 }

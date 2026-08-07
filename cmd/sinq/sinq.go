@@ -7,6 +7,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -30,9 +31,14 @@ import (
 	"github.com/Veitangie/sinq/internal/scenario"
 	"github.com/Veitangie/sinq/internal/timer"
 	"github.com/Veitangie/sinq/internal/treewalker"
+	"github.com/Veitangie/sinq/internal/ui"
 )
 
 const sinqLuaPath = "SINQ_LUA_PATH"
+
+var stdout io.Writer = os.Stdout
+var stderr io.Writer = os.Stderr
+var isInCi = os.Getenv("NO_COLOR") != "" || os.Getenv("SINQ_NO_COLOR") != "" || os.Getenv("CI") != ""
 
 func populateConfigInRuntime(cfg *config.Config) error {
 	if len(cfg.LuaPaths) == 0 {
@@ -72,6 +78,60 @@ func populateConfigInRuntime(cfg *config.Config) error {
 	return nil
 }
 
+func setupSpinner(inTermErr, inTermOut bool, ctx context.Context) context.CancelFunc {
+	if inTermErr && !isInCi {
+		uiWriter, spinnerWriter := ui.MakePair(stdout, stderr)
+		ctxWithCancel, cancel := context.WithCancel(ctx)
+		spinnerWriter.StartSpinner(ctxWithCancel, timer.DefaultClock{})
+		stderr = spinnerWriter
+		if inTermOut {
+			stdout = uiWriter
+		}
+		return func() {
+			cancel()
+			spinnerWriter.Close()
+		}
+	}
+
+	return func() {}
+}
+
+func parseFilePath(ctx context.Context, path string, walker *treewalker.Treewalker) ([]scenario.ScenarioBlueprint, OSRootWorkspace, error) {
+	fs := OSRootWorkspace{}
+	stat, err := os.Stat(path)
+	if err != nil {
+		return nil, fs, fmt.Errorf("Failed to stat %s: %w\n", path, err)
+	}
+
+	wsPath := path
+	if !stat.IsDir() {
+		wsPath = filepath.Dir(path)
+	}
+
+	fs, err = NewOSRootWorkspace(wsPath)
+	if err != nil {
+		return nil, fs, fmt.Errorf("Failed to open filetree at %s: %s\n", wsPath, err)
+	}
+
+	var res []scenario.ScenarioBlueprint
+	if stat.IsDir() {
+		var err error
+		newCtx := context.WithValue(ctx, treewalker.PathCtxKey, path)
+		res, err = walker.ParseFiletree(newCtx, fs)
+		if err != nil {
+			return nil, fs, fmt.Errorf("Error: Failed to parse filetree from %s: %s\n", path, err)
+		}
+	} else {
+		resOne, err := walker.ParseSingleFile(fs, path)
+		if err != nil {
+			return nil, fs, fmt.Errorf("Error: Failed to parse %s: %s\n", path, err)
+		}
+
+		res = []scenario.ScenarioBlueprint{resOne}
+	}
+	return res, fs, nil
+}
+
 func sinq(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -82,9 +142,9 @@ func sinq(args []string) int {
 	cfg, errs := cfgParser.Result()
 
 	if len(errs) != 0 {
-		fmt.Fprintf(os.Stderr, "Error: Failed to parse flags:\n")
+		fmt.Fprintf(stderr, "Error: Failed to parse flags:\n")
 		for _, err := range errs {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			fmt.Fprintf(stderr, "%s\n", err.Error())
 		}
 		return 1
 	}
@@ -110,72 +170,56 @@ func sinq(args []string) int {
 		return 0
 	}
 
-	err := populateConfigInRuntime(&cfg)
+	fi, err := os.Stdout.Stat()
+	inTermOut := err == nil && fi.Mode()&os.ModeCharDevice != 0
+
+	fi, err = os.Stderr.Stat()
+	inTermErr := err == nil && fi.Mode()&os.ModeCharDevice != 0
+
+	if !cfg.NoSpinner {
+		stopSpinner := setupSpinner(inTermErr, inTermOut, ctx)
+		defer stopSpinner()
+	}
+
+	err = populateConfigInRuntime(&cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to enrich configuration in runtime: %s\n", err.Error())
-		fmt.Fprint(os.Stderr, "Will proceed without runtime configuration\n")
+		fmt.Fprintf(stderr, "Error: Failed to enrich configuration in runtime: %s\n", err.Error())
+		fmt.Fprint(stderr, "Will proceed without runtime configuration\n")
 		cfg.LuaPaths = []string{}
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	logger.Debug("[sinq] Initialization complete", "duration", mainTimer.Time())
 
 	walker, err := treewalker.NewTreewalker(cfg, *logger, scenario.ParseRequestBlueprints, scenario.ParseConfig)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to construct treewalker: %s\n", err.Error())
+		fmt.Fprintf(stderr, "Error: Failed to construct treewalker: %s\n", err.Error())
 		return 1
 	}
 	discoveryTimer := timer.NewTimer(timer.DefaultClock{})
 
 	secrets, err := walker.ParseSecrets()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+		fmt.Fprintf(stderr, "Error: %s\n", err.Error())
 		return 1
 	}
 
 	allScenarios := []runner.ScenarioBundle{}
 	for _, path := range cfg.Paths {
-		stat, err := os.Stat(path)
+		res, fs, err := parseFilePath(ctx, path, walker)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to stat %s: %s\n", path, err.Error())
-			continue
+			fmt.Fprint(stderr, err.Error())
 		}
 
-		wsPath := path
-		if !stat.IsDir() {
-			wsPath = filepath.Dir(path)
-		}
-
-		fs, err := NewOSRootWorkspace(wsPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to open filetree at %s: %s\n", wsPath, err.Error())
-			continue
-		}
-		defer func(path string) {
+		defer func(fs OSRootWorkspace) {
+			if fs.root == nil {
+				return
+			}
 			err := fs.root.Close()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to close filetree at %s: %s\n", path, err.Error())
+				fmt.Fprintf(stderr, "Failed to close filetree at %s: %s\n", fs.String(), err.Error())
 			}
-		}(wsPath)
-
-		var res []scenario.ScenarioBlueprint
-		if stat.IsDir() {
-			var err error
-			newCtx := context.WithValue(ctx, treewalker.PathCtxKey, path)
-			res, err = walker.ParseFiletree(newCtx, fs)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: Failed to parse filetree from %s: %s\n", path, err.Error())
-				continue
-			}
-		} else {
-			resOne, err := walker.ParseSingleFile(fs, path)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: Failed to parse %s: %s\n", path, err.Error())
-				continue
-			}
-
-			res = []scenario.ScenarioBlueprint{resOne}
-		}
+		}(fs)
 
 		allScenarios = slices.Grow(allScenarios, len(res))
 		for _, scenarioBlueprint := range res {
@@ -191,16 +235,16 @@ func sinq(args []string) int {
 
 	scenarioCount := countTotalScenarios(allScenarios)
 	if scenarioCount == 0 {
-		fmt.Fprintf(os.Stderr, "Error: No scenarios found\n")
+		fmt.Fprintf(stderr, "Error: No scenarios found\n")
 		return 1
 	}
 
 	if os.Getenv("CI") != "" {
 		if cfg.LogLevel == slog.LevelDebug {
-			fmt.Fprintf(os.Stderr, "WARNING: Running in a CI environment with --log-level debug. This risks leaking secrets in CI logs.\n")
+			fmt.Fprintf(stderr, "WARNING: Running in a CI environment with --log-level debug. This risks leaking secrets in CI logs.\n")
 		}
 		if cfg.DumpOnFailure {
-			fmt.Fprintf(os.Stderr, "WARNING: Running in a CI environment with --dump-on-failure. This risks leaking secrets in CI logs if assertions fail.\n")
+			fmt.Fprintf(stderr, "WARNING: Running in a CI environment with --dump-on-failure. This risks leaking secrets in CI logs if assertions fail.\n")
 		}
 	}
 
@@ -220,13 +264,13 @@ func sinq(args []string) int {
 
 	rn, err := runner.NewRunner(cfg, ctx, transport, *logger, timer.DefaultClock{}, OSWorkspace{})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to construct runner: %s\n", err.Error())
+		fmt.Fprintf(stderr, "Error: Failed to construct runner: %s\n", err.Error())
 		return 1
 	}
 
 	resultCh, durationCh, errorCh := rn.RunScenarios(ctx, allScenarios, secrets, &mainTimer)
 
-	code := handleReporting(cfg, logger, resultCh, durationCh, errorCh, scenarioCount)
+	code := handleReporting(cfg, logger, resultCh, durationCh, errorCh, scenarioCount, inTermErr, inTermOut)
 
 	return code
 }
@@ -241,16 +285,16 @@ func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config) {
 		if comboCount > 1 {
 			matrixInfo = fmt.Sprintf(" (%d matrix combinations)", comboCount)
 		}
-		fmt.Fprintf(os.Stdout, "- %s%s\n", scBp.Config.Name, matrixInfo)
+		fmt.Fprintf(stdout, "- %s%s\n", scBp.Config.Name, matrixInfo)
 		if scBp.Config.Description != "" {
-			fmt.Fprintf(os.Stdout, "  Description: %s\n", scBp.Config.Description)
+			fmt.Fprintf(stdout, "  Description: %s\n", scBp.Config.Description)
 		}
 		if len(scBp.Config.Tags) != 0 {
 			allTags := make([]string, 0, len(scBp.Config.Tags))
 			for tag := range scBp.Config.Tags {
 				allTags = append(allTags, tag)
 			}
-			fmt.Fprintf(os.Stdout, "  Tags: [%s]\n", strings.Join(allTags, ", "))
+			fmt.Fprintf(stdout, "  Tags: [%s]\n", strings.Join(allTags, ", "))
 		}
 
 		for idx, rqBp := range scBp.Requests {
@@ -258,18 +302,26 @@ func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config) {
 			if rqBp.Name != "" {
 				maybeName = rqBp.Name
 			}
-			fmt.Fprintf(os.Stdout, "  - %d: %s\n", idx+1, maybeName)
+			fmt.Fprintf(stdout, "  - %d: %s\n", idx+1, maybeName)
 		}
 	}
 }
 
-func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan runner.ScenarioResult, durationCh <-chan time.Duration, errorCh <-chan error, scenarioCount int) int {
+func handleReporting(
+	cfg config.Config,
+	logger *slog.Logger,
+	resultCh <-chan runner.ScenarioResult,
+	durationCh <-chan time.Duration,
+	errorCh <-chan error,
+	scenarioCount int,
+	inTermErr, inTermOut bool,
+) int {
 
 	resultReporter := result.NewResultReporter()
 
 	report := reporter.NewPool(resultReporter)
 	if cfg.Out != "" {
-		err := report.Register(standard.NewReporter(cfg.Reporter, os.Stderr))
+		err := report.Register(createReporter(cfg, stderr, inTermErr))
 		if err != nil {
 			logger.Warn("[sinq] Failed to attach reporter", "error", err)
 		}
@@ -284,22 +336,22 @@ func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan run
 		}
 
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: Failed to open output file: %s\n", err.Error())
+			fmt.Fprintf(stderr, "Error: Failed to open output file: %s\n", err.Error())
 		} else {
 			defer func() {
 				err := file.Close()
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error: Failed to close output file: %s\n", err.Error())
+					fmt.Fprintf(stderr, "Error: Failed to close output file: %s\n", err.Error())
 				}
 			}()
 
-			err = report.Register(createReporter(cfg, file))
+			err = report.Register(createReporter(cfg, file, false))
 			if err != nil {
 				logger.Warn("[sinq] Failed to attach reporter", "error", err)
 			}
 		}
 	} else {
-		err := report.Register(createReporter(cfg, os.Stdout))
+		err := report.Register(createReporter(cfg, stdout, inTermOut))
 		if err != nil {
 			logger.Warn("[sinq] Failed to attach reporter", "error", err)
 		}
@@ -312,14 +364,14 @@ func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan run
 		err := report.Report(resultCh, durationCh, scenarioCount)
 
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: Failed to report results: %s\n", err.Error())
+			fmt.Fprintf(stderr, "Error: Failed to report results: %s\n", err.Error())
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
 		for err := range errorCh {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+			fmt.Fprintf(stderr, "Error: %s\n", err.Error())
 		}
 	}()
 
@@ -332,15 +384,15 @@ func handleReporting(cfg config.Config, logger *slog.Logger, resultCh <-chan run
 	return 1
 }
 
-func createReporter(cfg config.Config, out *os.File) reporter.Reporter {
+func createReporter(cfg config.Config, out io.Writer, inTerm bool) reporter.Reporter {
 	switch cfg.Format {
 	case "junit":
 		return junit.NewReporter(out)
 	default:
 		reporterCfg := cfg.Reporter
+
 		if reporterCfg.Color == config.Auto {
-			fi, _ := out.Stat()
-			if fi.Mode()&os.ModeCharDevice == 0 {
+			if !inTerm || isInCi {
 				reporterCfg.Color = config.Never
 			} else {
 				reporterCfg.Color = config.Always
@@ -396,7 +448,7 @@ func detectActiveShell() (string, error) {
 
 func handleCompletion() bool {
 	if runtime.GOOS == "windows" {
-		fmt.Fprint(os.Stdout, ps1Comp)
+		fmt.Fprint(stdout, ps1Comp)
 		return true
 	}
 
@@ -407,11 +459,11 @@ func handleCompletion() bool {
 
 	switch strings.ToLower(shell) {
 	case "bash":
-		fmt.Fprint(os.Stdout, bashComp)
+		fmt.Fprint(stdout, bashComp)
 	case "zsh":
-		fmt.Fprint(os.Stdout, zshComp)
+		fmt.Fprint(stdout, zshComp)
 	case "fish":
-		fmt.Fprint(os.Stdout, fishComp)
+		fmt.Fprint(stdout, fishComp)
 	default:
 		return false
 	}
@@ -445,6 +497,7 @@ Flags:
   -t, --tag string        Execute only scenarios that have the tag
   -n, --name string       Execute only scenarios which names match the regular expression
   -u, --unrestricted      Load lua "os" and "io" modules for scripts
+  -p, --print             Capture lua output and show it in the report
   --secrets-file string   Path to JSON-formatted secrets file
   --skip-tag string       Do not execute scenarios that have the tag
   --skip-name string      Do not execute scenarios which names match the regular expression
@@ -452,6 +505,7 @@ Flags:
   --max-cache-size string Global maximum response size for cached requests, default 5MB
   --cache-timeout string  Global timeout for the cached requests, default 10s
   --dump-on-failure       Print full request and response data on failed assertion
+  --no-spinner            Disable spinner animation
 
 For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
 Or read the manual: man 1 sinq`

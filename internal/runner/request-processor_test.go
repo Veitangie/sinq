@@ -887,3 +887,41 @@ func TestCachedRequestProcessor_UsesBody(t *testing.T) {
 		t.Errorf("Expected body 'test body', got '%s'", receivedBody)
 	}
 }
+
+func TestRequestProcessor_IsEmptyShortCircuit(t *testing.T) {
+	ctx := context.Background()
+	w := setupTestWorker(t, ctx)
+	w.lc.SetupRequestEnvironment(0)
+
+	reqBp := &scenario.RequestBlueprint{
+		Pre:    scenario.Token{PayloadStart: 10, PayloadEnd: 11},
+		Assert: scenario.Token{PayloadStart: 20, PayloadEnd: 21},
+		Post:   scenario.Token{PayloadStart: 30, PayloadEnd: 31},
+		Retry:  scenario.Token{PayloadStart: 40, PayloadEnd: 41},
+	}
+
+	scenarioBp := &scenario.ScenarioBlueprint{
+		Config: &scenario.ScenarioConfig{},
+	}
+
+	processor := RequestProcessor{
+		w:            w,
+		ctx:          ctx,
+		scenarioBp:   scenarioBp,
+		requestBp:    reqBp,
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
+	}
+
+	if err := processor.runPre(); err != nil {
+		t.Errorf("Expected nil error for empty Pre block, got %v", err)
+	}
+	if err := processor.runAssert(); err != nil {
+		t.Errorf("Expected nil error for empty Assert block, got %v", err)
+	}
+	if err := processor.runPost(); err != nil {
+		t.Errorf("Expected nil error for empty Post block, got %v", err)
+	}
+	if err := processor.runRetry(); err != nil {
+		t.Errorf("Expected nil error for empty Retry block, got %v", err)
+	}
+}

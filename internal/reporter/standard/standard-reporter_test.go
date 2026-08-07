@@ -39,7 +39,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{" ✓ Scenario: Test Scenario", "   ✓ Req1", " ✓ PASSED in 100ms | Scenarios: 1✓ 0✗ 0○ (1) | 1 requests sent"},
+			wantOutput: []string{" ✓ Scenario: Test Scenario", " ✓ PASSED in 100ms | Scenarios: 1✓ 0✗ 0○ (1) | 1 requests sent"},
 		},
 		{
 			name: "Output with Color",
@@ -53,7 +53,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{Red + "✗" + Reset + " Scenario: Color Scenario", "   " + Red + "✗" + Reset + " ReqColor", "   - Error: boom", Red + "✗" + Reset + " FAILED in 100ms | Scenarios: 0" + Green + "✓" + Reset + " 1" + Red + "✗" + Reset + " 0" + Yellow + "○" + Reset + " (1) | 1 requests sent"},
+			wantOutput: []string{Red + "✗" + Reset + " Scenario: Color Scenario", "   " + Red + "✗" + Reset + " ReqColor", "     " + Red + "✗" + Reset + " Error: boom", Red + "✗" + Reset + " FAILED in 100ms | Scenarios: 0" + Green + "✓" + Reset + " 1" + Red + "✗" + Reset + " 0" + Yellow + "○" + Reset + " (1) | 1 requests sent"},
 		},
 		{
 			name: "Verbose Timings and Assertions",
@@ -79,14 +79,14 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				},
 			},
 			wantOutput: []string{
-				"- Pre:         1ms",
-				"- Mat:         2ms",
-				"- Parse:       3ms",
-				"- Exec:        4ms",
-				"- Retry:       5ms",
-				"- Assert:      6ms",
-				"- Post:        7ms",
-				"- Failed assertions: assert(200) failed, body check failed",
+				"     ┃ Pre:         1ms",
+				"     ┃ Mat:         2ms",
+				"     ┃ Parse:       3ms",
+				"     ┃ Exec:        4ms",
+				"     ┃ Retry:       5ms",
+				"     ┃ Assert:      6ms",
+				"     ┃ Post:        7ms",
+				"     ✗ Failed assertions: assert(200) failed, body check failed",
 			},
 		},
 		{
@@ -115,7 +115,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{Gray + "-" + Reset + " Scenario: Skipped Scenario", "   " + Gray + "-" + Reset + " ReqS"},
+			wantOutput: []string{Gray + "-" + Reset + " Scenario: Skipped Scenario", " " + Green + "✓" + Reset + " PASSED in 100ms"},
 		},
 		{
 			name: "Show NoSkip filters Skipped",
@@ -158,10 +158,17 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				{
 					Name:   "Success Scenario",
 					Status: runner.Success,
+					RequestResults: []runner.RequestResult{
+						{Name: "Req1", Status: runner.Success},
+						{Name: "Req2", Status: runner.Skipped},
+					},
 				},
 				{
 					Name:   "Failure Scenario",
 					Status: runner.Failure,
+					RequestResults: []runner.RequestResult{
+						{Name: "Req3", Status: runner.Failure},
+					},
 				},
 			},
 			wantOutput: []string{" ✗ Scenario: Failure Scenario"},
@@ -177,13 +184,13 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 						{
 							Name:     "ReqDump",
 							Status:   runner.Failure,
-							Request:  "GET / HTTP/1.1",
-							Response: "HTTP/1.1 500 Internal Server Error",
+							Request:  "GET / HTTP/1.1\n",
+							Response: "HTTP/1.1 500 Internal Server Error\n",
 						},
 					},
 				},
 			},
-			wantOutput: []string{"Request:\nGET / HTTP/1.1\n", "Response:\nHTTP/1.1 500 Internal Server Error\n"},
+			wantOutput: []string{"     Request:\n     ┃ GET / HTTP/1.1", "     Response:\n     ┃ HTTP/1.1 500 Internal Server Error"},
 		},
 	}
 
@@ -214,23 +221,31 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 	}
 }
 
-func TestStandardReporter_WriteErrors(t *testing.T) {
-	rep := NewReporter(config.ReporterConfig{}, errorWriter{})
+func TestStandardReporter_OutputPrint(t *testing.T) {
+	buf := &bytes.Buffer{}
+	rep := NewReporter(config.ReporterConfig{Color: config.Never, Verbose: false}, buf)
+
 	sourceCh := make(chan runner.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
 
+	outputBuf := bytes.NewBufferString("hello\nworld\n")
 	sourceCh <- runner.ScenarioResult{
-		Name: "Error Test",
+		Name:   "Print Scenario",
+		Status: runner.Failure,
+		Output: outputBuf,
 		RequestResults: []runner.RequestResult{
-			{Name: "ErrReq", Status: runner.Success},
+			{Name: "Req", Status: runner.Failure},
 		},
 	}
 	close(sourceCh)
-	timerCh <- 1 * time.Millisecond
+	timerCh <- 10 * time.Millisecond
 	close(timerCh)
 
-	err := rep.Report(sourceCh, timerCh, 1)
-	if err == nil {
-		t.Errorf("Expected an error from simulated write failures, got nil")
+	_ = rep.Report(sourceCh, timerCh, 1)
+
+	outStr := buf.String()
+	want := "   Output:\n   ┃ hello\n   ┃ world\n"
+	if !strings.Contains(outStr, want) {
+		t.Errorf("Wanted: %s, got: %s", want, outStr)
 	}
 }

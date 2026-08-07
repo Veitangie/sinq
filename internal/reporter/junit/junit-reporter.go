@@ -24,13 +24,24 @@ type JUnitReport struct {
 }
 
 type JUnitTestSuite struct {
-	Name      string          `xml:"name,attr"`
-	Tests     int             `xml:"tests,attr"`
-	Failures  int             `xml:"failures,attr"`
-	Errors    int             `xml:"errors,attr"`
-	Time      string          `xml:"time,attr"`
-	Timestamp string          `xml:"timestamp,attr"`
-	TestCases []JUnitTestCase `xml:"testcase"`
+	Name       string          `xml:"name,attr"`
+	Tests      int             `xml:"tests,attr"`
+	Failures   int             `xml:"failures,attr"`
+	Errors     int             `xml:"errors,attr"`
+	Time       string          `xml:"time,attr"`
+	Timestamp  string          `xml:"timestamp,attr"`
+	TestCases  []JUnitTestCase `xml:"testcase"`
+	Properties []JUnitProperty `xml:"properties,omitempty"`
+	SystemOut  *JUnitSystemOut `xml:"system-out,omitempty"`
+}
+
+type JUnitSystemOut struct {
+	Contents string `xml:",chardata"`
+}
+
+type JUnitProperty struct {
+	Name     string `xml:"name,attr"`
+	Contents string `xml:",chardata"`
 }
 
 type JUnitTestCase struct {
@@ -39,7 +50,10 @@ type JUnitTestCase struct {
 	Time      string        `xml:"time,attr"`
 	Failure   *JUnitFailure `xml:"failure,omitempty"`
 	Error     *JUnitFailure `xml:"error,omitempty"`
+	Skipped   *JUnitSkipped `xml:"skipped,omitempty"`
 }
+
+type JUnitSkipped struct{}
 
 type JUnitFailure struct {
 	Message  string `xml:"message,attr"`
@@ -73,6 +87,14 @@ func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 		suite.Time = fmt.Sprintf("%.3f", scenarioResult.TotalDuration.Seconds())
 		suite.TestCases = make([]JUnitTestCase, 0, len(scenarioResult.RequestResults))
 
+		suite.Properties = make([]JUnitProperty, 0)
+		if len(scenarioResult.Tags) != 0 {
+			suite.Properties = append(suite.Properties, JUnitProperty{Name: "tags", Contents: strings.Join(scenarioResult.Tags, ", ")})
+		}
+		if scenarioResult.Output != nil && scenarioResult.Output.Len() != 0 {
+			suite.SystemOut = &JUnitSystemOut{Contents: scenarioResult.Output.String()}
+		}
+
 		for _, requestResult := range scenarioResult.RequestResults {
 			suite.TestCases = append(suite.TestCases, JUnitTestCase{
 				Name:      requestResult.Name,
@@ -92,6 +114,9 @@ func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 					Message: requestResult.ErrorMessage,
 					Type:    "RuntimeError",
 				}
+			}
+			if requestResult.Status == runner.Skipped || requestResult.Status == runner.Aborted {
+				suite.TestCases[len(suite.TestCases)-1].Skipped = &JUnitSkipped{}
 			}
 		}
 		result.Failures += suite.Failures
