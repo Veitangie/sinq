@@ -12,13 +12,13 @@ import (
 	"net/http"
 	"net/url"
 	"unicode"
+
+	"github.com/Veitangie/sinq/internal/scanner"
 )
 
 type requestParser struct {
-	source     []byte
-	current    int
-	lineNumber int
-	ctx        context.Context
+	*scanner.ByteScanner
+	ctx context.Context
 }
 
 const userAgent string = "The Spanish Inquisition/1.0"
@@ -37,72 +37,52 @@ func newParser(source []byte, ctx context.Context) (*requestParser, error) {
 		return nil, errors.New("Failed to construct parser: context is nil")
 	}
 	return &requestParser{
-		source:     source,
-		current:    0,
-		lineNumber: 1,
-		ctx:        ctx,
+		ByteScanner: scanner.NewByteScanner(source),
+		ctx:         ctx,
 	}, nil
-}
-
-func (r *requestParser) getCurrent() (byte, error) {
-	if r.current >= len(r.source) {
-		return 0b00, io.EOF
-	}
-	return r.source[r.current], nil
-}
-
-func (r *requestParser) advance() {
-	if r.current >= len(r.source) {
-		return
-	}
-
-	r.current++
-	if b, _ := r.getCurrent(); b == '\n' {
-		r.lineNumber++
-	}
 }
 
 func (r *requestParser) scanWord() ([]byte, error) {
 	r.skipWhitespace()
-	start := r.current
+	start := r.Current
 	for {
-		b, err := r.getCurrent()
+		b, err := r.Read()
 		if err != nil || unicode.IsSpace(rune(b)) {
-			return r.source[start:r.current], err
+			return r.Slice(start, r.Current), err
 		}
-		r.advance()
+		r.Advance()
 	}
 }
 
 func (r *requestParser) scanLine() ([]byte, error) {
 	r.skipWhitespace()
-	start := r.current
-	lastNonSpace := r.current
+	start := r.Current
+	lastNonSpace := r.Current
 	for {
-		b, err := r.getCurrent()
-		r.advance()
+		b, err := r.Read()
+		r.Advance()
 		if err != nil {
-			return r.source[start:r.current], err
+			return r.Slice(start, r.Current), err
 		}
 		if b == ' ' || b == '	' || b == '\r' {
 			continue
 		}
 		if b == '\n' {
-			return r.source[start:lastNonSpace], nil
+			return r.Slice(start, lastNonSpace), nil
 		}
-		lastNonSpace = r.current
+		lastNonSpace = r.Current
 	}
 }
 
 func (r *requestParser) nextLine() error {
 	r.skipWhitespace()
-	linebreak, err := r.getCurrent()
+	linebreak, err := r.Read()
 	if err != nil {
 		return err
 	}
 	if linebreak == '\r' {
-		r.advance()
-		linebreak, err = r.getCurrent()
+		r.Advance()
+		linebreak, err = r.Read()
 		if err != nil {
 			return err
 		}
@@ -110,12 +90,12 @@ func (r *requestParser) nextLine() error {
 	if linebreak != '\n' {
 		return r.parsingError("Expected next line")
 	}
-	r.advance()
+	r.Advance()
 	return nil
 }
 
 func (r *requestParser) parsingError(message string) error {
-	return fmt.Errorf("%d: %s", r.lineNumber, message)
+	return fmt.Errorf("%d: %s", r.LineNumber, message)
 }
 
 func (r *requestParser) unexpectedEOF() error {
@@ -152,10 +132,11 @@ func (r *requestParser) parse() (http.Request, []byte, error) {
 		return res, body, err
 	}
 
-	contentLength := len(r.source) - r.current
+	contentLeft := r.Slice(r.Current, -1)
+	contentLength := len(contentLeft)
 	if contentLength > 0 {
 		body = make([]byte, contentLength)
-		copy(body, r.source[r.current:])
+		copy(body, contentLeft)
 
 		res.ContentLength = int64(contentLength)
 	}
@@ -252,10 +233,10 @@ func (r *requestParser) validateURL(full *url.URL) error {
 
 func (r *requestParser) skipWhitespace() {
 	for {
-		b, err := r.getCurrent()
+		b, err := r.Read()
 		if err != nil || (b != ' ' && b != '	') {
 			return
 		}
-		r.advance()
+		r.Advance()
 	}
 }

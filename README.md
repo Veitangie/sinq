@@ -116,7 +116,7 @@ xattr -d com.apple.quarantine $(which sinq)
 Pre-compiled `.zip` archives are generated for every release.
 
 1. Go to the [Releases page](https://github.com/Veitangie/sinq/releases) and find the latest version.
-2. Download the `.zip` file for your architecture (`amd64` or `arm64`).
+2. Download the `.zip` file for your architecture (`x86_64` or `arm64`).
 3. Extract `sinq.exe` and add the containing folder to your system `%PATH%`.
 
 > **Using Scoop?**
@@ -207,8 +207,7 @@ docker run -v $(pwd):/tests ghcr.io/veitangie/sinq /tests
 
 <details>
 <summary><strong>⚡ Install Script (macOS & Linux)</strong></summary>
-
-A quick curl script that downloads the correct binary archive, verifies the SHA256 checksum, and extracts it to `/usr/local/bin`.
+<br>
 
 ```bash
 curl -sL https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/install.sh | bash
@@ -218,7 +217,7 @@ curl -sL https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/instal
 </details>
 
 <details>
-<summary><strong>🐹 Go Install (Requires Go 1.25+)</strong></summary>
+<summary><strong>🐹 Go Install (Requires Go 1.26+)</strong></summary>
 
 If you have a Go environment set up, you can compile and install directly from the module.
 
@@ -388,6 +387,10 @@ There are two categories of scripts within a `.sinq` file:
 **JWT API (`sinq.jwt`)**
 * Functions: `decode(token)`, `verify(token, key, algo?)`, `sign(claimsTable, key, method?)`
 
+**JSON API (`sinq.json`)**
+* Functions: `parse(source)`, `serialize(tbl, indent?)`
+* `sinq.json.null` — a constant representing an explicit JSON `null`, since Lua tables drop `nil` keys.
+
 **Fake Data API (`sinq.fake`)**
 * Functions: See the [Lua API documentation](https://sinq.veitangie.dev/lua-api) for a comprehensive suite of fake data generators (`sinq.fake.uuid()`, `sinq.fake.email()`, `sinq.fake.company()`, etc.) to generate random, realistic payloads for endpoints.
 
@@ -470,7 +473,7 @@ sinq -f junit -o report.xml ./tests/integration
 # Ignore self-signed TLS certificates and enable verbose debug logging
 sinq -iV ./tests/local
 
-# Run a single file as a standalone scenario
+# Run a single file as a standalone scenario with default configuration
 sinq ./tests/integration/001-auth/01-login.sinq
 
 # Override deeply nested environment keys using dot-notation and JSON values
@@ -494,7 +497,7 @@ sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
   -L, --log-level string  Log level to use: debug, info, warn or error (default "warn")
   -f, --format string     Output format: std or junit (default "std")
   -c, --color string      Terminal colors: always, never, auto (default "auto")
-  -S, --show string       Which results to show in the output: all, no-skip, failed (default "no-skip")
+  -S, --show string       Which results to show in the output: all, no-skip, failed, none (default "no-skip")
   -t, --tag string        Execute only scenarios that have at least one of passed tags
   -n, --name string       Execute only scenarios which names match at least one of passed regular expressions
   --no-spinner            Disable spinner animation
@@ -506,6 +509,8 @@ sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
   --max-cache-size string Global maximum response size for cached requests, default 5MB
   --cache-timeout string  Global timeout for the cached requests, default 10s
 ```
+
+> **Combining filters:** `-t/--tag` and `-n/--name` (and their `--no-tag`/`--no-name` counterparts) OR *within* the same flag type (any one of several `-t` tags is enough) but AND *across* types — a scenario must satisfy the tag filter (if any) *and* the name filter (if any) to be included.
 
 ---
 

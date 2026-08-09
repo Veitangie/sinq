@@ -22,7 +22,7 @@ _sinq() {
         '(-L --log-level)'{-L,--log-level}'[Log level to use: debug, info, warn or error]:log level:(debug info warn error)' \
         '(-f --format)'{-f,--format}'[Output format: std or junit]:format:(std junit)' \
         '(-c --color)'{-c,--color}'[Terminal colors: always, never, auto]:color mode:(always never auto)' \
-        '(-S --show)'{-S,--show}'[Which results to show in the output: all, no-skip, failed]:show filter:(all no-skip failed)' \
+        '(-S --show)'{-S,--show}'[Which results to show in the output: all, no-skip, failed, none]:show filter:(all no-skip failed none)' \
         '*'{-t,--tag}'[Execute only scenarios that have at least one of passed tags]:tag name' \
         '*'{-n,--name}'[Execute only scenarios which names match at least one of passed regular expressions]:test name' \
         '--no-spinner[Disable spinner animation]' \

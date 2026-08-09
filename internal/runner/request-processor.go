@@ -212,7 +212,7 @@ func (p *RequestProcessor) send() (intermediate, error) {
 	var result intermediate
 	p.w.env.logger.Debug("[Runner] Worker sending request", append(p.w.loggingContext(p.ctx), "attempt", p.retries)...)
 
-	if p.filenameFrom != "" && p.httpRequest.ContentLength != 0 {
+	if p.filenameFrom != "" && p.httpRequest.ContentLength > 0 {
 		return result, p.handleError(errors.New("Request has both attached body and body content in its .sinq file"))
 	}
 
@@ -255,7 +255,12 @@ func (p *RequestProcessor) send() (intermediate, error) {
 func (p *RequestProcessor) sendCached() (intermediate, error) {
 	var result intermediate
 	var getBody func(Workspace) func() (io.ReadCloser, error)
+	if p.filenameFrom != "" && p.httpRequest.ContentLength > 0 {
+		return result, p.handleError(errors.New("Request has both attached body and body content in its .sinq file"))
+	}
+
 	if p.filenameFrom != "" {
+		p.httpRequest.ContentLength = -1
 		getBody = func(w Workspace) func() (io.ReadCloser, error) {
 			return func() (io.ReadCloser, error) { return w.Open(p.filenameFrom) }
 		}

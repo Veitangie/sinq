@@ -6,6 +6,7 @@ package standard
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ type reportData struct {
 	prefixedRequestWriter  *prefixedWriter
 	prefixedVerboseWriter  *prefixedWriter
 	writer                 io.Writer
+	printed                bool
 }
 
 func newReportData(cfg config.ReporterConfig, writer io.Writer, size int) *reportData {
@@ -120,6 +122,8 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 	failedRequestsScenario := ranRequestsScenario - successfulRequestsScenario - abortedRequestsScenario
 
 	switch rd.cfg.Show {
+	case config.None:
+		return nil
 	case config.NoSkip:
 		if result.Status == runner.Unset || result.Status == runner.Skipped {
 			return nil
@@ -131,18 +135,13 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 	case config.All:
 	}
 
-	successfulString := mkStringSpaceRight(successfulRequestsScenario, rd.markSuccess)
-	failedString := mkStringSpaceRight(failedRequestsScenario, rd.markFail)
-	abortedString := mkStringSpaceRight(abortedRequestsScenario, rd.markAborted)
-	skippedString := mkStringSpaceRight(skippedRequestsScenario, rd.markSkipped)
+	rd.printed = true
+	tally := rd.makeTally(successfulRequestsScenario, failedRequestsScenario, abortedRequestsScenario, skippedRequestsScenario)
 
-	_, err := fmt.Fprintf(rd.writer, " %s Scenario: %s (%s%s%s%sin %s)%s\n",
+	_, err := fmt.Fprintf(rd.writer, " %s Scenario: %s (%s in %s)%s\n",
 		scenarioMark,
 		result.Name,
-		successfulString,
-		failedString,
-		abortedString,
-		skippedString,
+		strings.Join(tally, " "),
 		fmtDuration(result.TotalDuration),
 		scenarioTackOn,
 	)
@@ -155,7 +154,7 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 		return err
 	}
 
-	if !rd.cfg.Verbose && result.Status == runner.Success || result.Status == runner.Unset {
+	if !rd.cfg.Verbose && (result.Status == runner.Success || result.Status == runner.Unset || result.Status == runner.Skipped) {
 		return nil
 	}
 
@@ -166,20 +165,6 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 		}
 	}
 	return nil
-}
-
-func mkStringSpaceRight(num int, mark string) string {
-	if num == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d%s ", num, mark)
-}
-
-func mkStringSpaceLeft(num int, mark string) string {
-	if num == 0 {
-		return ""
-	}
-	return fmt.Sprintf(" %d%s", num, mark)
 }
 
 func (rd *reportData) reportOutput(result runner.ScenarioResult) error {
@@ -322,20 +307,36 @@ func (rd *reportData) reportEnd(duration time.Duration) error {
 		statusText = "SKIPPED"
 	}
 
-	successfulString := mkStringSpaceLeft(rd.successfulScenarios, rd.markSuccess)
-	failedString := mkStringSpaceLeft(failedScenarios, rd.markFail)
-	abortedString := mkStringSpaceLeft(abortedScenarios, rd.markAborted)
-	skippedString := mkStringSpaceLeft(skippedScenarios, rd.markSkipped)
+	tally := rd.makeTally(rd.successfulScenarios, failedScenarios, abortedScenarios, skippedScenarios)
+	prefix := ""
+	if rd.printed {
+		prefix = "\n"
+	}
 
-	_, err := fmt.Fprintf(rd.writer, "\n %s %s in %s | Scenarios:%s%s%s%s | %d requests sent\n",
+	_, err := fmt.Fprintf(rd.writer, "%s %s %s in %s | Scenarios: %s | %d requests sent\n",
+		prefix,
 		finalMark,
 		statusText,
 		fmtDuration(duration),
-		successfulString,
-		failedString,
-		abortedString,
-		skippedString,
+		strings.Join(tally, " "),
 		rd.ranRequests,
 	)
 	return err
+}
+
+func (rd *reportData) makeTally(success, failed, aborted, skipped int) []string {
+	res := make([]string, 0, 4)
+	if success != 0 {
+		res = append(res, strconv.Itoa(success)+rd.markSuccess)
+	}
+	if failed != 0 {
+		res = append(res, strconv.Itoa(failed)+rd.markFail)
+	}
+	if aborted != 0 {
+		res = append(res, strconv.Itoa(aborted)+rd.markAborted)
+	}
+	if skipped != 0 {
+		res = append(res, strconv.Itoa(skipped)+rd.markSkipped)
+	}
+	return res
 }

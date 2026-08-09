@@ -123,11 +123,12 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 
 		for idx := range r.cfg.Workers {
 			w := worker{
-				id:      idx,
-				taskCh:  taskCh,
-				errorCh: errorCh,
-				resCh:   resultCh,
-				env:     env,
+				id:        idx,
+				taskCh:    taskCh,
+				errorCh:   errorCh,
+				resCh:     resultCh,
+				env:       env,
+				reportCtx: ctx,
 			}
 			wg.Add(1)
 

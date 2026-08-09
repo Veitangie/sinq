@@ -11,12 +11,23 @@ import (
 	"time"
 
 	"github.com/Veitangie/sinq/internal/config"
+	"github.com/Veitangie/sinq/internal/scanner"
 )
 
 type ScenarioBlueprint struct {
 	Config   *ScenarioConfig
 	Requests []*RequestBlueprint
 	Secrets  map[string]any
+}
+
+func (s ScenarioBlueprint) CountVariants() int {
+	mod := 1
+	for _, mat := range s.Config.EnvMatrix {
+		if len(mat) > 0 {
+			mod *= len(mat)
+		}
+	}
+	return mod
 }
 
 func (s ScenarioBlueprint) String() string {
@@ -81,7 +92,7 @@ type ScenarioConfig struct {
 	Tags        map[string]struct{} `json:"-"`
 	TagsList    []string            `json:"-"`
 
-	Env map[string]any `json:"env"`
+	Env map[string]any `json:"-"`
 
 	ReqTimeout    Duration                    `json:"req_timeout"`
 	ScriptTimeout Duration                    `json:"script_timeout"`
@@ -149,7 +160,7 @@ func ParseRequestBlueprints(r io.Reader, filename string) ([]*RequestBlueprint, 
 	}
 	currentRes := &RequestBlueprint{Source: source, Filename: filename}
 	res := []*RequestBlueprint{currentRes}
-	parser := parser{source: source, lineNumber: 1, offsetNumber: 1}
+	parser := parser{ByteScanner: scanner.NewByteScanner(source)}
 
 	parser.consumeWhitespace()
 
@@ -186,7 +197,7 @@ ParsingLoop:
 	}
 
 	if len(currentRes.Content) == 0 {
-		return res, errors.New("Unexpected delimiter resulting in an empty request at the end of file")
+		return res, errors.New("Empty request (did you add ### at the end, denoting the start of a new request?)")
 	}
 
 	return res, nil

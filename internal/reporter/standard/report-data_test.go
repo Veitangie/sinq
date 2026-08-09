@@ -101,3 +101,49 @@ func TestReportData_ErrorRequestTallyingBug(t *testing.T) {
 		t.Errorf("Error request was not tallied as a failure (✗). Expected to contain %q\nGot:\n%s", expectedStr, outStr)
 	}
 }
+
+func TestReportData_ShowNone(t *testing.T) {
+	buf := &bytes.Buffer{}
+	rep := NewReporter(config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.None}, buf)
+
+	sourceCh := make(chan runner.ScenarioResult, 2)
+	timerCh := make(chan time.Duration, 1)
+
+	sourceCh <- runner.ScenarioResult{
+		Name:          "Passed Scenario",
+		Status:        runner.Success,
+		TotalDuration: 1 * time.Millisecond,
+		RequestResults: []runner.RequestResult{
+			{
+				Name:   "PassReq",
+				Status: runner.Success,
+			},
+		},
+	}
+	sourceCh <- runner.ScenarioResult{
+		Name:          "Failed Scenario",
+		Status:        runner.Failure,
+		TotalDuration: 1 * time.Millisecond,
+		RequestResults: []runner.RequestResult{
+			{
+				Name:         "FailReq",
+				Status:       runner.Failure,
+				ErrorMessage: "failed",
+			},
+		},
+	}
+	close(sourceCh)
+	timerCh <- 2 * time.Millisecond
+	close(timerCh)
+
+	_ = rep.Report(sourceCh, timerCh, 2)
+
+	outStr := buf.String()
+	if strings.Contains(outStr, "Scenario:") {
+		t.Errorf("Expected no scenario details in Show None mode. Got:\n%s", outStr)
+	}
+	expectedEndStr := "✗ FAILED in 2ms | Scenarios: 1✓ 1✗ | 2 requests sent\n"
+	if !strings.Contains(outStr, expectedEndStr) {
+		t.Errorf("Expected end summary to be exactly %q in Show None mode. Got:\n%s", expectedEndStr, outStr)
+	}
+}

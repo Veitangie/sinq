@@ -5,7 +5,6 @@ package treewalker_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,7 +31,7 @@ func mockParseRequest(r io.Reader, filename string) ([]*scenario.RequestBlueprin
 }
 
 func mockParseConfig(target *scenario.ScenarioConfig, r io.Reader) error {
-	return json.NewDecoder(r).Decode(target)
+	return scenario.ParseConfig(target, r)
 }
 
 func TestTreewalker_InheritanceAndLeaves(t *testing.T) {

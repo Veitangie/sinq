@@ -6,9 +6,11 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/Veitangie/sinq/internal/luapi"
@@ -130,7 +132,7 @@ func TestWorker_ContextCancellation_CleanExit(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessScenario_PanicRecovery(t *testing.T) {
+func TestWorker_ProcessScenario_EmptyRequestFailsCleanly(t *testing.T) {
 	resCh := make(chan ScenarioResult, 1)
 	errorCh := make(chan error, 1)
 
@@ -141,12 +143,12 @@ func TestWorker_ProcessScenario_PanicRecovery(t *testing.T) {
 	bundle := taskBundle{
 		ScenarioBlueprint: scenario.ScenarioBlueprint{
 			Config: &scenario.ScenarioConfig{
-				Name:       "PanicScenario",
+				Name:       "EmptyRequestScenario",
 				ReqTimeout: scenario.Duration{Duration: 1 * time.Second},
 			},
 			Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
 		},
-		workspace: nil,
+		workspace: &mockWorkspace{FS: fstest.MapFS{}},
 		env:       map[string]any{},
 		labels:    []string{},
 	}
@@ -156,10 +158,10 @@ func TestWorker_ProcessScenario_PanicRecovery(t *testing.T) {
 	select {
 	case res := <-resCh:
 		if res.Status != Error {
-			t.Errorf("Expected scenario status to be Error due to panic, got %v", res.Status)
+			t.Errorf("Expected scenario status to be Error for an empty request, got %v", res.Status)
 		}
 	case <-time.After(1 * time.Second):
-		t.Fatal("Worker did not recover from panic and deadlocked")
+		t.Fatal("processScenario deadlocked on an empty request")
 	}
 }
 
@@ -293,5 +295,205 @@ func TestWorker_ReportResult_ExtractsOutput(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("reportResult deadlocked")
+	}
+}
+
+func TestWorker_Run_NilContext(t *testing.T) {
+	errorCh := make(chan error, 1)
+	w := setupTestWorker(t, context.Background())
+	w.errorCh = errorCh
+
+	w.run(nil) //nolint:staticcheck
+
+	select {
+	case err := <-errorCh:
+		if err == nil {
+			t.Fatal("expected an error for a nil context, got nil")
+		}
+	default:
+		t.Fatal("expected run(nil) to report an error on errorCh")
+	}
+}
+
+func TestWorker_ProcessRequest_ContextAlreadyCanceled(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	scenarioBp := &scenario.ScenarioBlueprint{
+		Config:   &scenario.ScenarioConfig{Name: "cancelled"},
+		Requests: []*scenario.RequestBlueprint{{Filename: "req.sinq"}},
+	}
+	status := Success
+	result := &RequestResult{}
+
+	shouldContinue, err := w.processRequest(ctx, scenarioBp, 0, &http.Client{}, &status, result)
+	if shouldContinue {
+		t.Error("expected shouldContinue to be false when the context is already cancelled")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	if status != Aborted {
+		t.Errorf("expected status Aborted for a cancelled context, got %v", status)
+	}
+	if result.Status != Aborted {
+		t.Errorf("expected result.Status Aborted, got %v", result.Status)
+	}
+}
+
+func TestWorker_ProcessRequest_ContextDeadlineExceeded(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+
+	scenarioBp := &scenario.ScenarioBlueprint{
+		Config:   &scenario.ScenarioConfig{Name: "timed-out"},
+		Requests: []*scenario.RequestBlueprint{{Filename: "req.sinq"}},
+	}
+	status := Success
+	result := &RequestResult{}
+
+	shouldContinue, err := w.processRequest(ctx, scenarioBp, 0, &http.Client{}, &status, result)
+	if shouldContinue {
+		t.Error("expected shouldContinue to be false when the context deadline is exceeded")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected context.DeadlineExceeded, got %v", err)
+	}
+	if status != Error {
+		t.Errorf("expected status Error for a deadline-exceeded context, got %v", status)
+	}
+	if result.Status != Error {
+		t.Errorf("expected result.Status Error, got %v", result.Status)
+	}
+}
+
+func TestWorker_ProcessScenario_TagFilterExcludesScenario(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+	w.env.cfg.TagsInclude = []string{"nonexistent-tag"}
+
+	resCh := make(chan ScenarioResult, 1)
+	errorCh := make(chan error, 1)
+	w.resCh = resCh
+	w.errorCh = errorCh
+
+	bundle := taskBundle{
+		ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config: &scenario.ScenarioConfig{
+				Name: "FilteredScenario",
+				Tags: map[string]struct{}{"other": {}},
+			},
+			Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
+		},
+		env: map[string]any{},
+	}
+
+	w.processScenario(context.Background(), bundle)
+
+	select {
+	case res := <-resCh:
+		if res.Status != Unset {
+			t.Errorf("expected an excluded scenario to report Unset status, got %v", res.Status)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("processScenario did not report a result for a tag-filtered scenario")
+	}
+}
+
+func TestWorker_ProcessScenario_RequestNamePrefersExplicitName(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+	w.env.transport = mockRoundTripper{}
+
+	resCh := make(chan ScenarioResult, 1)
+	errorCh := make(chan error, 1)
+	w.resCh = resCh
+	w.errorCh = errorCh
+
+	bp, err := scenario.ParseRequestBlueprints(bytes.NewBufferString("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req1.sinq")
+	if err != nil {
+		t.Fatalf("failed to parse request blueprint: %v", err)
+	}
+	bp[0].Name = "Custom Request Name"
+
+	bundle := taskBundle{
+		ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config:   &scenario.ScenarioConfig{Name: "NamedRequestScenario"},
+			Requests: bp,
+		},
+		env: map[string]any{},
+	}
+
+	w.processScenario(context.Background(), bundle)
+
+	select {
+	case res := <-resCh:
+		if len(res.RequestResults) != 1 || res.RequestResults[0].Name != "Custom Request Name" {
+			t.Errorf("expected the explicit request Name to be used over Filename, got %+v", res.RequestResults)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("processScenario did not report a result")
+	}
+}
+
+func TestWorker_MaterializeRequest_ContextCancelledMidLoop(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req := &scenario.RequestBlueprint{
+		Source: []byte("GET /\r\n\r\n"),
+		Content: []scenario.Token{
+			{Type: scenario.Text, Start: 0, End: 9, PayloadStart: 0, PayloadEnd: 9},
+		},
+	}
+
+	_, err := w.materializeRequest(ctx, req, time.Second)
+	if err == nil {
+		t.Fatal("expected an error when the context is already cancelled")
+	}
+}
+
+func TestWorker_MaterializeRequest_IncompleteToken(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	req := &scenario.RequestBlueprint{
+		Source:   []byte("GET / $BAD"),
+		Filename: "bad.sinq",
+		Content: []scenario.Token{
+			{Type: scenario.IncompleteToken, Line: 1, Offset: 5},
+		},
+	}
+
+	_, err := w.materializeRequest(context.Background(), req, time.Second)
+	if err == nil {
+		t.Fatal("expected an error for an incomplete token")
+	}
+	if !strings.Contains(err.Error(), "incomplete token") {
+		t.Errorf("expected the error to mention an incomplete token, got %q", err.Error())
+	}
+}
+
+func TestWorker_MaterializeRequest_UnexpectedDelimiter(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	req := &scenario.RequestBlueprint{
+		Source:   []byte("GET / ###"),
+		Filename: "bad.sinq",
+		Content: []scenario.Token{
+			{Type: scenario.Delimiter, Line: 1, Offset: 6},
+		},
+	}
+
+	_, err := w.materializeRequest(context.Background(), req, time.Second)
+	if err == nil {
+		t.Fatal("expected an error for an unexpected delimiter")
+	}
+	if !strings.Contains(err.Error(), "delimiter") {
+		t.Errorf("expected the error to mention a delimiter, got %q", err.Error())
 	}
 }

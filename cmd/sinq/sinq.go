@@ -5,11 +5,11 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -47,8 +47,10 @@ func populateConfigInRuntime(cfg *config.Config) error {
 		}
 	}
 
+	needToAddCwd := true
 	if len(cfg.Paths) == 0 {
 		cfg.Paths = append(cfg.Paths, ".")
+		needToAddCwd = false
 	}
 
 	for idx := range cfg.LuaPaths {
@@ -69,12 +71,14 @@ func populateConfigInRuntime(cfg *config.Config) error {
 		cfg.LuaPaths = append(cfg.LuaPaths, abs)
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
+	if needToAddCwd {
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
 
-	cfg.LuaPaths = append(cfg.LuaPaths, wd)
+		cfg.LuaPaths = append(cfg.LuaPaths, wd)
+	}
 	return nil
 }
 
@@ -135,6 +139,15 @@ func parseFilePath(ctx context.Context, path string, walker *treewalker.Treewalk
 	return res, fs, nil
 }
 
+func inTermWantColor(fd *os.File, cfg config.Config) (bool, bool) {
+	if fd == nil {
+		return false, false
+	}
+	fi, err := fd.Stat()
+	inTerm := err == nil && fi.Mode()&os.ModeCharDevice != 0
+	return inTerm, cfg.Reporter.Color == config.Always || (cfg.Reporter.Color == config.Auto && !isInCi && inTerm)
+}
+
 func sinq(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -156,25 +169,37 @@ func sinq(args []string) int {
 		return 1
 	}
 
+	infoPrinter, err := standard.NewInfoPrinter(stdout, version)
+	if err != nil {
+		return 1
+	}
+
 	if cfg.Help {
-		return printHelp()
+		err = infoPrinter.PrintHelp()
+		if err != nil {
+			return 1
+		}
+		return 0
 	}
 
 	if cfg.Version {
-		return printVersion()
+		err = infoPrinter.PrintVersion()
+		if err != nil {
+			return 1
+		}
+		return 0
 	}
 
-	fi, err := os.Stdout.Stat()
-	inTermOut := err == nil && fi.Mode()&os.ModeCharDevice != 0
-	wantColorOut := cfg.Reporter.Color == config.Always || (cfg.Reporter.Color == config.Auto && !isInCi && inTermOut)
-
-	fi, err = os.Stderr.Stat()
-	inTermErr := err == nil && fi.Mode()&os.ModeCharDevice != 0
-	wantColorErr := cfg.Reporter.Color == config.Always || (cfg.Reporter.Color == config.Auto && !isInCi && inTermErr)
+	inTermOut, wantColorOut := inTermWantColor(os.Stdout, cfg)
+	inTermErr, wantColorErr := inTermWantColor(os.Stderr, cfg)
 
 	if !cfg.NoSpinner {
 		stopSpinner := setupSpinner(inTermErr, inTermOut, wantColorErr, ctx)
 		defer stopSpinner()
+	}
+	err = infoPrinter.SetWriter(stdout)
+	if err != nil {
+		return 1
 	}
 
 	err = populateConfigInRuntime(&cfg)
@@ -229,7 +254,11 @@ func sinq(args []string) int {
 	logger.Debug("[sinq] Discovery complete", "duration", discoveryTimer.Time())
 
 	if cfg.List {
-		listScenarios(allScenarios, cfg, wantColorOut)
+		err = infoPrinter.PrintScenarios(allScenarios, cfg, wantColorOut)
+		if err != nil {
+			logger.Error("[sinq] Failed to list scenarios", "error", err.Error())
+			return 1
+		}
 		return 0
 	}
 
@@ -260,6 +289,7 @@ func sinq(args []string) int {
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: cfg.Insecure},
 	}
 
 	rn, err := runner.NewRunner(cfg, ctx, transport, *logger, timer.DefaultClock{}, OSWorkspace{})
@@ -273,72 +303,6 @@ func sinq(args []string) int {
 	code := handleReporting(cfg, logger, resultCh, durationCh, errorCh, scenarioCount, wantColorErr, wantColorOut)
 
 	return code
-}
-
-func printVersion() int {
-	_, err := fmt.Fprint(stdout, versionConstPart)
-	if err != nil {
-		return 1
-	}
-	_, err = fmt.Fprintln(stdout, ponderSinqMeaning())
-	if err != nil {
-		return 1
-	}
-	return 0
-}
-
-func printHelp() int {
-	_, err := fmt.Fprint(stdout, helpPrefix)
-	if err != nil {
-		return 1
-	}
-	_, err = fmt.Fprintln(stdout, ponderSinqMeaning())
-	if err != nil {
-		return 1
-	}
-	_, err = fmt.Fprintln(stdout, helpSuffix)
-	if err != nil {
-		return 1
-	}
-	return 0
-}
-
-func listScenarios(allScenarios []runner.ScenarioBundle, cfg config.Config, wantColor bool) {
-	cyan := ""
-	reset := ""
-	if wantColor {
-		cyan = ui.Cyan
-		reset = ui.Reset
-	}
-	for _, scBp := range allScenarios {
-		if cfg.Reporter.Show == config.NoSkip && !cfg.ShouldInclude(scBp.Config.Tags, scBp.Config.Name) {
-			continue
-		}
-		matrixInfo := ""
-		comboCount := countOneScenario(scBp)
-		if comboCount > 1 {
-			matrixInfo = fmt.Sprintf(" (%d matrix combinations)", comboCount)
-		}
-		fmt.Fprintf(stdout, " %s%s\n", scBp.Config.Name, matrixInfo)
-		if scBp.Config.Description != "" {
-			fmt.Fprintf(stdout, "  Description: %s\n", scBp.Config.Description)
-		}
-		if len(scBp.Config.Tags) != 0 {
-			allTags := make([]string, 0, len(scBp.Config.Tags))
-			for tag := range scBp.Config.Tags {
-				allTags = append(allTags, tag)
-			}
-			fmt.Fprintf(stdout, "  Tags: [%s]\n", strings.Join(allTags, ", "))
-		}
-
-		for idx, rqBp := range scBp.Requests {
-			maybeName := rqBp.Filename
-			if rqBp.Name != "" {
-				maybeName = rqBp.Name
-			}
-			fmt.Fprintf(stdout, " %s┃%s %d: %s\n", cyan, reset, idx+1, maybeName)
-		}
-	}
 }
 
 func handleReporting(
@@ -439,19 +403,9 @@ func createReporter(cfg config.Config, out io.Writer, wantColor bool) reporter.R
 func countTotalScenarios(scenarios []runner.ScenarioBundle) int {
 	res := 0
 	for _, scBp := range scenarios {
-		res += countOneScenario(scBp)
+		res += scBp.CountVariants()
 	}
 	return res
-}
-
-func countOneScenario(scBp runner.ScenarioBundle) int {
-	mod := 1
-	for _, mat := range scBp.Config.EnvMatrix {
-		if len(mat) > 0 {
-			mod *= len(mat)
-		}
-	}
-	return mod
 }
 
 //go:embed completions/sinq.ps1
@@ -504,59 +458,4 @@ func handleCompletion() bool {
 	return true
 }
 
-func ponderSinqMeaning() string {
-	return sinqMeaning[rand.Intn(len(sinqMeaning))]
-}
-
-const helpPrefix = "sinq - "
-
-const helpSuffix = `Usage: sinq [flags] [directories...]
-
-A concurrent HTTP functional and integration testing tool.
-
-Flags:
-  -v, --version           Print the current sinq version and exit
-  -h, --help              Print this help message and exit
-  -i, --insecure          Disable SSL/TLS certificate verification
-  -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
-  -l, --list              Parse and list scenarios at specified directories
-  -u, --unrestricted      Load lua "os" and "io" modules for scripts
-  -p, --print             Capture lua output and show it in the report
-  -w, --workers int       Number of concurrent workers (default 10)
-  -s, --secret string     Key=value pair overrides for scenario secrets
-  -e, --env string        Key=value pair overrides for all scenario environments
-  -o, --out path          Path to write the output file (prints to stdout if omitted)
-  -L, --log-level string  Log level to use: debug, info, warn or error (default "warn")
-  -f, --format string     Output format: std or junit (default "std")
-  -c, --color string      Terminal colors: always, never, auto (default "auto")
-  -S, --show string       Which results to show in the output: all, no-skip, failed (default "no-skip")
-  -t, --tag string        Execute only scenarios that have at least one of passed tags
-  -n, --name string       Execute only scenarios which names match at least one of passed regular expressions
-  --no-spinner            Disable spinner animation
-  --dump-on-failure       Print full request and response data on failed assertion
-  --secrets-file string   Path to JSON-formatted secrets file
-  --no-tag string         Do not execute scenarios that have the tag
-  --no-name string        Do not execute scenarios which names match the regular expression
-  --plugins string        Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows
-  --max-cache-size string Global maximum response size for cached requests, default 5MB
-  --cache-timeout string  Global timeout for the cached requests, default 10s
-
-For full documentation and examples, visit: https://github.com/Veitangie/sinq/docs
-Or read the manual: man 1 sinq`
-
-var versionConstPart = "sinq dev - "
-
-var sinqMeaning []string = []string{
-	"The Spanish Inquisition",
-	"Sinq Is Not Quokka",
-	"Save Intergalactic Neutrino Quants",
-	"A[s]ynchronous Test[in]g Tool[q]it",
-	"Sinq Is Now Qombinatorial",
-	"Slick, Independent, Novel, Quirky",
-	"Stateful Integrated by Network Quality Assurer",
-	"Stealth Interpreter, Normal Querier",
-	"[S]top searching for mean[inq]",
-	"[Sin]q is on Arch Linu[q]s",
-	"[S]leepless [ni]ghts in [Q]azaqstan",
-	"[S]cenario-based [i]nstantiator of [n]on-deterministic se[q]uences",
-}
+var version string = "dev"

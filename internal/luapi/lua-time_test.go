@@ -26,7 +26,7 @@ func TestLuaTime_Now(t *testing.T) {
 	mockClock := &MockClock{CurrentTime: expectedTime}
 
 	lc := &LuaContext{
-		LState: *L,
+		LState: L,
 		clock:  mockClock,
 	}
 

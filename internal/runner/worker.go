@@ -67,6 +67,7 @@ type worker struct {
 	maxRequestIdx     int
 	lc                *luapi.LuaContext
 	assertionFailures []string
+	reportCtx         context.Context
 }
 
 type workerContextKey string
@@ -101,7 +102,7 @@ func (w *worker) reportResult(ctx context.Context, scenarioTimer timer.Timer, re
 	}
 	select {
 	case w.resCh <- result:
-	case <-ctx.Done():
+	case <-w.reportCtx.Done():
 		w.env.logger.Debug("[Runner] Failed to publish scenario result because of timeout/cancel", w.loggingContext(ctx)...)
 	}
 }

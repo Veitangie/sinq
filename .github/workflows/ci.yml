@@ -221,7 +221,7 @@ jobs:
             depends_on "go-md2man" => :build
 
             def install
-              system "go", "build", "-trimpath", "-ldflags", "-s -w -X 'main.versionConstPart=sinq ${GITHUB_REF_NAME} - '", "-o", bin/"sinq", "./cmd/sinq"
+              system "go", "build", "-trimpath", "-ldflags", "-s -w -X 'main.version=${GITHUB_REF_NAME}'", "-o", bin/"sinq", "./cmd/sinq"
               system "go-md2man", "-in", "docs/man.md", "-out", "sinq.1"
               man1.install "sinq.1"
               bash_completion.install "cmd/sinq/completions/sinq.bash" => "sinq"

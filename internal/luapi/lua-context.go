@@ -17,7 +17,7 @@ import (
 )
 
 type LuaContext struct {
-	lua.LState
+	*lua.LState
 	clock             timer.Clock
 	serializer        JSONSerializer
 	parser            JSONParser
@@ -43,21 +43,33 @@ func NewLuaContext(clock timer.Clock, unrestricted bool, loader lua.LGFunction, 
 	}
 	var lc LuaContext
 	if unrestricted {
-		lc = LuaContext{LState: *lua.NewState()}
+		lc = LuaContext{LState: lua.NewState()}
 		if module, ok := lc.GetGlobal("io").(*lua.LTable); ok {
 			module.RawSetString("write", lc.NewFunction(lc.write))
 			module.RawSetString("read", lc.NewFunction(func(l *lua.LState) int { l.Error(lua.LString("io.read called in sinq sandbox"), 1); return 0 }))
 		}
 	} else {
-		lc = LuaContext{LState: *lua.NewState(lua.Options{SkipOpenLibs: true, IncludeGoStackTrace: true})}
-		lua.OpenBase(&lc.LState)
-		lua.OpenChannel(&lc.LState)
-		lua.OpenCoroutine(&lc.LState)
-		lua.OpenDebug(&lc.LState)
-		lua.OpenMath(&lc.LState)
-		lua.OpenPackage(&lc.LState)
-		lua.OpenString(&lc.LState)
-		lua.OpenTable(&lc.LState)
+		lc = LuaContext{LState: lua.NewState(lua.Options{SkipOpenLibs: true, IncludeGoStackTrace: true})}
+		lua.OpenBase(lc.LState)
+		lua.OpenChannel(lc.LState)
+		lua.OpenCoroutine(lc.LState)
+		lua.OpenDebug(lc.LState)
+		lua.OpenMath(lc.LState)
+		lua.OpenPackage(lc.LState)
+		lua.OpenString(lc.LState)
+		lua.OpenTable(lc.LState)
+
+		base := lc.RawGet(lc.Get(lua.GlobalsIndex).(*lua.LTable), lua.LString("_G"))
+		if basetb, ok := base.(*lua.LTable); ok {
+			basetb.RawSetString("dofile", lc.NewFunction(func(l *lua.LState) int {
+				l.Error(lua.LString("dofile: disabled in sandbox without --unrestricted"), 1)
+				return 0
+			}))
+			basetb.RawSetString("loadfile", lc.NewFunction(func(l *lua.LState) int {
+				l.Error(lua.LString("loadfile: disabled in sandbox without --unrestricted"), 1)
+				return 0
+			}))
+		}
 	}
 
 	lc.clock = clock
@@ -77,8 +89,8 @@ func NewLuaContext(clock timer.Clock, unrestricted bool, loader lua.LGFunction, 
 	lc.sandbox.Metatable = sandboxMeta
 
 	lc.parser = JSONParser{
-		L:     &lc.LState,
-		LNull: newJSONNull(&lc.LState),
+		L:     lc.LState,
+		LNull: newJSONNull(lc.LState),
 	}
 
 	return &lc
@@ -169,8 +181,8 @@ func (lc *LuaContext) SetupScenarioEnvironment(setIdx lua.LGFunction, finishScen
 	lc.fakeTable.RawSetString("oneOf", lc.NewFunction(lc.FakeTakeOne))
 	lc.sinqTable.RawSetString("fake", lc.fakeTable)
 
-	lc.SetGlobal("secrets", ToLuaValue(secrets, &lc.LState))
-	lc.SetGlobal("env", ToLuaValue(env, &lc.LState))
+	lc.SetGlobal("secrets", ToLuaValue(secrets, lc.LState))
+	lc.SetGlobal("env", ToLuaValue(env, lc.LState))
 
 	lc.SetGlobal("sinq", lc.sinqTable)
 }
@@ -205,7 +217,7 @@ func (lc *LuaContext) RunSandboxed(byteCode *lua.FunctionProto, timeout time.Dur
 func (lc *LuaContext) RecordResponseMeta(attempt int, code int, headers http.Header) {
 	lc.ResponseTable.RawSetString("attempt", lua.LNumber(attempt))
 	lc.ResponseTable.RawSetString("code", lua.LNumber(code))
-	lc.ResponseTable.RawSetString("headers", ToLuaValue(headers, &lc.LState))
+	lc.ResponseTable.RawSetString("headers", ToLuaValue(headers, lc.LState))
 }
 
 func (lc *LuaContext) RecordResponseFile(written int64) {

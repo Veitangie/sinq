@@ -73,8 +73,9 @@ func setupTestWorker(t *testing.T, ctx context.Context) *worker {
 	}
 
 	w := &worker{
-		id:  1,
-		env: env,
+		id:        1,
+		env:       env,
+		reportCtx: ctx,
 	}
 
 	err := w.setupScenarioEnvironment(ctx, nil)

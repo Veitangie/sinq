@@ -40,7 +40,7 @@ func (c *cachedLoader) load(ls *lua.LState) int {
 	}
 
 	select {
-	case res := <-c.group.DoChan(moduleName, func() (any, error) {
+	case res := <-c.group.DoChan(moduleName, singleflightSafe(func() (any, error) {
 		if res, ok := c.cache.Load(moduleName); ok {
 			if cachedRes, ok := res.(cachedResult[*lua.FunctionProto]); ok {
 				return cachedRes.res, cachedRes.err
@@ -67,7 +67,7 @@ func (c *cachedLoader) load(ls *lua.LState) int {
 
 		c.cache.Store(moduleName, cachedResult[*lua.FunctionProto]{res: compiled, err: err})
 		return compiled, err
-	}):
+	})):
 		if res.Err != nil {
 			ls.Push(lua.LString(res.Err.Error()))
 			return 1

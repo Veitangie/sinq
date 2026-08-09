@@ -58,7 +58,7 @@ _sinq_completions() {
             return 0
             ;;
         -S|--show)
-            COMPREPLY=( $(compgen -W "all no-skip failed" -- "$cur") )
+            COMPREPLY=( $(compgen -W "all no-skip failed none" -- "$cur") )
             return 0
             ;;
         -o|--out|--secrets-file)

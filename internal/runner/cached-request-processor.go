@@ -5,6 +5,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -59,7 +60,7 @@ func (sp *cachedRequestProcessor) process(
 		Timeout:   sp.cacheTimeout,
 	}
 
-	res := sp.group.DoChan(hash, func() (any, error) {
+	res := sp.group.DoChan(hash, singleflightSafe(func() (any, error) {
 		if res, err, ok := sp.lookup(hash); ok {
 			sp.logger.Debug("[Runner] Found cached request, not running", "host", request.URL.Host, "path", request.URL.Path)
 			return res, err
@@ -86,9 +87,23 @@ func (sp *cachedRequestProcessor) process(
 		res, err := makeIntermediate(workspace, filenameTo, int64(sp.maxCacheSize.ByteAmount), resp)
 		sp.cache.Store(hash, cachedResult[intermediate]{res: res, err: err})
 		return res, err
-	})
+	}))
 
 	return res
+}
+
+func singleflightSafe(underlying func() (any, error)) func() (any, error) {
+	return func() (result any, err error) {
+		defer func() {
+			panickedWith := recover()
+			if panickedWith != nil {
+				result = nil
+				err = fmt.Errorf("Caugh a panic in single flight: %v", panickedWith)
+			}
+		}()
+		result, err = underlying()
+		return
+	}
 }
 
 func makeIntermediate(workspace Workspace, filenameTo string, maxBodySize int64, response *http.Response) (intermediate, error) {

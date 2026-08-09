@@ -347,13 +347,13 @@ func FuzzRequestParser_Heavy(f *testing.F) {
 
 		p2, err := newParser(data, context.Background())
 		if err == nil {
-			for p2.current < len(p2.source) {
+			for p2.Current < p.Len() {
 				_, _ = p2.scanWord()
 				_, _ = p2.scanLine()
 				p2.skipWhitespace()
 
-				if p2.current == 0 && len(data) > 0 {
-					p2.current++
+				if p2.Current == 0 && len(data) > 0 {
+					p2.Current++
 				}
 			}
 		}

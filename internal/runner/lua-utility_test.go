@@ -77,7 +77,7 @@ func TestWorker_ToLuaValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := luapi.ToLuaValue(tt.input, &w.lc.LState)
+			got := luapi.ToLuaValue(tt.input, w.lc.LState)
 			tt.validate(t, got)
 		})
 	}

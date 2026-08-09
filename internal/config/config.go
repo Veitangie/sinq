@@ -87,6 +87,7 @@ const (
 	All WhatShow = iota
 	NoSkip
 	Failed
+	None
 )
 
 type ReporterConfig struct {

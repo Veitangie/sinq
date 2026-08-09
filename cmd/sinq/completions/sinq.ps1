@@ -16,8 +16,8 @@ Register-ArgumentCompleter -CommandName sinq -Native -ScriptBlock {
         '--format'    = @('std', 'junit')
         '-c'          = @('always', 'never', 'auto')
         '--color'     = @('always', 'never', 'auto')
-        '-S'          = @('all', 'no-skip', 'failed')
-        '--show'      = @('all', 'no-skip', 'failed')
+        '-S'          = @('all', 'no-skip', 'failed', 'none')
+        '--show'      = @('all', 'no-skip', 'failed', 'none')
     }
 
     if ($choiceMap.ContainsKey($prev)) {
@@ -73,8 +73,8 @@ Register-ArgumentCompleter -CommandName sinq -Native -ScriptBlock {
             @{ Name = '--format';          Tip = 'Output format: std or junit' },
             @{ Name = '-c';                Tip = 'Terminal colors: always, never, auto' },
             @{ Name = '--color';           Tip = 'Terminal colors: always, never, auto' },
-            @{ Name = '-S';                Tip = 'Which results to show in the output: all, no-skip, failed' },
-            @{ Name = '--show';            Tip = 'Which results to show in the output: all, no-skip, failed' },
+            @{ Name = '-S';                Tip = 'Which results to show in the output: all, no-skip, failed, none' },
+            @{ Name = '--show';            Tip = 'Which results to show in the output: all, no-skip, failed, none' },
             @{ Name = '-t';                Tip = 'Execute only scenarios that have at least one of passed tags' },
             @{ Name = '--tag';             Tip = 'Execute only scenarios that have at least one of passed tags' },
             @{ Name = '-n';                Tip = 'Execute only scenarios which names match at least one of passed regular expressions' },

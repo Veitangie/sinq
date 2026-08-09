@@ -29,16 +29,15 @@ func TestCachedLoader_Load(t *testing.T) {
 	lc := luapi.NewLuaContext(nil, false, nil, nil)
 	defer lc.Close()
 
-	ls := &lc.LState
-	ls.SetContext(context.Background())
+	lc.SetContext(context.Background())
 	callLoad := func(mod string) lua.LValue {
-		ls.Push(ls.NewFunction(loader.load))
-		ls.Push(lua.LString(mod))
-		if err := ls.PCall(1, 1, nil); err != nil {
+		lc.Push(lc.NewFunction(loader.load))
+		lc.Push(lua.LString(mod))
+		if err := lc.PCall(1, 1, nil); err != nil {
 			t.Fatalf("PCall failed: %v", err)
 		}
-		ret := ls.Get(-1)
-		ls.Pop(1)
+		ret := lc.Get(-1)
+		lc.Pop(1)
 		return ret
 	}
 

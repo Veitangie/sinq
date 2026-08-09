@@ -210,6 +210,15 @@ func TestParser_Parse(t *testing.T) {
 			}(),
 			wantErr: false},
 		{
+			name:  "Show None",
+			flags: []string{"--show", "none"},
+			wantConfig: func() Config {
+				c := SaneDefaults()
+				c.Reporter.Show = None
+				return c
+			}(),
+			wantErr: false},
+		{
 			name:       "Show Invalid",
 			flags:      []string{"--show", "invalid"},
 			wantConfig: SaneDefaults(),

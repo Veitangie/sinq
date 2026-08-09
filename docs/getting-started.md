@@ -81,7 +81,7 @@ To get syntax highlighting and better editor support, check out the community ex
    GET https://httpbin.org/get
    
    $ASSERT{
-       sinq.assert.equals(res.status, 200)
+       sinq.assert.code(200, "Healthcheck failed")
    }
    ```
 
@@ -90,7 +90,7 @@ To get syntax highlighting and better editor support, check out the community ex
 Now that you have your first test, let's run it. Point `sinq` to the root directory of your tests:
 
 ```bash
-sinq run ./my-tests
+sinq ./my-tests
 ```
 
 You should see output indicating that the scenario was discovered and the `01_healthcheck.sinq` request passed successfully. 

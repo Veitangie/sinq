@@ -6,53 +6,22 @@ package scenario
 import (
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"unicode"
+
+	"github.com/Veitangie/sinq/internal/scanner"
 )
 
 type parser struct {
-	source            []byte
-	current           int
-	lineNumber        int
-	offsetNumber      int
+	*scanner.ByteScanner
 	currentScriptName string
 	unnamedScriptIdx  int
 	delimiterToken    Token
 }
 
-func (p *parser) advance() {
-	if p.current >= len(p.source) {
-		return
-	}
-	current := p.source[p.current]
-	p.offsetNumber++
-
-	if current == '\n' {
-		p.lineNumber++
-		p.offsetNumber = 1
-	}
-
-	p.current++
-}
-
-func (p *parser) read() (byte, error) {
-	if p.current >= len(p.source) {
-		return 0b0, io.EOF
-	}
-	return p.source[p.current], nil
-}
-
-func (p *parser) previous() byte {
-	if p.current-1 < 0 || p.current-1 >= len(p.source) {
-		return 0b0
-	}
-	return p.source[p.current-1]
-}
-
 func (p *parser) match(expected byte) error {
-	b, err := p.read()
-	p.advance()
+	b, err := p.Read()
+	p.Advance()
 	if err != nil {
 		return p.unexpectedEOF()
 	}
@@ -69,7 +38,7 @@ func (p *parser) scriptError(message string) error {
 	if p.currentScriptName != "" {
 		maybeScriptName = fmt.Sprintf(" \"%s\"", p.currentScriptName)
 	}
-	return fmt.Errorf("%d:%d Failed to parse lua script%s: %s", p.lineNumber, p.offsetNumber, maybeScriptName, message)
+	return fmt.Errorf("%d:%d Failed to parse lua script%s: %s", p.LineNumber, p.OffsetNumber, maybeScriptName, message)
 }
 
 func (p *parser) unexpectedEOF() error {
@@ -111,9 +80,9 @@ func (p *parser) lexToken() (Token, error) {
 		return res, nil
 	}
 
-	b, err := p.read()
+	b, err := p.Read()
 	if err != nil {
-		return Token{Type: EOF, Line: p.lineNumber, Offset: p.offsetNumber, PayloadStart: -1, PayloadEnd: -1}, nil
+		return Token{Type: EOF, Line: p.LineNumber, Offset: p.OffsetNumber, PayloadStart: -1, PayloadEnd: -1}, nil
 	}
 
 	switch b {
@@ -129,19 +98,19 @@ func (p *parser) parseText() (Token, error) {
 	hasEscapes := false
 	res := Token{
 		Type:         Text,
-		Start:        p.current,
-		PayloadStart: p.current,
-		Line:         p.lineNumber,
-		Offset:       p.offsetNumber,
+		Start:        p.Current,
+		PayloadStart: p.Current,
+		Line:         p.LineNumber,
+		Offset:       p.OffsetNumber,
 	}
 	for {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
-			res.End = p.current
-			res.PayloadEnd = p.current
+			res.End = p.Current
+			res.PayloadEnd = p.Current
 			res.HasEscapes = hasEscapes
 			if isEscaped {
-				err = fmt.Errorf("%d:%d Unexpected EOF after escape character", p.lineNumber, p.offsetNumber)
+				err = fmt.Errorf("%d:%d Unexpected EOF after escape character", p.LineNumber, p.OffsetNumber)
 			} else {
 				err = nil
 			}
@@ -150,7 +119,7 @@ func (p *parser) parseText() (Token, error) {
 
 		if isEscaped {
 			isEscaped = false
-			p.advance()
+			p.Advance()
 			continue
 		}
 
@@ -159,12 +128,12 @@ func (p *parser) parseText() (Token, error) {
 			isEscaped = true
 			hasEscapes = true
 		case '$':
-			res.End = p.current
-			res.PayloadEnd = p.current
+			res.End = p.Current
+			res.PayloadEnd = p.Current
 			res.HasEscapes = hasEscapes
 			return res, nil
 		case '#':
-			maybeEnd := p.current
+			maybeEnd := p.Current
 			maybeToken := p.parseDelimiter()
 
 			if maybeToken.Type == Delimiter {
@@ -180,28 +149,28 @@ func (p *parser) parseText() (Token, error) {
 				return res, nil
 			}
 
-			isEscaped = p.previous() == '\\'
+			isEscaped = p.Previous() == '\\'
 			res.HasEscapes = maybeToken.HasEscapes || isEscaped
 			continue
 		}
 
-		p.advance()
+		p.Advance()
 	}
 }
 
 func (p *parser) parseDelimiter() Token {
 	res := Token{
-		Start: p.current - 1,
+		Start: p.Current - 1,
 		// This is a hack technically, since the actual delimiter starts at the new line, but for better UX we want
 		// to report it as starting at the first #, so Line and Offset should match that in the result
-		Line:   p.lineNumber,
-		Offset: p.offsetNumber,
+		Line:   p.LineNumber,
+		Offset: p.OffsetNumber,
 	}
 
-	prev := p.previous()
+	prev := p.Previous()
 
 	for range 3 {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
 			return res
 		}
@@ -210,7 +179,7 @@ func (p *parser) parseDelimiter() Token {
 			return res
 		}
 
-		p.advance()
+		p.Advance()
 	}
 
 	if prev != '\n' && prev != 0b0 {
@@ -218,38 +187,38 @@ func (p *parser) parseDelimiter() Token {
 	}
 
 	for {
-		b, err := p.read()
+		b, err := p.Read()
 
 		if err != nil {
 			return res
 		}
 
 		if b == '\n' {
-			res.End = p.current
+			res.End = p.Current
 			res.Type = Delimiter
 			return res
 		}
 
 		if !unicode.IsSpace(rune(b)) {
 			if res.PayloadStart == 0 {
-				res.PayloadStart = p.current
+				res.PayloadStart = p.Current
 			}
 
 			if b == '\\' {
 				res.HasEscapes = true
 			}
-			res.PayloadEnd = p.current + 1
+			res.PayloadEnd = p.Current + 1
 		}
 
-		p.advance()
+		p.Advance()
 	}
 }
 
 func (p *parser) parseScript() (Token, error) {
-	res := Token{Start: p.current, PayloadStart: -1, PayloadEnd: -1, End: p.current + 1, Line: p.lineNumber, Offset: p.offsetNumber}
+	res := Token{Start: p.Current, PayloadStart: -1, PayloadEnd: -1, End: p.Current + 1, Line: p.LineNumber, Offset: p.OffsetNumber}
 	err := p.match('$')
 	if err != nil {
-		res.End = p.current
+		res.End = p.Current
 		return res, err
 	}
 
@@ -264,65 +233,65 @@ func (p *parser) parseScript() (Token, error) {
 	p.currentScriptName = name
 	defer func() { p.currentScriptName = "" }()
 	if err != nil {
-		res.End = p.current
+		res.End = p.Current
 		return res, err
 	}
 
 	err = p.match('{')
 	if err != nil {
-		res.End = p.current
+		res.End = p.Current
 		return res, err
 	}
-	res.PayloadStart = p.current
+	res.PayloadStart = p.Current
 
 	err = p.parseLuaScript()
 	if err != nil {
-		res.End = p.current
+		res.End = p.Current
 		return res, err
 	}
 
 	err = p.match('}')
 	if err != nil {
-		res.End = p.current
+		res.End = p.Current
 		return res, err
 	}
 
-	res.End = p.current
-	res.PayloadEnd = p.current - 1
+	res.End = p.Current
+	res.PayloadEnd = p.Current - 1
 	res.Type = Script
 
 	return res, nil
 }
 
 func (p *parser) parseScriptName() (string, error) {
-	start := p.current
-	startLine := p.lineNumber
-	startOffset := p.offsetNumber
+	start := p.Current
+	startLine := p.LineNumber
+	startOffset := p.OffsetNumber
 	for {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
-			return string(p.source[start:p.current]), p.unexpectedEOF()
+			return string(p.Slice(start, p.Current)), p.unexpectedEOF()
 		}
 
 		if b == '\n' {
-			return string(p.source[start:p.current]), fmt.Errorf("%d:%d: Expected start of lua script with {, got newline instead", startLine, startOffset)
+			return string(p.Slice(start, p.Current)), fmt.Errorf("%d:%d: Expected start of lua script with {, got newline instead", startLine, startOffset)
 		}
 
 		// Script names can consist of any characters apart from {
 		if b != '{' {
-			p.advance()
+			p.Advance()
 			continue
 		}
 
 		break
 	}
 
-	return strings.TrimSpace(string(p.source[start:p.current])), nil
+	return strings.TrimSpace(string(p.Slice(start, p.Current))), nil
 }
 
 func (p *parser) parseLuaScript() error {
 	for {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
 			return p.unexpectedEOF()
 		}
@@ -356,7 +325,7 @@ func (p *parser) parseLuaScript() error {
 			}
 
 		case '{':
-			p.advance()
+			p.Advance()
 			err := p.parseLuaScript()
 			if err != nil {
 				return err
@@ -371,14 +340,14 @@ func (p *parser) parseLuaScript() error {
 			return nil
 
 		default:
-			p.advance()
+			p.Advance()
 		}
 	}
 }
 
 func (p *parser) parseLuaComment() error {
 	for range 2 {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
 			return p.unexpectedEOF()
 		}
@@ -386,10 +355,10 @@ func (p *parser) parseLuaComment() error {
 		if b != '-' {
 			return nil
 		}
-		p.advance()
+		p.Advance()
 	}
 
-	canBeBracket, err := p.read()
+	canBeBracket, err := p.Read()
 	if err != nil {
 		return p.unexpectedEOF()
 	}
@@ -412,8 +381,8 @@ func (p *parser) parseLuaComment() error {
 
 func (p *parser) parseLuaSimpleComment() error {
 	for {
-		b, err := p.read()
-		p.advance()
+		b, err := p.Read()
+		p.Advance()
 
 		if err != nil {
 			return p.unexpectedEOF()
@@ -426,21 +395,21 @@ func (p *parser) parseLuaSimpleComment() error {
 }
 
 func (p *parser) parseLuaSimpleString() error {
-	quote, err := p.read()
+	quote, err := p.Read()
 	if err != nil {
 		return p.unexpectedEOF()
 	}
 	if quote != '"' && quote != '\'' {
 		return p.scriptError("Unexpected start of string, expecting \" or ' at the start")
 	}
-	p.advance()
+	p.Advance()
 
-	startLine := p.lineNumber
-	startOffset := p.offsetNumber
+	startLine := p.LineNumber
+	startOffset := p.OffsetNumber
 	isEscaped := false
 
 	for {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
 			return p.scriptError(fmt.Sprintf("Unclosed string literal at pos %d:%d, expecting %c", startLine, startOffset, quote))
 		}
@@ -448,7 +417,7 @@ func (p *parser) parseLuaSimpleString() error {
 		if b == '\n' && !isEscaped {
 			return p.scriptError(fmt.Sprintf("Unclosed string literal at pos %d:%d, expecting %c", startLine, startOffset, quote))
 		}
-		p.advance()
+		p.Advance()
 
 		if isEscaped {
 			isEscaped = false
@@ -492,7 +461,7 @@ func (p *parser) parseLuaMultilineStringWithCloser(level int) error {
 
 func (p *parser) parseLuaMultilineString() error {
 	for {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
 			return p.unexpectedEOF()
 		}
@@ -500,7 +469,7 @@ func (p *parser) parseLuaMultilineString() error {
 		if b == ']' {
 			return nil
 		}
-		p.advance()
+		p.Advance()
 	}
 }
 
@@ -512,54 +481,54 @@ func (p *parser) parseLongBracketOpen() (int, error) {
 
 	layer := 0
 	for {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
 			return -1, p.unexpectedEOF()
 		}
 
 		switch b {
 		case '[':
-			p.advance()
+			p.Advance()
 			return layer, nil
 		case '=':
 			layer++
 		default:
 			return -1, nil
 		}
-		p.advance()
+		p.Advance()
 	}
 }
 
 func (p *parser) parseLongBracketClose() (int, error) {
 	layer := 0
 	for {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
 			return -1, p.unexpectedEOF()
 		}
 
 		switch b {
 		case ']':
-			p.advance()
+			p.Advance()
 			return layer, nil
 		case '=':
 			layer++
 		default:
 			return -1, nil
 		}
-		p.advance()
+		p.Advance()
 	}
 }
 
 func (p *parser) consumeWhitespace() {
 	for {
-		b, err := p.read()
+		b, err := p.Read()
 		if err != nil {
 			return
 		}
 		if !unicode.IsSpace(rune(b)) {
 			return
 		}
-		p.advance()
+		p.Advance()
 	}
 }

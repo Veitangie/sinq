@@ -1,3 +1,6 @@
+// sinq - A concurrent integration testing tool
+// Copyright (C) 2026 Veitangie
+// SPDX-License-Identifier: GPL-3.0-or-later
 package config
 
 import (
@@ -44,11 +47,11 @@ func (v PositiveIntValue) Set(value string) error {
 
 func (v PositiveIntValue) Type() string { return "int" }
 
-type NonNegativeDurationValue struct{ target *time.Duration }
+type PositiveDurationValue struct{ target *time.Duration }
 
-var _ pflag.Value = NonNegativeDurationValue{}
+var _ pflag.Value = PositiveDurationValue{}
 
-func (v NonNegativeDurationValue) String() string {
+func (v PositiveDurationValue) String() string {
 	if v.target == nil {
 		return "unset"
 	}
@@ -56,9 +59,9 @@ func (v NonNegativeDurationValue) String() string {
 	return v.target.String()
 }
 
-func (v NonNegativeDurationValue) Set(value string) error {
+func (v PositiveDurationValue) Set(value string) error {
 	if v.target == nil {
-		return errors.New("log level setter was not initialized")
+		return errors.New("duration setter was not initialized")
 	}
 
 	maybeDuration, err := time.ParseDuration(value)
@@ -66,15 +69,15 @@ func (v NonNegativeDurationValue) Set(value string) error {
 		return err
 	}
 
-	if maybeDuration < 0 {
-		return errors.New("expected non-negative duration")
+	if maybeDuration <= 0 {
+		return errors.New("expected positive duration")
 	}
 
 	*v.target = maybeDuration
 	return nil
 }
 
-func (v NonNegativeDurationValue) Type() string { return "duration" }
+func (v PositiveDurationValue) Type() string { return "duration" }
 
 type LogLevelValue struct{ target *slog.Level }
 
@@ -304,6 +307,8 @@ func (v WhatShowValue) String() string {
 		return "no-skip"
 	case Failed:
 		return "failed"
+	case None:
+		return "none"
 	default:
 		return "unknown"
 	}
@@ -321,8 +326,10 @@ func (v WhatShowValue) Set(value string) error {
 		*v.target = NoSkip
 	case "failed":
 		*v.target = Failed
+	case "none":
+		*v.target = None
 	default:
-		return errors.New("expected one of: all, no-skip, failed")
+		return errors.New("expected one of: all, no-skip, failed, none")
 	}
 	return nil
 }

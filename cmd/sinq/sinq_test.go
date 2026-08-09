@@ -4,11 +4,17 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,6 +22,33 @@ import (
 
 	"github.com/Veitangie/sinq/internal/config"
 )
+
+func withCapturedIO(t *testing.T, out, err io.Writer) {
+	t.Helper()
+	oldOut, oldErr := stdout, stderr
+	stdout, stderr = out, err
+	t.Cleanup(func() {
+		stdout, stderr = oldOut, oldErr
+	})
+}
+
+type erroringWriter struct{ err error }
+
+func (w erroringWriter) Write(p []byte) (int, error) { return 0, w.err }
+
+type flakyWriter struct {
+	failAfter int
+	calls     int
+	err       error
+}
+
+func (w *flakyWriter) Write(p []byte) (int, error) {
+	w.calls++
+	if w.calls > w.failAfter {
+		return 0, w.err
+	}
+	return len(p), nil
+}
 
 func TestSinq_EndToEnd_ComplexAsyncPolling(t *testing.T) {
 	var mu sync.Mutex
@@ -369,8 +402,8 @@ func TestPopulateConfigInRuntime(t *testing.T) {
 		t.Errorf("expected Paths to be ['.'], got %v", cfg.Paths)
 	}
 
-	if len(cfg.LuaPaths) != 4 {
-		t.Errorf("expected 4 LuaPaths, got %d", len(cfg.LuaPaths))
+	if len(cfg.LuaPaths) != 3 {
+		t.Errorf("expected 3 LuaPaths, got %d", len(cfg.LuaPaths))
 	}
 }
 
@@ -485,5 +518,148 @@ func TestOSWorkspaceMkDirall(t *testing.T) {
 	err = ws2.MkDirall(filepath.Join(os.TempDir(), "sinq_scenario_mkdir_test"))
 	if err != nil {
 		t.Errorf("Unexpected error in OSWorkspace: %v", err)
+	}
+}
+
+func TestInTermWantColor_NilFile(t *testing.T) {
+	inTerm, wantColor := inTermWantColor(nil, config.SaneDefaults())
+	if inTerm {
+		t.Error("expected inTerm to be false for a nil file")
+	}
+	if wantColor {
+		t.Error("expected wantColor to be false for a nil file")
+	}
+}
+
+func TestSetupSpinner_CloseError(t *testing.T) {
+	oldIsInCi := isInCi
+	isInCi = false
+	t.Cleanup(func() { isInCi = oldIsInCi })
+
+	withCapturedIO(t, &bytes.Buffer{}, &bytes.Buffer{})
+	flaky := &flakyWriter{failAfter: 1, err: errors.New("write failed")}
+	stderr = flaky
+
+	stopSpinner := setupSpinner(true, false, false, context.Background())
+
+	errBuf := &bytes.Buffer{}
+	stderr = errBuf
+	stopSpinner()
+
+	if !strings.Contains(errBuf.String(), "Failed to stop spinner writer") {
+		t.Errorf("expected a spinner-close failure message, got %q", errBuf.String())
+	}
+}
+
+func TestSinq_NonexistentPath(t *testing.T) {
+	errBuf := &bytes.Buffer{}
+	withCapturedIO(t, &bytes.Buffer{}, errBuf)
+
+	code := sinq([]string{"--no-spinner", "/this/path/does/not/exist/at/all"})
+	if code != 1 {
+		t.Errorf("expected exit code 1 for a nonexistent path, got %d", code)
+	}
+	if !strings.Contains(errBuf.String(), "Failed to stat") {
+		t.Errorf("expected a 'Failed to stat' error, got %q", errBuf.String())
+	}
+}
+
+func TestSinq_HelpAndVersion_PrintError(t *testing.T) {
+	tests := [][]string{{"--help"}, {"--version"}}
+	for _, args := range tests {
+		t.Run(strings.Join(args, ""), func(t *testing.T) {
+			withCapturedIO(t, &erroringWriter{err: errors.New("broken pipe")}, &bytes.Buffer{})
+			if code := sinq(args); code != 1 {
+				t.Errorf("sinq(%v) = %d; want 1 when stdout fails to write", args, code)
+			}
+		})
+	}
+}
+
+func TestSinq_List_PrintScenariosError(t *testing.T) {
+	tmpDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmpDir, "01_test.sinq"), []byte("GET http://example.com"), 0644)
+
+	withCapturedIO(t, &erroringWriter{err: errors.New("broken pipe")}, &bytes.Buffer{})
+
+	if code := sinq([]string{"--no-spinner", "--list", tmpDir}); code != 1 {
+		t.Errorf("sinq(--list) = %d; want 1 when stdout fails to write", code)
+	}
+}
+
+func TestSinq_CIWarnings(t *testing.T) {
+	t.Setenv("CI", "true")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	req := fmt.Sprintf("GET %s\n$ASSERT{ sinq.assert.code(200) }", srv.URL)
+	_ = os.WriteFile(filepath.Join(tmpDir, "ok.sinq"), []byte(req), 0644)
+
+	errBuf := &bytes.Buffer{}
+	withCapturedIO(t, &bytes.Buffer{}, errBuf)
+
+	code := sinq([]string{"--no-spinner", "--log-level", "debug", "--dump-on-failure", "--workers", "1", tmpDir})
+	if code != 0 {
+		t.Fatalf("expected sinq() to succeed, got exit code %d: %s", code, errBuf.String())
+	}
+
+	if !strings.Contains(errBuf.String(), "--log-level debug") {
+		t.Errorf("expected a CI warning about --log-level debug, got %q", errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "--dump-on-failure") {
+		t.Errorf("expected a CI warning about --dump-on-failure, got %q", errBuf.String())
+	}
+}
+
+func TestSinq_OutFlag_PointsAtDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmpDir, "01_test.sinq"), []byte("GET http://example.com"), 0644)
+
+	errBuf := &bytes.Buffer{}
+	withCapturedIO(t, &bytes.Buffer{}, errBuf)
+
+	code := sinq([]string{"--no-spinner", "--out", tmpDir, tmpDir})
+	if code != 1 {
+		t.Errorf("expected exit code 1 when --out points at a directory, got %d", code)
+	}
+	if !strings.Contains(errBuf.String(), "Failed to open output file") {
+		t.Errorf("expected an 'output file' error, got %q", errBuf.String())
+	}
+}
+
+func TestSinq_ErrorChannel_IsDrainedAndReported(t *testing.T) {
+	tmpDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmpDir, "config.scenario"), []byte(`{not valid json`), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "01_test.sinq"), []byte("GET http://example.com"), 0644)
+
+	valid := filepath.Join(tmpDir, "valid")
+	_ = os.Mkdir(valid, 0755)
+	_ = os.WriteFile(filepath.Join(valid, "02_test.sinq"), []byte("GET http://example.com"), 0644)
+
+	errBuf := &bytes.Buffer{}
+	withCapturedIO(t, &bytes.Buffer{}, errBuf)
+
+	sinq([]string{"--no-spinner", "--workers", "1", tmpDir})
+
+	if !strings.Contains(errBuf.String(), "Error:") {
+		t.Errorf("expected the malformed config.scenario error to be reported, got %q", errBuf.String())
+	}
+}
+
+func TestHandleCompletion_UnrecognizedParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("handleCompletion always succeeds on windows via the ps1 fallback")
+	}
+
+	errBuf := &bytes.Buffer{}
+	withCapturedIO(t, &bytes.Buffer{}, errBuf)
+
+	code := sinq([]string{"--completion"})
+	if code != 0 && code != 1 {
+		t.Errorf("expected exit code 0 or 1 from --completion, got %d", code)
 	}
 }

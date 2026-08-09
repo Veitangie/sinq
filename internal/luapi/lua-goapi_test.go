@@ -15,21 +15,20 @@ import (
 func TestExtractBodyJson(t *testing.T) {
 	t.Run("Success: Parses valid JSON and caches it", func(t *testing.T) {
 		lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
-		ls := &lc.LState
-		defer ls.Close()
+		defer lc.Close()
 
-		reqTable := ls.NewTable()
+		reqTable := lc.NewTable()
 		reqTable.RawSetString("bodyRaw", lua.LString(`{"status": "ok", "count": 42}`))
 
-		closure := ls.NewClosure(lc.ExtractBodyJson, reqTable)
-		ls.Push(closure)
+		closure := lc.NewClosure(lc.ExtractBodyJson, reqTable)
+		lc.Push(closure)
 
-		if err := ls.PCall(0, 2, nil); err != nil {
+		if err := lc.PCall(0, 2, nil); err != nil {
 			t.Fatalf("unexpected lua execution error: %v", err)
 		}
 
-		errVal := ls.Get(-1)
-		resVal := ls.Get(-2)
+		errVal := lc.Get(-1)
+		resVal := lc.Get(-2)
 
 		if errVal != lua.LNil {
 			t.Errorf("expected error to be nil, got %v", errVal)
@@ -46,22 +45,21 @@ func TestExtractBodyJson(t *testing.T) {
 
 	t.Run("Success: Returns cached value immediately (Type Agnostic)", func(t *testing.T) {
 		lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
-		ls := &lc.LState
-		defer ls.Close()
+		defer lc.Close()
 
-		reqTable := ls.NewTable()
+		reqTable := lc.NewTable()
 		reqTable.RawSetString("bodyJson", lua.LBool(true))
 		reqTable.RawSetString("bodyRaw", lua.LString(`{bad_json}`))
 
-		closure := ls.NewClosure(lc.ExtractBodyJson, reqTable)
-		ls.Push(closure)
+		closure := lc.NewClosure(lc.ExtractBodyJson, reqTable)
+		lc.Push(closure)
 
-		if err := ls.PCall(0, 2, nil); err != nil {
+		if err := lc.PCall(0, 2, nil); err != nil {
 			t.Fatalf("unexpected lua execution error: %v", err)
 		}
 
-		errVal := ls.Get(-1)
-		resVal := ls.Get(-2)
+		errVal := lc.Get(-1)
+		resVal := lc.Get(-2)
 
 		if errVal != lua.LNil {
 			t.Errorf("expected error to be nil, got %v", errVal)
@@ -73,21 +71,20 @@ func TestExtractBodyJson(t *testing.T) {
 
 	t.Run("Failure: Invalid JSON returns nil and error", func(t *testing.T) {
 		lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
-		ls := &lc.LState
-		defer ls.Close()
+		defer lc.Close()
 
-		reqTable := ls.NewTable()
+		reqTable := lc.NewTable()
 		reqTable.RawSetString("bodyRaw", lua.LString(`{"status": "incomplete"`))
 
-		closure := ls.NewClosure(lc.ExtractBodyJson, reqTable)
-		ls.Push(closure)
+		closure := lc.NewClosure(lc.ExtractBodyJson, reqTable)
+		lc.Push(closure)
 
-		if err := ls.PCall(0, 2, nil); err != nil {
+		if err := lc.PCall(0, 2, nil); err != nil {
 			t.Fatalf("unexpected lua execution error: %v", err)
 		}
 
-		errVal := ls.Get(-1)
-		resVal := ls.Get(-2)
+		errVal := lc.Get(-1)
+		resVal := lc.Get(-2)
 
 		if resVal != lua.LNil {
 			t.Errorf("expected result to be nil on failure, got %v", resVal)
@@ -102,20 +99,19 @@ func TestExtractBodyJson(t *testing.T) {
 
 	t.Run("Failure: Missing bodyRaw", func(t *testing.T) {
 		lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
-		ls := &lc.LState
-		defer ls.Close()
+		defer lc.Close()
 
-		reqTable := ls.NewTable()
+		reqTable := lc.NewTable()
 
-		closure := ls.NewClosure(lc.ExtractBodyJson, reqTable)
-		ls.Push(closure)
+		closure := lc.NewClosure(lc.ExtractBodyJson, reqTable)
+		lc.Push(closure)
 
-		if err := ls.PCall(0, 2, nil); err != nil {
+		if err := lc.PCall(0, 2, nil); err != nil {
 			t.Fatalf("unexpected lua execution error: %v", err)
 		}
 
-		errVal := ls.Get(-1)
-		resVal := ls.Get(-2)
+		errVal := lc.Get(-1)
+		resVal := lc.Get(-2)
 
 		if resVal != lua.LNil {
 			t.Errorf("expected result to be nil, got %v", resVal)
@@ -127,18 +123,17 @@ func TestExtractBodyJson(t *testing.T) {
 
 	t.Run("Failure: Upvalue is not a table", func(t *testing.T) {
 		lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
-		ls := &lc.LState
-		defer ls.Close()
+		defer lc.Close()
 
-		closure := ls.NewClosure(lc.ExtractBodyJson, lua.LString("I am a teapot"))
-		ls.Push(closure)
+		closure := lc.NewClosure(lc.ExtractBodyJson, lua.LString("I am a teapot"))
+		lc.Push(closure)
 
-		if err := ls.PCall(0, 2, nil); err != nil {
+		if err := lc.PCall(0, 2, nil); err != nil {
 			t.Fatalf("unexpected lua execution error: %v", err)
 		}
 
-		errVal := ls.Get(-1)
-		resVal := ls.Get(-2)
+		errVal := lc.Get(-1)
+		resVal := lc.Get(-2)
 
 		if resVal != lua.LNil {
 			t.Errorf("expected result to be nil, got %v", resVal)
@@ -151,8 +146,7 @@ func TestExtractBodyJson(t *testing.T) {
 
 func TestToLuaValue(t *testing.T) {
 	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
-	ls := &lc.LState
-	defer ls.Close()
+	defer lc.Close()
 
 	tests := []struct {
 		name  string
@@ -247,7 +241,7 @@ func TestToLuaValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := ToLuaValue(tt.input, ls)
+			res := ToLuaValue(tt.input, lc.LState)
 			tt.check(t, res)
 		})
 	}
@@ -255,34 +249,33 @@ func TestToLuaValue(t *testing.T) {
 
 func TestExtractBodyJsonUnsafe(t *testing.T) {
 	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
-	ls := &lc.LState
-	defer ls.Close()
+	defer lc.Close()
 
 	t.Run("Success", func(t *testing.T) {
-		reqTable := ls.NewTable()
+		reqTable := lc.NewTable()
 		reqTable.RawSetString("bodyRaw", lua.LString(`{"status": "ok"}`))
 
-		closure := ls.NewClosure(lc.ExtractBodyJsonUnsafe, reqTable)
-		ls.Push(closure)
+		closure := lc.NewClosure(lc.ExtractBodyJsonUnsafe, reqTable)
+		lc.Push(closure)
 
-		if err := ls.PCall(0, 1, nil); err != nil {
+		if err := lc.PCall(0, 1, nil); err != nil {
 			t.Fatalf("unexpected lua execution error: %v", err)
 		}
 
-		resVal := ls.Get(-1)
+		resVal := lc.Get(-1)
 		if resVal.Type() != lua.LTTable {
 			t.Errorf("expected result to be a table, got %v", resVal.Type())
 		}
 	})
 
 	t.Run("Failure throws error string", func(t *testing.T) {
-		reqTable := ls.NewTable()
+		reqTable := lc.NewTable()
 		reqTable.RawSetString("bodyRaw", lua.LString(`{bad_json`))
 
-		closure := ls.NewClosure(lc.ExtractBodyJsonUnsafe, reqTable)
-		ls.Push(closure)
+		closure := lc.NewClosure(lc.ExtractBodyJsonUnsafe, reqTable)
+		lc.Push(closure)
 
-		err := ls.PCall(0, 1, nil)
+		err := lc.PCall(0, 1, nil)
 		if err == nil {
 			t.Fatalf("expected lua error on unsafe extraction")
 		}
@@ -291,8 +284,7 @@ func TestExtractBodyJsonUnsafe(t *testing.T) {
 
 func TestFromLuaValue(t *testing.T) {
 	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
-	ls := &lc.LState
-	defer ls.Close()
+	defer lc.Close()
 
 	tests := []struct {
 		name  string
@@ -332,7 +324,7 @@ func TestFromLuaValue(t *testing.T) {
 			}
 		}},
 		{"Array Table", func() lua.LValue {
-			tbl := ls.NewTable()
+			tbl := lc.NewTable()
 			tbl.RawSetInt(1, lua.LString("a"))
 			tbl.RawSetInt(2, lua.LNumber(1))
 			return tbl
@@ -349,7 +341,7 @@ func TestFromLuaValue(t *testing.T) {
 			}
 		}},
 		{"Map Table", func() lua.LValue {
-			tbl := ls.NewTable()
+			tbl := lc.NewTable()
 			tbl.RawSetString("key", lua.LString("value"))
 			return tbl
 		}(), func(t *testing.T, val any, err error) {
@@ -365,7 +357,7 @@ func TestFromLuaValue(t *testing.T) {
 			}
 		}},
 		{"UserData", func() lua.LValue {
-			ud := ls.NewUserData()
+			ud := lc.NewUserData()
 			ud.Value = struct{ A int }{1}
 			return ud
 		}(), func(t *testing.T, val any, err error) {
@@ -378,7 +370,7 @@ func TestFromLuaValue(t *testing.T) {
 			}
 		}},
 		{"Cycle Detection", func() lua.LValue {
-			tbl := ls.NewTable()
+			tbl := lc.NewTable()
 			tbl.RawSetString("self", tbl)
 			return tbl
 		}(), func(t *testing.T, val any, err error) {
@@ -390,10 +382,10 @@ func TestFromLuaValue(t *testing.T) {
 			}
 		}},
 		{"DAG Support (No false cycles)", func() lua.LValue {
-			child := ls.NewTable()
+			child := lc.NewTable()
 			child.RawSetString("key", lua.LString("val"))
 
-			parent := ls.NewTable()
+			parent := lc.NewTable()
 			parent.RawSetInt(1, child)
 			parent.RawSetInt(2, child)
 			return parent
@@ -412,7 +404,7 @@ func TestFromLuaValue(t *testing.T) {
 			}
 		}},
 		{"Mixed Table", func() lua.LValue {
-			tbl := ls.NewTable()
+			tbl := lc.NewTable()
 			tbl.RawSetInt(1, lua.LString("a"))
 			tbl.RawSetString("key", lua.LString("value"))
 			return tbl
@@ -425,7 +417,7 @@ func TestFromLuaValue(t *testing.T) {
 			}
 		}},
 		{"Unknown Key Type", func() lua.LValue {
-			tbl := ls.NewTable()
+			tbl := lc.NewTable()
 			tbl.RawSet(lua.LBool(true), lua.LString("value"))
 			return tbl
 		}(), func(t *testing.T, val any, err error) {
@@ -437,8 +429,8 @@ func TestFromLuaValue(t *testing.T) {
 			}
 		}},
 		{"Nested Error in Array", func() lua.LValue {
-			tbl := ls.NewTable()
-			inner := ls.NewTable()
+			tbl := lc.NewTable()
+			inner := lc.NewTable()
 			inner.RawSet(lua.LBool(true), lua.LString("invalid"))
 			tbl.RawSetInt(1, inner)
 			return tbl
@@ -448,8 +440,8 @@ func TestFromLuaValue(t *testing.T) {
 			}
 		}},
 		{"Nested Error in Map", func() lua.LValue {
-			tbl := ls.NewTable()
-			inner := ls.NewTable()
+			tbl := lc.NewTable()
+			inner := lc.NewTable()
 			inner.RawSetString("self", inner)
 			tbl.RawSetString("key", inner)
 			return tbl
@@ -458,7 +450,7 @@ func TestFromLuaValue(t *testing.T) {
 				t.Fatalf("expected error on nested error in map, got nil")
 			}
 		}},
-		{"Unhandled Type", ls.NewFunction(func(ls *lua.LState) int { return 0 }), func(t *testing.T, val any, err error) {
+		{"Unhandled Type", lc.NewFunction(func(ls *lua.LState) int { return 0 }), func(t *testing.T, val any, err error) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -466,7 +458,7 @@ func TestFromLuaValue(t *testing.T) {
 				t.Errorf("expected nil for unhandled type, got %v", val)
 			}
 		}},
-		{"JSON Null", newJSONNull(ls), func(t *testing.T, val any, err error) {
+		{"JSON Null", newJSONNull(lc.LState), func(t *testing.T, val any, err error) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

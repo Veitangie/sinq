@@ -93,3 +93,54 @@ func TestToken_IsSpecialScript(t *testing.T) {
 		})
 	}
 }
+
+func TestScenarioBlueprint_CountVariants(t *testing.T) {
+	tests := []struct {
+		name      string
+		envMatrix []map[string]map[string]any
+		want      int
+	}{
+		{
+			name:      "Empty matrix",
+			envMatrix: nil,
+			want:      1,
+		},
+		{
+			name: "Single element matrix",
+			envMatrix: []map[string]map[string]any{
+				{"a": {"b": 1}},
+			},
+			want: 1,
+		},
+		{
+			name: "Matrix with two elements",
+			envMatrix: []map[string]map[string]any{
+				{
+					"a": {"b": 1},
+					"c": {"d": 2},
+				},
+			},
+			want: 2,
+		},
+		{
+			name: "Matrix with one empty element and one non-empty",
+			envMatrix: []map[string]map[string]any{
+				{},
+				{"c": {"d": 2}},
+			},
+			want: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bp := ScenarioBlueprint{
+				Config: &ScenarioConfig{
+					EnvMatrix: tt.envMatrix,
+				},
+			}
+			if got := bp.CountVariants(); got != tt.want {
+				t.Errorf("CountVairants() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

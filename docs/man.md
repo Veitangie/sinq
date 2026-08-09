@@ -97,7 +97,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Terminal colors: always, never, auto (default "auto").
 
 **-S**, **--show** *string*
-: Which results to show in the output: all, no-skip, failed (default "no-skip").
+: Which results to show in the output: all, no-skip, failed, none (default "no-skip").
 
 **-t**, **--tag** *string*
 : Execute only scenarios that have at least one of passed tags.

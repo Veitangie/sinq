@@ -306,30 +306,29 @@ func TestJSONParser_Parse(t *testing.T) {
 func TestJSONSerializer_SerializeLValue(t *testing.T) {
 	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	defer lc.Close()
-	ls := &lc.LState
 	mapToTable := func(m map[string]lua.LValue) *lua.LTable {
-		tbl := ls.NewTable()
+		tbl := lc.NewTable()
 		for k, v := range m {
 			tbl.RawSetString(k, v)
 		}
 		return tbl
 	}
 	sliceToTable := func(s []lua.LValue) *lua.LTable {
-		tbl := ls.NewTable()
+		tbl := lc.NewTable()
 		for i, v := range s {
 			tbl.RawSetInt(i+1, v)
 		}
 		return tbl
 	}
 	emptyArrayTable := func() *lua.LTable {
-		tbl := ls.NewTable()
-		mt := ls.NewTable()
+		tbl := lc.NewTable()
+		mt := lc.NewTable()
 		mt.RawSetString("asEmptyArray", lua.LBool(true))
 		tbl.Metatable = mt
 		return tbl
 	}
 	mixedTable := func() *lua.LTable {
-		tbl := ls.NewTable()
+		tbl := lc.NewTable()
 		tbl.RawSetInt(1, lua.LNumber(100))
 		tbl.RawSetString("key", lua.LString("value"))
 		return tbl
@@ -346,7 +345,7 @@ func TestJSONSerializer_SerializeLValue(t *testing.T) {
 		{
 			name: "Cycle Detection",
 			val: func() lua.LValue {
-				tbl := ls.NewTable()
+				tbl := lc.NewTable()
 				tbl.RawSetString("self", tbl)
 				return tbl
 			}(),
@@ -355,9 +354,9 @@ func TestJSONSerializer_SerializeLValue(t *testing.T) {
 		{
 			name: "DAG Support (No false cycles)",
 			val: func() lua.LValue {
-				child := ls.NewTable()
+				child := lc.NewTable()
 				child.RawSetString("key", lua.LString("val"))
-				parent := ls.NewTable()
+				parent := lc.NewTable()
 				parent.RawSetInt(1, child)
 				parent.RawSetInt(2, child)
 				return parent
@@ -393,7 +392,7 @@ func TestJSONSerializer_SerializeLValue(t *testing.T) {
 		// --- Empty Tables ---
 		{
 			name:      "Empty Table (Defaults to Object)",
-			val:       ls.NewTable(),
+			val:       lc.NewTable(),
 			want:      `{}`,
 			wantError: false,
 		},
@@ -488,22 +487,21 @@ func TestJSONSerializer_SerializeLValue(t *testing.T) {
 func TestSerializeToJSON(t *testing.T) {
 	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	defer lc.Close()
-	ls := &lc.LState
 
 	t.Run("Success", func(t *testing.T) {
-		ls.Push(ls.NewFunction(lc.SerializeToJSON))
-		tbl := ls.NewTable()
+		lc.Push(lc.NewFunction(lc.SerializeToJSON))
+		tbl := lc.NewTable()
 		tbl.RawSetString("key", lua.LString("value"))
-		ls.Push(tbl)
-		ls.Push(lua.LString(""))
+		lc.Push(tbl)
+		lc.Push(lua.LString(""))
 
-		if err := ls.PCall(2, 2, nil); err != nil {
+		if err := lc.PCall(2, 2, nil); err != nil {
 			t.Fatalf("unexpected lua error: %v", err)
 		}
 
-		errRes := ls.Get(-1)
-		valRes := ls.Get(-2)
-		ls.Pop(2)
+		errRes := lc.Get(-1)
+		valRes := lc.Get(-2)
+		lc.Pop(2)
 
 		if errRes != lua.LNil {
 			t.Fatalf("expected nil error, got %v", errRes)
@@ -515,19 +513,19 @@ func TestSerializeToJSON(t *testing.T) {
 	})
 
 	t.Run("Failure", func(t *testing.T) {
-		ls.Push(ls.NewFunction(lc.SerializeToJSON))
-		tbl := ls.NewTable()
+		lc.Push(lc.NewFunction(lc.SerializeToJSON))
+		tbl := lc.NewTable()
 		tbl.RawSetInt(1, lua.LNumber(1))
 		tbl.RawSetString("key", lua.LString("value"))
-		ls.Push(tbl)
+		lc.Push(tbl)
 
-		if err := ls.PCall(1, 2, nil); err != nil {
+		if err := lc.PCall(1, 2, nil); err != nil {
 			t.Fatalf("unexpected lua error: %v", err)
 		}
 
-		errRes := ls.Get(-1)
-		valRes := ls.Get(-2)
-		ls.Pop(2)
+		errRes := lc.Get(-1)
+		valRes := lc.Get(-2)
+		lc.Pop(2)
 
 		if errRes == lua.LNil {
 			t.Fatalf("expected error, got nil")

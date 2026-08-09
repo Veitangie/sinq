@@ -159,6 +159,7 @@ func (t *Treewalker) ParseFiletree(ctx context.Context, fileSystem fs.FS) ([]sce
 	errorCh := make(chan error, t.cfg.Workers)
 
 	cancellableCtx, cancelCtx := context.WithCancelCause(ctx)
+	defer cancelCtx(nil)
 	coordinatorWG := sync.WaitGroup{}
 	coordinatorWG.Add(3)
 

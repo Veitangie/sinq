@@ -5,13 +5,16 @@ package scenario
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/Veitangie/sinq/internal/config"
+	"github.com/Veitangie/sinq/internal/envs"
 )
 
 type configHelper struct {
+	Env       map[string]any   `json:"env"`
 	EnvMatrix []map[string]any `json:"env_matrix"`
 	Tags      []string         `json:"tags"`
 }
@@ -56,6 +59,10 @@ func parseAdditionalData(target *ScenarioConfig, bytes []byte) error {
 		}
 	}
 
+	if len(helper.Env) != 0 {
+		envs.DeepMerge(target.Env, helper.Env)
+	}
+
 	return nil
 }
 
@@ -72,14 +79,35 @@ func ParseConfig(target *ScenarioConfig, source io.Reader) error {
 	}
 
 	if target.MaxBody != oldSize {
-		bodySize, err := config.ParseSize(target.MaxBody)
-		if err != nil {
-			return fmt.Errorf("Failed to parse max body size: %w", err)
+		bodySize, errInSize := config.ParseSize(target.MaxBody)
+		if errInSize != nil {
+			err = errors.Join(err, fmt.Errorf("Failed to parse max body size: %w", errInSize))
+		} else {
+			target.MaxBodySize = bodySize
 		}
-		target.MaxBodySize = bodySize
 	}
 
-	err = parseAdditionalData(target, bytes)
+	if target.ReqTimeout.Duration <= 0 {
+		err = errors.Join(err, errors.New("Non positive request timeout"))
+	}
+
+	if target.ScriptTimeout.Duration <= 0 {
+		err = errors.Join(err, errors.New("Non positive script timeout"))
+	}
+
+	if target.Timeout.Duration <= 0 {
+		err = errors.Join(err, errors.New("Non positive scenario timeout"))
+	}
+
+	if target.MaxRetries < 0 {
+		err = errors.Join(err, errors.New("Negative retries"))
+	}
+
+	if target.MaxRedirects < 0 {
+		err = errors.Join(err, errors.New("Negative redirects"))
+	}
+
+	err = errors.Join(err, parseAdditionalData(target, bytes))
 	if err != nil {
 		return err
 	}

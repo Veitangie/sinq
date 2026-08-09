@@ -81,6 +81,44 @@ func TestParseAdditionalData(t *testing.T) {
 	}
 }
 
+func TestParseConfig_EnvDeepMergeAcrossFiles(t *testing.T) {
+	parentJSON := `{
+		"env": {
+			"BASE_URL": "https://api.local",
+			"NESTED": {"A": 1, "B": 2}
+		}
+	}`
+	childJSON := `{
+		"env": {
+			"NESTED": {"A": 99}
+		}
+	}`
+
+	cfg := SaneDefaultConfig()
+	if err := ParseConfig(&cfg, strings.NewReader(parentJSON)); err != nil {
+		t.Fatalf("ParseConfig(parent) failed: %v", err)
+	}
+	if err := ParseConfig(&cfg, strings.NewReader(childJSON)); err != nil {
+		t.Fatalf("ParseConfig(child) failed: %v", err)
+	}
+
+	if cfg.Env["BASE_URL"] != "https://api.local" {
+		t.Errorf("Expected BASE_URL to be inherited from the parent, got: %v", cfg.Env["BASE_URL"])
+	}
+
+	nested, ok := cfg.Env["NESTED"].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected NESTED to be a map, got: %T %v", cfg.Env["NESTED"], cfg.Env["NESTED"])
+	}
+
+	if nested["A"] != float64(99) {
+		t.Errorf("Expected NESTED.A to be overridden by the child to 99, got: %v", nested["A"])
+	}
+	if nested["B"] != float64(2) {
+		t.Errorf("Expected NESTED.B to be preserved from the parent (deep merge), got: %v", nested["B"])
+	}
+}
+
 func TestParseConfig_WithTags(t *testing.T) {
 	jsonContent := `{
 		"name": "Test API",
