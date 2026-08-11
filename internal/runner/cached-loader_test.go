@@ -8,9 +8,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/Veitangie/sinq/internal/luapi"
 	lua "github.com/yuin/gopher-lua"
 	"golang.org/x/sync/singleflight"
+	"veitangie.dev/sinq/internal/luapi"
 )
 
 func TestCachedLoader_Load(t *testing.T) {

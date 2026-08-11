@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Veitangie/sinq/internal/envs"
 	"github.com/spf13/pflag"
+	"veitangie.dev/sinq/internal/envs"
 )
 
 type Parser struct {

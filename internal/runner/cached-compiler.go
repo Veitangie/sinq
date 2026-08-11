@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/Veitangie/sinq/internal/scenario"
 	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
 	"golang.org/x/sync/singleflight"
+	"veitangie.dev/sinq/internal/scenario"
 )
 
 type extractPayloadFunc = func(scenario.Token) []byte

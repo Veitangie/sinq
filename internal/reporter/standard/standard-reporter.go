@@ -9,9 +9,9 @@ import (
 	"io"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/reporter"
-	"github.com/Veitangie/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/reporter"
+	"veitangie.dev/sinq/internal/runner"
 )
 
 const (

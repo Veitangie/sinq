@@ -17,9 +17,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/scenario"
-	"github.com/Veitangie/sinq/internal/treewalker"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/treewalker"
 )
 
 func mockParseRequest(r io.Reader, filename string) ([]*scenario.RequestBlueprint, error) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Veitangie/sinq/internal/timer"
 	"github.com/yuin/gopher-lua"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 func TestExtractBodyJson(t *testing.T) {

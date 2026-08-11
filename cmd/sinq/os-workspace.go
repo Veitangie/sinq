@@ -8,7 +8,7 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/Veitangie/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/runner"
 )
 
 const PERM_RWX fs.FileMode = 0777

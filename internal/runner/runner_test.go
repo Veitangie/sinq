@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/scenario"
-	"github.com/Veitangie/sinq/internal/timer"
 	"go.uber.org/goleak"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 type noopRoundTripper struct{}

@@ -16,7 +16,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
+	"veitangie.dev/sinq/internal/config"
 )
 
 func newTestCachedRequestProcessor(t *testing.T, transport http.RoundTripper) *cachedRequestProcessor {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/Veitangie/sinq/internal/scanner"
+	"veitangie.dev/sinq/internal/scanner"
 )
 
 type parser struct {

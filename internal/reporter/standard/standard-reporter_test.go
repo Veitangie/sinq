@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/runner"
-	"github.com/Veitangie/sinq/internal/ui"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/spinq"
 )
 
 type errorWriter struct{}
@@ -54,7 +54,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{ui.Red + "✗" + ui.Reset + " Scenario: Color Scenario", "   " + ui.Red + "✗" + ui.Reset + " ReqColor", "     " + ui.Red + "✗" + ui.Reset + " Error: boom", ui.Red + "✗" + ui.Reset + " FAILED in 100ms | Scenarios: 1" + ui.Red + "✗" + ui.Reset + " | 1 requests sent"},
+			wantOutput: []string{spinq.Red + "✗" + spinq.ResetColor + " Scenario: Color Scenario", "   " + spinq.Red + "✗" + spinq.ResetColor + " ReqColor", "     " + spinq.Red + "✗" + spinq.ResetColor + " Error: boom", spinq.Red + "✗" + spinq.ResetColor + " FAILED in 100ms | Scenarios: 1" + spinq.Red + "✗" + spinq.ResetColor + " | 1 requests sent"},
 		},
 		{
 			name: "Verbose Timings and Assertions",
@@ -102,7 +102,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{ui.Yellow + "○" + ui.Reset + " Scenario: Aborted Scenario", "   " + ui.Yellow + "○" + ui.Reset + " ReqA"},
+			wantOutput: []string{spinq.Yellow + "○" + spinq.ResetColor + " Scenario: Aborted Scenario", "   " + spinq.Yellow + "○" + spinq.ResetColor + " ReqA"},
 		},
 		{
 			name: "Skipped Status Formatting",
@@ -116,7 +116,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{ui.Gray + "-" + ui.Reset + " Scenario: Skipped Scenario", " " + ui.Gray + "-" + ui.Reset + " SKIPPED in 100ms | Scenarios: 1" + ui.Gray + "-" + ui.Reset + " | 0 requests sent"},
+			wantOutput: []string{spinq.Gray + "-" + spinq.ResetColor + " Scenario: Skipped Scenario", " " + spinq.Gray + "-" + spinq.ResetColor + " SKIPPED in 100ms | Scenarios: 1" + spinq.Gray + "-" + spinq.ResetColor + " | 0 requests sent"},
 		},
 		{
 			name: "Show NoSkip filters Skipped",

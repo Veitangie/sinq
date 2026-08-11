@@ -22,16 +22,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/reporter"
-	"github.com/Veitangie/sinq/internal/reporter/junit"
-	"github.com/Veitangie/sinq/internal/reporter/result"
-	"github.com/Veitangie/sinq/internal/reporter/standard"
-	"github.com/Veitangie/sinq/internal/runner"
-	"github.com/Veitangie/sinq/internal/scenario"
-	"github.com/Veitangie/sinq/internal/timer"
-	"github.com/Veitangie/sinq/internal/treewalker"
-	"github.com/Veitangie/sinq/internal/ui"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/reporter"
+	"veitangie.dev/sinq/internal/reporter/junit"
+	"veitangie.dev/sinq/internal/reporter/result"
+	"veitangie.dev/sinq/internal/reporter/standard"
+	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/timer"
+	"veitangie.dev/sinq/internal/treewalker"
+	"veitangie.dev/sinq/internal/ui"
+	"veitangie.dev/spinq"
 )
 
 const sinqLuaPath = "SINQ_LUA_PATH"
@@ -82,25 +83,42 @@ func populateConfigInRuntime(cfg *config.Config) error {
 	return nil
 }
 
-func setupSpinner(inTermErr, inTermOut, color bool, ctx context.Context) context.CancelFunc {
+func setupSpinner(inTermErr, inTermOut, color bool, ctx context.Context) (context.CancelFunc, func(*slog.Logger)) {
 	if inTermErr && !isInCi {
-		uiWriter, spinnerWriter := ui.MakePair(stdout, stderr, color)
-		ctxWithCancel, cancel := context.WithCancel(ctx)
-		spinnerWriter.StartSpinner(ctxWithCancel, timer.DefaultClock{})
-		stderr = spinnerWriter
-		if inTermOut {
-			stdout = uiWriter
+		pair, err := spinq.WrapPair(ctx, stdout, stderr, ui.GetFrame(color, timer.DefaultClock{}), spinq.Every(100*time.Millisecond))
+		if err != nil {
+			fmt.Fprintf(stderr, "Failed to set up spinner: %s", err.Error())
+			return func() {}, func(*slog.Logger) {}
 		}
-		return func() {
-			cancel()
-			err := spinnerWriter.Close()
-			if err != nil {
-				fmt.Fprintf(stderr, "Failed to stop spinner writer: %s\n", err.Error())
+		if err = pair.Spinny.Start(ctx); err != nil {
+			fmt.Fprintf(stderr, "Failed to start spinner: %s", err.Error())
+			return func() {}, func(*slog.Logger) {}
+		}
+		stderr = pair.Spinny
+		if inTermOut {
+			stdout = pair.Standard
+		}
+		return pair.Close, func(l *slog.Logger) {
+			if l == nil {
+				return
 			}
+			l.Debug("[sinq] Attached spinner logger")
+			for err := range pair.Err() {
+				l.Debug("[sinq] Spinner encountered error, restarting", "error", err.Error())
+				err = pair.Spinny.Start(ctx)
+				if err == spinq.ErrClosed {
+					l.Debug("[sinq] Got ErrClosed from spinner, detaching")
+					return
+				}
+				if err != nil {
+					l.Debug("[sinq] Failed to restart spinner", "error", err.Error())
+				}
+			}
+			l.Debug("[sinq] Spinner was closed, detaching")
 		}
 	}
 
-	return func() {}
+	return func() {}, func(*slog.Logger) {}
 }
 
 func parseFilePath(ctx context.Context, path string, walker *treewalker.Treewalker) ([]scenario.ScenarioBlueprint, OSRootWorkspace, error) {
@@ -193,8 +211,10 @@ func sinq(args []string) int {
 	inTermOut, wantColorOut := inTermWantColor(os.Stdout, cfg)
 	inTermErr, wantColorErr := inTermWantColor(os.Stderr, cfg)
 
+	attachSpinnerLogger := func(*slog.Logger) {}
 	if !cfg.NoSpinner {
-		stopSpinner := setupSpinner(inTermErr, inTermOut, wantColorErr, ctx)
+		var stopSpinner context.CancelFunc
+		stopSpinner, attachSpinnerLogger = setupSpinner(inTermErr, inTermOut, wantColorErr, ctx)
 		defer stopSpinner()
 	}
 	err = infoPrinter.SetWriter(stdout)
@@ -211,6 +231,7 @@ func sinq(args []string) int {
 
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	logger.Debug("[sinq] Initialization complete", "duration", mainTimer.Time())
+	go attachSpinnerLogger(logger)
 
 	walker, err := treewalker.NewTreewalker(cfg, *logger, scenario.ParseRequestBlueprints, scenario.ParseConfig)
 	if err != nil {

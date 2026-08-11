@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/runner"
 )
 
 type errorWriter struct{}

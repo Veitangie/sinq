@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/runner"
-	"github.com/Veitangie/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/scenario"
 )
 
 func TestInfoPrinter_PrintVersion(t *testing.T) {

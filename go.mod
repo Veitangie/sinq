@@ -1,4 +1,4 @@
-module github.com/Veitangie/sinq
+module veitangie.dev/sinq
 
 go 1.26.5
 
@@ -10,4 +10,12 @@ require golang.org/x/sync v0.22.0
 
 require github.com/golang-jwt/jwt/v5 v5.3.1
 
-require github.com/spf13/pflag v1.0.10
+require (
+	github.com/spf13/pflag v1.0.10
+	veitangie.dev/spinq v1.0.0-rc.3
+)
+
+require (
+	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
+	github.com/mattn/go-runewidth v0.0.27 // indirect
+)

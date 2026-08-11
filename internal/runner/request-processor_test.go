@@ -20,11 +20,11 @@ import (
 	"golang.org/x/sync/singleflight"
 	"hash/maphash"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/scenario"
-	"github.com/Veitangie/sinq/internal/timer"
 	lua "github.com/yuin/gopher-lua"
 	"net/http/cookiejar"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {

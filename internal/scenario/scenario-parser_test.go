@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/Veitangie/sinq/internal/config"
+	"veitangie.dev/sinq/internal/config"
 )
 
 type errorReader struct{}

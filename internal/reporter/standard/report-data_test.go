@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/runner"
 )
 
 type countdownErrorWriter struct {

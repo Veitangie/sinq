@@ -18,11 +18,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/envs"
-	"github.com/Veitangie/sinq/internal/natsort"
-	"github.com/Veitangie/sinq/internal/scenario"
-	"github.com/Veitangie/sinq/internal/timer"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/envs"
+	"veitangie.dev/sinq/internal/natsort"
+	"veitangie.dev/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 type TreewalkerCtxKey string

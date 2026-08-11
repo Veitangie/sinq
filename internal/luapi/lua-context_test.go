@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/timer"
 	lua "github.com/yuin/gopher-lua"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 func dummyFunc(L *lua.LState) int { return 0 }

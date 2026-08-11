@@ -37,7 +37,7 @@ For quick command-line installation, choose your preferred package manager:
 
 === "Go Install"
     ```bash
-    go install github.com/Veitangie/sinq/cmd/sinq@latest
+    go install veitangie.dev/sinq/cmd/sinq@latest
     ```
 
 ??? note "Setting up shell auto-completion"

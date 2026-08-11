@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/envs"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/envs"
 )
 
 type configHelper struct {

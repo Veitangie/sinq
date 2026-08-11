@@ -5,13 +5,13 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
+	"veitangie.dev/sinq/internal/config"
 )
 
 func withCapturedIO(t *testing.T, out, err io.Writer) {
@@ -531,23 +531,29 @@ func TestInTermWantColor_NilFile(t *testing.T) {
 	}
 }
 
-func TestSetupSpinner_CloseError(t *testing.T) {
-	oldIsInCi := isInCi
-	isInCi = false
-	t.Cleanup(func() { isInCi = oldIsInCi })
+func TestSinq_NoSpinner_DoesNotPanic(t *testing.T) {
+	if os.Getenv("SINQ_TEST_NO_SPINNER_SUBPROCESS") == "1" {
+		tmpDir, err := os.MkdirTemp("", "sinq_no_spinner_subprocess")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "setup error:", err)
+			os.Exit(2)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "01_test.sinq"), []byte("GET http://example.com"), 0644); err != nil {
+			fmt.Fprintln(os.Stderr, "setup error:", err)
+			os.Exit(2)
+		}
 
-	withCapturedIO(t, &bytes.Buffer{}, &bytes.Buffer{})
-	flaky := &flakyWriter{failAfter: 1, err: errors.New("write failed")}
-	stderr = flaky
+		withCapturedIO(t, &bytes.Buffer{}, &bytes.Buffer{})
+		sinq([]string{"--no-spinner", "--list", tmpDir})
+		time.Sleep(200 * time.Millisecond)
+		os.Exit(0)
+	}
 
-	stopSpinner := setupSpinner(true, false, false, context.Background())
-
-	errBuf := &bytes.Buffer{}
-	stderr = errBuf
-	stopSpinner()
-
-	if !strings.Contains(errBuf.String(), "Failed to stop spinner writer") {
-		t.Errorf("expected a spinner-close failure message, got %q", errBuf.String())
+	cmd := exec.Command(os.Args[0], "-test.run=TestSinq_NoSpinner_DoesNotPanic")
+	cmd.Env = append(os.Environ(), "SINQ_TEST_NO_SPINNER_SUBPROCESS=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("sinq() with --no-spinner crashed in a subprocess: %v\noutput:\n%s", err, out)
 	}
 }
 

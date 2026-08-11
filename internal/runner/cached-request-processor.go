@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
 	"golang.org/x/sync/singleflight"
+	"veitangie.dev/sinq/internal/config"
 )
 
 type intermediate struct {

@@ -222,7 +222,7 @@ curl -sL https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/instal
 If you have a Go environment set up, you can compile and install directly from the module.
 
 ```bash
-go install github.com/Veitangie/sinq/cmd/sinq@latest
+go install veitangie.dev/sinq/cmd/sinq@latest
 ```
 > *Note: Ensure your `$(go env GOPATH)/bin` directory is in your system `$PATH`.*
 </details>

@@ -6,8 +6,8 @@ package luapi
 import (
 	"testing"
 
-	"github.com/Veitangie/sinq/internal/timer"
 	lua "github.com/yuin/gopher-lua"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 func TestJSONParser_Parse(t *testing.T) {

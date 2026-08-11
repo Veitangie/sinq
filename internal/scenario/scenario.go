@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/scanner"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/scanner"
 )
 
 type ScenarioBlueprint struct {

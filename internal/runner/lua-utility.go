@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/luapi"
-	"github.com/Veitangie/sinq/internal/scenario"
-	"github.com/Veitangie/sinq/internal/timer"
 	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
+	"veitangie.dev/sinq/internal/luapi"
+	"veitangie.dev/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 func (w *worker) setRequestIdx(ls *lua.LState) int {

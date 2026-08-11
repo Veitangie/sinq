@@ -15,9 +15,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/timer"
 	"golang.org/x/sync/singleflight"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 type mockWorkspace struct {

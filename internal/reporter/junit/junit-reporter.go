@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/reporter"
-	"github.com/Veitangie/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/reporter"
+	"veitangie.dev/sinq/internal/runner"
 )
 
 type JUnitReport struct {

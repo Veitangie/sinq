@@ -13,8 +13,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Veitangie/sinq/internal/envs"
-	"github.com/Veitangie/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/envs"
+	"veitangie.dev/sinq/internal/scenario"
 )
 
 type worker struct {

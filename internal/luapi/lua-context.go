@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/timer"
 	lua "github.com/yuin/gopher-lua"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 type LuaContext struct {

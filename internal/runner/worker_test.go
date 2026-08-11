@@ -13,9 +13,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/luapi"
-	"github.com/Veitangie/sinq/internal/scenario"
-	"github.com/Veitangie/sinq/internal/timer"
+	"veitangie.dev/sinq/internal/luapi"
+	"veitangie.dev/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 func TestWorker_ExecuteAndExtractValue_CacheTrap(t *testing.T) {

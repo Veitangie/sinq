@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/scenario"
-	"github.com/Veitangie/sinq/internal/timer"
+	"veitangie.dev/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 type RequestProcessor struct {

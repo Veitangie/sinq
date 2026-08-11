@@ -10,10 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/runner"
-	"github.com/Veitangie/sinq/internal/ui"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/spinq"
 )
+
+const LightGray = "\033[38;5;244m"
 
 type reportData struct {
 	cfg                    config.ReporterConfig
@@ -53,14 +55,14 @@ func newReportData(cfg config.ReporterConfig, writer io.Writer, size int) *repor
 	}
 
 	if cfg.Color != config.Never {
-		result.markSuccess = ui.Green + result.markSuccess + ui.Reset
-		result.markFail = ui.Red + result.markFail + ui.Reset
-		result.markAborted = ui.Yellow + result.markAborted + ui.Reset
-		result.markSkipped = ui.Gray + result.markSkipped + ui.Reset
-		result.cyan = ui.Cyan
-		result.magenta = ui.Magenta
-		result.lightGray = ui.LightGray
-		result.reset = ui.Reset
+		result.markSuccess = spinq.Green + result.markSuccess + spinq.ResetColor
+		result.markFail = spinq.Red + result.markFail + spinq.ResetColor
+		result.markAborted = spinq.Yellow + result.markAborted + spinq.ResetColor
+		result.markSkipped = spinq.Gray + result.markSkipped + spinq.ResetColor
+		result.cyan = spinq.Cyan
+		result.magenta = spinq.Magenta
+		result.lightGray = LightGray
+		result.reset = spinq.ResetColor
 	}
 	result.prefixedScenarioWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "   %s┃%s ", result.magenta, result.reset), underlying: writer}
 	result.prefixedRequestWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "     %s┃%s ", result.cyan, result.reset), underlying: writer}

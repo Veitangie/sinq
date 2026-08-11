@@ -10,9 +10,9 @@ import (
 	"math/rand/v2"
 	"strings"
 
-	"github.com/Veitangie/sinq/internal/config"
-	"github.com/Veitangie/sinq/internal/runner"
-	"github.com/Veitangie/sinq/internal/ui"
+	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/spinq"
 )
 
 type InfoPrinter struct {
@@ -69,8 +69,8 @@ func (p InfoPrinter) PrintScenarios(allScenarios []runner.ScenarioBundle, cfg co
 	cyan := ""
 	reset := ""
 	if wantColor {
-		cyan = ui.Cyan
-		reset = ui.Reset
+		cyan = spinq.Cyan
+		reset = spinq.ResetColor
 	}
 	skipHighlight := cyan + "┃" + reset
 	middleHighlight := cyan + "┣━" + reset

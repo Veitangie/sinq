@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/scenario"
 	lua "github.com/yuin/gopher-lua"
+	"veitangie.dev/sinq/internal/scenario"
 )
 
 func setupTestCompiler() cachedCompiler {

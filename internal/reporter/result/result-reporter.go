@@ -6,7 +6,7 @@ package result
 import (
 	"time"
 
-	"github.com/Veitangie/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/runner"
 )
 
 type ResultReporter struct {

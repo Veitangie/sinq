@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/timer"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 func TestResultStatus_String(t *testing.T) {

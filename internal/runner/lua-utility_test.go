@@ -16,9 +16,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/Veitangie/sinq/internal/luapi"
-	"github.com/Veitangie/sinq/internal/scenario"
 	lua "github.com/yuin/gopher-lua"
+	"veitangie.dev/sinq/internal/luapi"
+	"veitangie.dev/sinq/internal/scenario"
 )
 
 func TestWorker_ToLuaValue(t *testing.T) {
