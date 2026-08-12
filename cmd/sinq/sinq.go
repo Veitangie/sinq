@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -106,7 +107,7 @@ func setupSpinner(inTermErr, inTermOut, color bool, ctx context.Context) (contex
 			for err := range pair.Err() {
 				l.Debug("[sinq] Spinner encountered error, restarting", "error", err.Error())
 				err = pair.Spinny.Start(ctx)
-				if err == spinq.ErrClosed {
+				if errors.Is(err, spinq.ErrClosed) {
 					l.Debug("[sinq] Got ErrClosed from spinner, detaching")
 					return
 				}

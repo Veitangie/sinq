@@ -12,10 +12,10 @@ require github.com/golang-jwt/jwt/v5 v5.3.1
 
 require (
 	github.com/spf13/pflag v1.0.10
-	veitangie.dev/spinq v1.0.0-rc.3
+	veitangie.dev/spinq v1.0.0-rc.5
 )
 
 require (
-	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/mattn/go-runewidth v0.0.27 // indirect
 )
