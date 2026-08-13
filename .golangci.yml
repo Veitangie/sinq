@@ -65,3 +65,9 @@ linters:
           - gocognit
           - gocyclo
           - exhaustive
+
+      - path: cmd/sinq/sinq\.go
+        linters:
+          - gocognit
+          - gocyclo
+        text: "of func `sinq` is high"

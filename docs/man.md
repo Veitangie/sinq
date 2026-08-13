@@ -78,6 +78,9 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **-w**, **--workers** *int*
 : Number of concurrent workers (default 10).
 
+**-c**, **--count** *int*
+: Number of launches for every scenario.
+
 **-s**, **--secret** *string*
 : Key=value pair overrides for scenario secrets.
 
@@ -93,7 +96,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **-f**, **--format** *string*
 : Output format: std or junit (default "std").
 
-**-c**, **--color** *string*
+**-C**, **--color** *string*
 : Terminal colors: always, never, auto (default "auto").
 
 **-S**, **--show** *string*

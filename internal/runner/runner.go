@@ -31,6 +31,7 @@ type Runner struct {
 type ScenarioBundle struct {
 	scenario.ScenarioBlueprint
 	Workspace Workspace
+	Count     uint
 }
 
 func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle) <-chan taskBundle {
@@ -50,17 +51,22 @@ func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle
 					envs.DeepMerge(totalEnv, sc.Config.EnvMatrix[idx][label])
 				}
 
+				shouldInclude := sc.Count > 0
+
 				bundle := taskBundle{
 					sc.ScenarioBlueprint,
 					sc.Workspace,
 					totalEnv,
 					labels,
+					shouldInclude,
 				}
 
-				select {
-				case <-ctx.Done():
-					break Loop
-				case taskCh <- bundle:
+				for range max(sc.Count, 1) {
+					select {
+					case <-ctx.Done():
+						break Loop
+					case taskCh <- bundle:
+					}
 				}
 			}
 		}

@@ -28,8 +28,9 @@ _sinq_completions() {
         -o --out
         -L --log-level
         -f --format
-        -c --color
+        -C --color
         -S --show
+        -c --count
         -t --tag
         -n --name
         --no-spinner
@@ -53,7 +54,7 @@ _sinq_completions() {
             COMPREPLY=( $(compgen -W "std junit" -- "$cur") )
             return 0
             ;;
-        -c|--color)
+        -C|--color)
             COMPREPLY=( $(compgen -W "always never auto" -- "$cur") )
             return 0
             ;;
@@ -65,7 +66,7 @@ _sinq_completions() {
             COMPREPLY=( $(compgen -f -- "$cur") )
             return 0
             ;;
-        -w|--workers|-s|--secret|-e|--env|-t|--tag|-n|--name|--no-tag|--no-name|--plugins|--max-cache-size|--cache-timeout)
+        -w|--workers|-c|--count|-s|--secret|-e|--env|-t|--tag|-n|--name|--no-tag|--no-name|--plugins|--max-cache-size|--cache-timeout)
             return 0
             ;;
     esac

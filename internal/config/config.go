@@ -30,6 +30,7 @@ type Config struct {
 	Out          string
 	MaxCacheSize DataSize
 	CacheTimeout time.Duration
+	Count        uint
 	LuaPaths     []string
 	Paths        []string
 	Treewalker   TreewalkerConfig
@@ -205,6 +206,7 @@ func SaneDefaults() Config {
 		Out:           "",
 		MaxCacheSize:  DataSize{ByteAmount: 5 << 20, Unit: MiByte},
 		CacheTimeout:  10 * time.Second,
+		Count:         1,
 		LuaPaths:      []string{},
 		Paths:         []string{},
 		Treewalker: TreewalkerConfig{

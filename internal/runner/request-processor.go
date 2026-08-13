@@ -93,7 +93,11 @@ func (p *RequestProcessor) materialize() error {
 	}
 
 	if p.w.env.cfg.DumpOnFailure {
-		p.result.Request = string(materialized)
+		if len(materialized) != 0 && materialized[len(materialized)-1] != '\n' {
+			p.result.Request = string(append(materialized, '\n'))
+		} else {
+			p.result.Request = string(materialized)
+		}
 	}
 
 	return p.handleError(err)

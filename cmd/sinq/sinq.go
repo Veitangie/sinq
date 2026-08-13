@@ -247,6 +247,7 @@ func sinq(args []string) int {
 		return 1
 	}
 
+	scenarioCount := 0
 	allScenarios := []runner.ScenarioBundle{}
 	for _, path := range cfg.Paths {
 		res, fs, err := parseFilePath(ctx, path, walker)
@@ -268,9 +269,17 @@ func sinq(args []string) int {
 			fmt.Fprint(stderr, "Received interrupt signal, shutting down\n")
 			return 1
 		}
+
 		allScenarios = slices.Grow(allScenarios, len(res))
 		for _, scenarioBlueprint := range res {
-			allScenarios = append(allScenarios, runner.ScenarioBundle{ScenarioBlueprint: scenarioBlueprint, Workspace: fs})
+			count := cfg.Count
+			variantCount := scenarioBlueprint.CountVariants()
+			if !cfg.ShouldInclude(scenarioBlueprint.Config.Tags, scenarioBlueprint.Config.Name) {
+				count = 0
+				scenarioCount += variantCount
+			}
+			scenarioCount += int(count) * variantCount
+			allScenarios = append(allScenarios, runner.ScenarioBundle{ScenarioBlueprint: scenarioBlueprint, Workspace: fs, Count: count})
 		}
 	}
 	logger.Debug("[sinq] Discovery complete", "duration", discoveryTimer.Time())
@@ -284,7 +293,6 @@ func sinq(args []string) int {
 		return 0
 	}
 
-	scenarioCount := countTotalScenarios(allScenarios)
 	if scenarioCount == 0 {
 		fmt.Fprintf(stderr, "Error: No scenarios found\n")
 		return 1
@@ -420,14 +428,6 @@ func createReporter(cfg config.Config, out io.Writer, wantColor bool) reporter.R
 		}
 		return standard.NewReporter(reporterCfg, out)
 	}
-}
-
-func countTotalScenarios(scenarios []runner.ScenarioBundle) int {
-	res := 0
-	for _, scBp := range scenarios {
-		res += scBp.CountVariants()
-	}
-	return res
 }
 
 //go:embed completions/sinq.ps1

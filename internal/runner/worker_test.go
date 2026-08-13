@@ -151,6 +151,7 @@ func TestWorker_ProcessScenario_EmptyRequestFailsCleanly(t *testing.T) {
 		workspace: &mockWorkspace{FS: fstest.MapFS{}},
 		env:       map[string]any{},
 		labels:    []string{},
+		run:       true,
 	}
 
 	w.processScenario(context.Background(), bundle)
@@ -251,6 +252,7 @@ func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
 		workspace: &mockWorkspace{},
 		env:       map[string]any{"base_url": "http://localhost"},
 		labels:    []string{},
+		run:       true,
 	}
 
 	resCh := make(chan ScenarioResult, 1)

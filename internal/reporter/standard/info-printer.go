@@ -151,12 +151,13 @@ Flags:
   -u, --unrestricted      Load lua "os" and "io" modules for scripts
   -p, --print             Capture lua output and show it in the report
   -w, --workers int       Number of concurrent workers (default 10)
+  -c, --count int         Number of launches for every scenario
   -s, --secret string     Key=value pair overrides for scenario secrets
   -e, --env string        Key=value pair overrides for all scenario environments
   -o, --out path          Path to write the output file (prints to stdout if omitted)
   -L, --log-level string  Log level to use: debug, info, warn or error (default "warn")
   -f, --format string     Output format: std or junit (default "std")
-  -c, --color string      Terminal colors: always, never, auto (default "auto")
+  -C, --color string      Terminal colors: always, never, auto (default "auto")
   -S, --show string       Which results to show in the output: all, no-skip, failed, none (default "no-skip")
   -t, --tag string        Execute only scenarios that have at least one of passed tags
   -n, --name string       Execute only scenarios which names match at least one of passed regular expressions

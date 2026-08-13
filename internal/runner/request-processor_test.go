@@ -116,6 +116,34 @@ func TestRequestProcessor_HandleError(t *testing.T) {
 	}
 }
 
+func TestRequestProcessor_MaterializeDumpOnFailure_AppendsTrailingNewline(t *testing.T) {
+	w := setupTestWorker(t, nil)
+	w.lc.SetupRequestEnvironment(0)
+	w.env.cfg.DumpOnFailure = true
+
+	rawSinq := "GET http://localhost/ HTTP/1.1"
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "no_trailing_newline.sinq")
+	if err != nil {
+		t.Fatalf("Failed to parse blueprint: %v", err)
+	}
+
+	processor := &RequestProcessor{
+		ctx:          context.Background(),
+		w:            w,
+		requestBp:    reqBp[0],
+		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
+		status:       new(ResultStatus),
+		result:       &RequestResult{},
+		requestTimer: timer.NewTimer(timer.DefaultClock{}),
+	}
+
+	_ = processor.materialize()
+
+	if !strings.HasSuffix(processor.result.Request, "\n") {
+		t.Errorf("BUG: expected dumped request without a trailing newline to get one appended, got %q", processor.result.Request)
+	}
+}
+
 func TestBug_ZeroByteUpload(t *testing.T) {
 	var receivedBody []byte
 	var receivedTransferEncoding []string

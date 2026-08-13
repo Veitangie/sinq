@@ -46,7 +46,7 @@ func TestRunner_GoroutineLeakage(t *testing.T) {
 
 	scenarios := make([]ScenarioBundle, 1000)
 	for i := range scenarios {
-		scenarios[i] = ScenarioBundle{scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{Name: "LeakTest"}}, nil}
+		scenarios[i] = ScenarioBundle{scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{Name: "LeakTest"}}, nil, 1}
 	}
 
 	totalTimer := timer.NewTimer(timer.DefaultClock{})

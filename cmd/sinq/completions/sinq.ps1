@@ -14,7 +14,7 @@ Register-ArgumentCompleter -CommandName sinq -Native -ScriptBlock {
         '--log-level' = @('debug', 'info', 'warn', 'error')
         '-f'          = @('std', 'junit')
         '--format'    = @('std', 'junit')
-        '-c'          = @('always', 'never', 'auto')
+        '-C'          = @('always', 'never', 'auto')
         '--color'     = @('always', 'never', 'auto')
         '-S'          = @('all', 'no-skip', 'failed', 'none')
         '--show'      = @('all', 'no-skip', 'failed', 'none')
@@ -36,7 +36,7 @@ Register-ArgumentCompleter -CommandName sinq -Native -ScriptBlock {
         return
     }
 
-    $valueFlags = @('-w', '--workers', '-s', '--secret', '-e', '--env', '-t', '--tag',
+    $valueFlags = @('-w', '--workers', '-c', '--count', '-s', '--secret', '-e', '--env', '-t', '--tag',
                     '-n', '--name', '--no-tag', '--no-name', '--plugins',
                     '--max-cache-size', '--cache-timeout')
     if ($valueFlags -contains $prev) {
@@ -71,10 +71,12 @@ Register-ArgumentCompleter -CommandName sinq -Native -ScriptBlock {
             @{ Name = '--log-level';       Tip = 'Log level to use: debug, info, warn or error' },
             @{ Name = '-f';                Tip = 'Output format: std or junit' },
             @{ Name = '--format';          Tip = 'Output format: std or junit' },
-            @{ Name = '-c';                Tip = 'Terminal colors: always, never, auto' },
+            @{ Name = '-C';                Tip = 'Terminal colors: always, never, auto' },
             @{ Name = '--color';           Tip = 'Terminal colors: always, never, auto' },
             @{ Name = '-S';                Tip = 'Which results to show in the output: all, no-skip, failed, none' },
             @{ Name = '--show';            Tip = 'Which results to show in the output: all, no-skip, failed, none' },
+            @{ Name = '-c';                Tip = 'Number of launches for every scenario' },
+            @{ Name = '--count';           Tip = 'Number of launches for every scenario' },
             @{ Name = '-t';                Tip = 'Execute only scenarios that have at least one of passed tags' },
             @{ Name = '--tag';             Tip = 'Execute only scenarios that have at least one of passed tags' },
             @{ Name = '-n';                Tip = 'Execute only scenarios which names match at least one of passed regular expressions' },

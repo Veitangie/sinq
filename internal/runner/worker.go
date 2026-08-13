@@ -35,6 +35,7 @@ type taskBundle struct {
 	workspace Workspace
 	env       map[string]any
 	labels    []string
+	run       bool
 }
 
 func (t taskBundle) getFullName() string {
@@ -229,7 +230,7 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 		Status:         Unset,
 	}
 
-	if !w.env.cfg.ShouldInclude(bundle.Config.Tags, bundle.Config.Name) {
+	if !bundle.run {
 		w.reportResult(ctx, scenarioTimer, result)
 		return
 	}

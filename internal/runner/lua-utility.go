@@ -331,6 +331,9 @@ func (w *worker) requestCompleted(response intermediate) (string, error) {
 		}
 		sb.WriteByte('\n')
 		sb.Write(data)
+		if len(data) > 0 && data[len(data)-1] != '\n' {
+			sb.WriteByte('\n')
+		}
 		result = sb.String()
 	}
 

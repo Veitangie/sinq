@@ -60,7 +60,7 @@ func TestParser_Parse(t *testing.T) {
 		},
 		{
 			name:  "Color Options",
-			flags: []string{"-c", "always"},
+			flags: []string{"-C", "always"},
 			wantConfig: func() Config {
 				c := SaneDefaults()
 				c.Reporter.Color = Always
@@ -111,7 +111,7 @@ func TestParser_Parse(t *testing.T) {
 			wantErr:    false},
 		{
 			name:       "Color Never",
-			flags:      []string{"-c", "never"},
+			flags:      []string{"-C", "never"},
 			wantConfig: func() Config { c := SaneDefaults(); c.Reporter.Color = Never; return c }(),
 			wantErr:    false},
 		{
@@ -132,7 +132,7 @@ func TestParser_Parse(t *testing.T) {
 		},
 		{
 			name:       "Invalid Color",
-			flags:      []string{"-c", "magenta"},
+			flags:      []string{"-C", "magenta"},
 			wantConfig: SaneDefaults(),
 			wantErr:    true,
 		},
@@ -474,7 +474,7 @@ func TestParser_Parse(t *testing.T) {
 			wantErr:    true},
 		{
 			name:       "Color Missing Value",
-			flags:      []string{"-c"},
+			flags:      []string{"-C"},
 			wantConfig: SaneDefaults(),
 			wantErr:    true},
 		{
