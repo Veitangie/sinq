@@ -223,6 +223,34 @@ func TestRequestParser_Parse(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Single-Word Request Line Defaults to GET",
+			input: "https://api.com/onlyurl\n" +
+				"\n",
+			validate: func(t *testing.T, r http.Request) {
+				if r.Method != "GET" {
+					t.Errorf("expected the default GET method for a single-word request line, got %s", r.Method)
+				}
+				if r.URL.Host != "api.com" {
+					t.Errorf("expected host api.com, got %s", r.URL.Host)
+				}
+			},
+		},
+		{
+			name: "Minimal Single-Byte Body",
+			input: "POST https://api.com/single HTTP/1.1\n" +
+				"\n" +
+				"X",
+			validate: func(t *testing.T, r http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if string(body) != "X" {
+					t.Errorf("expected a single-byte body 'X', got %q", body)
+				}
+				if r.ContentLength != 1 {
+					t.Errorf("expected ContentLength 1, got %d", r.ContentLength)
+				}
+			},
+		},
+		{
 			name: "Edge Case: EOF after Header (No newline)",
 			input: "GET https://api.com/eof HTTP/1.1\n" +
 				"X-Last: value",

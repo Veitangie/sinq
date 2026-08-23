@@ -114,6 +114,15 @@ func TestByteScanner_Previous(t *testing.T) {
 	}
 }
 
+func TestByteScanner_Previous_BoundaryPastSourceLength(t *testing.T) {
+	s := NewByteScanner([]byte("ab"))
+	s.Current = 3
+
+	if p := s.Previous(); p != 0 {
+		t.Errorf("expected 0 when Current-1 is out of range (>= len), got %q", p)
+	}
+}
+
 func TestByteScanner_Slice(t *testing.T) {
 	s := NewByteScanner([]byte("hello world"))
 

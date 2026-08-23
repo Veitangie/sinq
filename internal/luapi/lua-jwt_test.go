@@ -130,6 +130,52 @@ func TestVerifyJWT(t *testing.T) {
 	}
 }
 
+func TestVerifyJWT_AlgorithmHint(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	key := "your-256-bit-secret"
+
+	t.Run("Matching algorithm hint succeeds", func(t *testing.T) {
+		L.Push(L.NewFunction(VerifyJWT))
+		L.Push(lua.LString(testJWT))
+		L.Push(lua.LString(key))
+		L.Push(lua.LString("HS256"))
+
+		if err := L.PCall(3, 2, nil); err != nil {
+			t.Fatalf("unexpected lua error: %v", err)
+		}
+		errRes := L.Get(-1)
+		L.Pop(2)
+		if errRes != lua.LNil {
+			t.Fatalf("expected nil error for matching algorithm hint, got %v", errRes)
+		}
+	})
+
+	t.Run("Mismatched algorithm hint fails", func(t *testing.T) {
+		L.Push(L.NewFunction(VerifyJWT))
+		L.Push(lua.LString(testJWT))
+		L.Push(lua.LString(key))
+		L.Push(lua.LString("RS256"))
+
+		if err := L.PCall(3, 2, nil); err != nil {
+			t.Fatalf("unexpected lua error: %v", err)
+		}
+		errRes := L.Get(-1)
+		valRes := L.Get(-2)
+		L.Pop(2)
+		if errRes == lua.LNil {
+			t.Fatalf("expected error for mismatched algorithm hint, got nil")
+		}
+		if !strings.Contains(errRes.String(), "Expected method to be") {
+			t.Errorf("unexpected error message: %v", errRes)
+		}
+		if valRes != lua.LNil {
+			t.Errorf("expected nil value on error, got %v", valRes)
+		}
+	})
+}
+
 func TestVerifyJWT_Failure(t *testing.T) {
 	L := lua.NewState()
 	defer L.Close()

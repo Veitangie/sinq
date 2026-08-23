@@ -338,7 +338,7 @@ The `sinq.json` table provides explicit methods to parse and serialize JSON data
 The `sinq.fake` table exposes deterministic fake data generators. All generators respect the current seed.
 
 #### Primitives & Core Data
-* **`sinq.fake.uuid()`**: Returns a random UUIDv4 string.
+* **`sinq.fake.uuid()`** (alias: **`sinq.fake.uuidv4()`**): Returns a random UUIDv4 string.
 * **`sinq.fake.int(min?, max?)`**: Returns a random integer.
 * **`sinq.fake.float(min?, max?)`**: Returns a random float.
 * **`sinq.fake.shakespeare()`**: Returns a random boolean (`true` or `false`).

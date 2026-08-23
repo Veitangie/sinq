@@ -196,3 +196,9 @@ func BenchmarkSort1(b *testing.B) {
 		Sort(testList)
 	}
 }
+
+func TestCompare_EmptySecondString(t *testing.T) {
+	if got := Compare("a", ""); got != false {
+		t.Errorf(`Compare("a", "") = %v, want false`, got)
+	}
+}

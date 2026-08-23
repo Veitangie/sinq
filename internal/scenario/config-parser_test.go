@@ -119,6 +119,71 @@ func TestParseConfig_EnvDeepMergeAcrossFiles(t *testing.T) {
 	}
 }
 
+func TestParseConfig_TimeoutBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		json     string
+		wantErrs []string
+	}{
+		{
+			name:     "Zero request timeout is rejected",
+			json:     `{"req_timeout": "0s"}`,
+			wantErrs: []string{"Non positive request timeout"},
+		},
+		{
+			name:     "Zero script timeout is rejected",
+			json:     `{"script_timeout": "0s"}`,
+			wantErrs: []string{"Non positive script timeout"},
+		},
+		{
+			name:     "Zero scenario timeout is rejected",
+			json:     `{"timeout": "0s"}`,
+			wantErrs: []string{"Non positive scenario timeout"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := SaneDefaultConfig()
+			err := ParseConfig(&cfg, strings.NewReader(tt.json))
+			if err == nil {
+				t.Fatalf("Expected an error for %q, got nil", tt.json)
+			}
+			for _, want := range tt.wantErrs {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("Expected error to contain %q, got: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestParseConfig_RetriesAndRedirectsZeroIsValid(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+	}{
+		{
+			name: "Zero max_retries is not an error",
+			json: `{"max_retries": 0}`,
+		},
+		{
+			name: "Zero max_redirects is not an error",
+			json: `{"max_redirects": 0}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := SaneDefaultConfig()
+			err := ParseConfig(&cfg, strings.NewReader(tt.json))
+			if err != nil {
+				t.Errorf("Expected zero to be a valid (non-negative) value, got error: %v", err)
+			}
+		})
+	}
+}
+
 func TestParseConfig_WithTags(t *testing.T) {
 	jsonContent := `{
 		"name": "Test API",

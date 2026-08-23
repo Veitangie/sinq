@@ -6,6 +6,7 @@ package config
 import (
 	"regexp"
 	"testing"
+	"time"
 )
 
 func TestConfig_ShouldInclude(t *testing.T) {
@@ -123,6 +124,51 @@ func TestDataSizeString(t *testing.T) {
 	ds := DataSize{ByteAmount: 1024, Unit: KiByte}
 	if ds.String() != "1.000000KiB" {
 		t.Errorf("expected 1.000000KiB, got %s", ds.String())
+	}
+}
+
+func TestParseSize_PureDigitsDefaultsToBytes(t *testing.T) {
+	got, err := ParseSize("100")
+	if err != nil {
+		t.Fatalf("ParseSize(%q) unexpected error: %v", "100", err)
+	}
+	if got.Unit != Byte || got.ByteAmount != 100 {
+		t.Errorf("ParseSize(%q) = %+v, want {ByteAmount:100 Unit:Byte}", "100", got)
+	}
+}
+
+func TestParseSize_NineIsTreatedAsDigit(t *testing.T) {
+	got, err := ParseSize("9")
+	if err != nil {
+		t.Fatalf("ParseSize(%q) unexpected error: %v", "9", err)
+	}
+	if got.ByteAmount != 9 {
+		t.Errorf("ParseSize(%q) = %+v, want ByteAmount 9", "9", got)
+	}
+}
+
+func TestParseSize_ZeroIsAccepted(t *testing.T) {
+	got, err := ParseSize("0")
+	if err != nil {
+		t.Fatalf("ParseSize(%q) unexpected error: %v", "0", err)
+	}
+	if got.ByteAmount != 0 {
+		t.Errorf("ParseSize(%q) = %+v, want ByteAmount 0", "0", got)
+	}
+}
+
+func TestSaneDefaults_MaxCacheSizeBytes(t *testing.T) {
+	cfg := SaneDefaults()
+	const want = 5 * 1024 * 1024
+	if cfg.MaxCacheSize.ByteAmount != want {
+		t.Errorf("SaneDefaults().MaxCacheSize.ByteAmount = %d, want %d", cfg.MaxCacheSize.ByteAmount, want)
+	}
+}
+
+func TestSaneDefaults_CacheTimeout(t *testing.T) {
+	cfg := SaneDefaults()
+	if cfg.CacheTimeout != 10*time.Second {
+		t.Errorf("SaneDefaults().CacheTimeout = %v, want %v", cfg.CacheTimeout, 10*time.Second)
 	}
 }
 

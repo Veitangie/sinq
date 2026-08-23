@@ -15,7 +15,7 @@ When `sinq` runs a child folder, it automatically "inherits" all the test script
 
 You don't just share test scripts; you can also share configuration variables across your scenarios.
 
-You can place a `config.scenario` JSON file in any directory to set environment variables or execution limits. When a child scenario runs, it inherits configurations from its parent directories.
+You can place a JSON file ending in `.scenario` (e.g. `config.scenario`) in any directory to set environment variables or execution limits — the filename itself doesn't matter, only the `.scenario` extension. When a child scenario runs, it inherits configurations from its parent directories.
 
 If a child folder defines the same variable as a parent, the child's value overwrites the parent's. This is called **deep merging**.
 

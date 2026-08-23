@@ -5,6 +5,7 @@ package standard
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -12,6 +13,20 @@ import (
 	"veitangie.dev/sinq/internal/runner"
 	"veitangie.dev/sinq/internal/scenario"
 )
+
+type nthErrorWriter struct {
+	failOn int
+	n      int
+	buf    bytes.Buffer
+}
+
+func (w *nthErrorWriter) Write(p []byte) (int, error) {
+	w.n++
+	if w.n == w.failOn {
+		return 0, errors.New("simulated error on write")
+	}
+	return w.buf.Write(p)
+}
 
 func TestInfoPrinter_PrintVersion(t *testing.T) {
 	buf := &bytes.Buffer{}
@@ -209,5 +224,137 @@ func TestInfoPrinter_SetWriter_NilWriterIsRejectedAndLeavesPrinterUsable(t *test
 	}
 	if !strings.Contains(original.String(), "sinq v1.2.3 - ") {
 		t.Errorf("Expected the original writer to still work after a rejected SetWriter(nil), got: %q", original.String())
+	}
+}
+
+func TestInfoPrinter_PrintVersion_FirstWriteErrorPropagates(t *testing.T) {
+	w := &nthErrorWriter{failOn: 1}
+	printer, err := NewInfoPrinter(w, "v1.0.0")
+	if err != nil {
+		t.Fatalf("Failed to create InfoPrinter: %v", err)
+	}
+
+	if err := printer.PrintVersion(); err == nil {
+		t.Fatal("expected PrintVersion to propagate an error from the first write")
+	}
+	if w.n != 1 {
+		t.Errorf("expected PrintVersion to stop after the first write, but the writer was called %d times", w.n)
+	}
+}
+
+func TestInfoPrinter_PrintVersion_SecondWriteErrorPropagates(t *testing.T) {
+	w := &nthErrorWriter{failOn: 2}
+	printer, err := NewInfoPrinter(w, "v1.0.0")
+	if err != nil {
+		t.Fatalf("Failed to create InfoPrinter: %v", err)
+	}
+
+	if err := printer.PrintVersion(); err == nil {
+		t.Fatal("expected PrintVersion to propagate an error from the second write")
+	}
+}
+
+func TestInfoPrinter_PrintHelp_ThirdWriteErrorPropagates(t *testing.T) {
+	w := &nthErrorWriter{failOn: 3}
+	printer, err := NewInfoPrinter(w, "v1.0.0")
+	if err != nil {
+		t.Fatalf("Failed to create InfoPrinter: %v", err)
+	}
+
+	if err := printer.PrintHelp(); err == nil {
+		t.Fatal("expected PrintHelp to propagate an error from the third write")
+	}
+}
+
+func TestInfoPrinter_PrintScenarios_NoSkipFiltersExcluded(t *testing.T) {
+	buf := &bytes.Buffer{}
+	printer, err := NewInfoPrinter(buf, "v1.0.0")
+	if err != nil {
+		t.Fatalf("Failed to create InfoPrinter: %v", err)
+	}
+
+	scenarios := []runner.ScenarioBundle{
+		{ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config:   &scenario.ScenarioConfig{Name: "ExcludedScenario", Tags: map[string]struct{}{"other": {}}},
+			Requests: []*scenario.RequestBlueprint{{Filename: "r.txt"}},
+		}},
+	}
+	cfg := config.Config{
+		Reporter:    config.ReporterConfig{Show: config.NoSkip},
+		TagsInclude: []string{"needed"},
+	}
+
+	if err := printer.PrintScenarios(scenarios, cfg, false); err != nil {
+		t.Fatalf("PrintScenarios failed: %v", err)
+	}
+
+	if strings.Contains(buf.String(), "ExcludedScenario") {
+		t.Errorf("expected ExcludedScenario to be filtered out under Show:NoSkip, got:\n%s", buf.String())
+	}
+}
+
+func TestInfoPrinter_PrintScenarios_NonNoSkipIgnoresFiltering(t *testing.T) {
+	buf := &bytes.Buffer{}
+	printer, err := NewInfoPrinter(buf, "v1.0.0")
+	if err != nil {
+		t.Fatalf("Failed to create InfoPrinter: %v", err)
+	}
+
+	scenarios := []runner.ScenarioBundle{
+		{ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config:   &scenario.ScenarioConfig{Name: "IncludedScenario", Tags: map[string]struct{}{"other": {}}},
+			Requests: []*scenario.RequestBlueprint{{Filename: "r.txt"}},
+		}},
+	}
+	cfg := config.Config{
+		Reporter:    config.ReporterConfig{Show: config.All},
+		TagsInclude: []string{"needed"},
+	}
+
+	if err := printer.PrintScenarios(scenarios, cfg, false); err != nil {
+		t.Fatalf("PrintScenarios failed: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "IncludedScenario") {
+		t.Errorf("expected IncludedScenario to be listed when Show is not NoSkip, got:\n%s", buf.String())
+	}
+}
+
+func TestInfoPrinter_PrintScenarios_MatrixBoundaryAndHighlights(t *testing.T) {
+	buf := &bytes.Buffer{}
+	printer, err := NewInfoPrinter(buf, "v1.0.0")
+	if err != nil {
+		t.Fatalf("Failed to create InfoPrinter: %v", err)
+	}
+
+	scenarios := []runner.ScenarioBundle{
+		{ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config: &scenario.ScenarioConfig{Name: "SingleCombo"},
+			Requests: []*scenario.RequestBlueprint{
+				{Filename: "r1.txt"},
+				{Filename: "r2.txt"},
+				{Filename: "r3.txt"},
+			},
+		}},
+	}
+	cfg := config.Config{Reporter: config.ReporterConfig{Show: config.All}}
+
+	if err := printer.PrintScenarios(scenarios, cfg, false); err != nil {
+		t.Fatalf("PrintScenarios failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "matrix combinations") {
+		t.Errorf("expected no matrix-combinations note for a single-combination scenario, got:\n%s", out)
+	}
+
+	idxR1 := strings.Index(out, "┣━r1.txt")
+	idxR2 := strings.Index(out, "┣━r2.txt")
+	idxR3 := strings.Index(out, "┗━r3.txt")
+	if idxR1 == -1 || idxR2 == -1 || idxR3 == -1 {
+		t.Fatalf("expected r1/r2 (not last) to use the middle highlight and r3 (last) to use the end highlight, got:\n%s", out)
+	}
+	if idxR1 >= idxR2 || idxR2 >= idxR3 {
+		t.Errorf("expected requests to be printed in order r1,r2,r3, got:\n%s", out)
 	}
 }

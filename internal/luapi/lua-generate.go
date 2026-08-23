@@ -64,7 +64,10 @@ func (lc *LuaContext) FakeEmail(ls *lua.LState) int {
 
 func (lc *LuaContext) FakePhone(ls *lua.LState) int {
 	digits := make([]byte, 10)
-	digits[0] = byte(lc.generator.Int64()%9) + 1
+	digits[0] = '0' + byte(lc.generator.Int64()%9) + 1
+	for i := range 9 {
+		digits[i+1] = '0' + byte(lc.generator.Int64()%10)
+	}
 	ls.Push(lua.LString(fmt.Sprintf("%s%s", lc.randomStringEntry(phoneCodes), digits)))
 	return 1
 }

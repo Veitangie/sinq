@@ -3,6 +3,7 @@
 [![CodeFactor](https://www.codefactor.io/repository/github/veitangie/sinq/badge)](https://www.codefactor.io/repository/github/veitangie/sinq)
 [![Code Quality](https://app.codacy.com/project/badge/Grade/bd32a7efb2b444f78e55cd2f351c613c)](https://app.codacy.com/gh/Veitangie/sinq/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 ![Pipeline Status](https://github.com/Veitangie/sinq/actions/workflows/ci.yml/badge.svg)
+[![Test Efficacy](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Veitangie/assets/main/badges/sinq/gremlins.json)](https://github.com/Veitangie/sinq/actions/workflows/gremlins.yml)
 ![Release Version](https://img.shields.io/github/v/release/Veitangie/sinq?include_prereleases&logo=github)
 
 Have you ever felt the pain of wiring up a bunch of independent requests into one stateful flow from start to finish? I have, and while manageable, one thing always bugged me. Why do we treat end-to-end API tests as a bunch of independent requests that we have to somehow bundle together, when they actually are much closer to stateful workflows? That's why this tool was born. It is designed to do one job - execute sequences of requests to walk through different workflow scenarios. Instead of maintaining large request collections or YAML-heavy test definitions, I wanted to describe real user workflows directly in files and let `sinq` compile them into executable scenarios. And make it natively parallel, why not? So I present to you:
@@ -333,7 +334,7 @@ More detailed explanation of the algorithm can be found in the [Treewalker docum
 
 ## The `.sinq` Format
 
-A `.sinq` file is a standard HTTP request with optional embedded Lua scripts. You can also define multiple requests in a single `.sinq` file by separating them with the `###` delimiter. 
+A `.sinq` file is a standard HTTP request with optional embedded Lua scripts. You can also define multiple requests in a single `.sinq` file by separating them with the `###` delimiter. Text after `###` on the same line names the request that follows (shown in `--list` output and reports) — a leading `###` before any content names the file's first request the same way, even in a single-request file.
 
 There are two categories of scripts within a `.sinq` file:
 1. **General/Inline Scripts:** `$MY_VAR`, `$` (unnamed). These are evaluated to dynamically generate the outgoing HTTP request. The return value is injected directly into the request payload or headers. If a general script fails, `sinq` attempts to automatically prepend `return ` and retry, enabling simple string interpolations like `${env.HOST}`.
@@ -392,7 +393,7 @@ There are two categories of scripts within a `.sinq` file:
 * `sinq.json.null` — a constant representing an explicit JSON `null`, since Lua tables drop `nil` keys.
 
 **Fake Data API (`sinq.fake`)**
-* Functions: See the [Lua API documentation](https://sinq.veitangie.dev/lua-api) for a comprehensive suite of fake data generators (`sinq.fake.uuid()`, `sinq.fake.email()`, `sinq.fake.company()`, etc.) to generate random, realistic payloads for endpoints.
+* Functions: See the [Lua API documentation](https://sinq.veitangie.dev/lua-api) for a comprehensive suite of fake data generators (`sinq.fake.uuid()` / `sinq.fake.uuidv4()`, `sinq.fake.email()`, `sinq.fake.company()`, etc.) to generate random, realistic payloads for endpoints.
 
 ### Responses
 All completed responses are stored in the global `sinq.responses` table. Lua is 1-indexed, so the response to the first request is `sinq.responses[1]`.

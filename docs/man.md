@@ -36,6 +36,8 @@ $ASSERT{
 ```
 Every `$NAME?{ ... }` block is treated as Lua script. Scripts with non-reserved names are executed before sending the request. Their return values get substituted into the final request.
 
+Multiple requests can be defined in a single file by separating them with a `###` delimiter on its own line. Text after `###` on the same line names the request that follows it (shown in `--list` output and in reports); a leading `###` before any request content names the file's first request the same way.
+
 Lifecycle scripts have reserved names, and are executed at different times during the request lifecycle:
 
 * `$PRE`: Executes immediately when a worker picks up the request, before it is materialized.
@@ -224,8 +226,8 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **sinq.json.null**
 : A constant used to explicitly serialize a `null` value in JSON tables.
 
-**sinq.fake.uuid()**
-: Returns a random UUIDv4 string.
+**sinq.fake.uuid()**, **sinq.fake.uuidv4()**
+: Returns a random UUIDv4 string. `uuidv4` is an alias for `uuid`.
 
 **sinq.fake.email()**, **sinq.fake.ipv4()**, **sinq.fake.ipv6()**, **sinq.fake.url()**, **sinq.fake.userAgent()**, **sinq.fake.trace()**, **sinq.fake.username()**, **sinq.fake.password()**
 : Fake generators for network and identity strings.

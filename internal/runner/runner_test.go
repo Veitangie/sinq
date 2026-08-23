@@ -35,6 +35,50 @@ func TestNewRunner_Validation(t *testing.T) {
 	}
 }
 
+func TestNewRunner_DefaultsNilClock(t *testing.T) {
+	cfg := config.SaneDefaults()
+
+	r, err := NewRunner(cfg, context.Background(), noopRoundTripper{}, *slog.Default(), nil, &mockWorkspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.clock == nil {
+		t.Fatal("expected NewRunner to default a nil clock to timer.DefaultClock{}")
+	}
+}
+
+func TestRunner_StartDataSource_CountControlsRun(t *testing.T) {
+	runner := &Runner{cfg: config.SaneDefaults()}
+
+	scenarios := []ScenarioBundle{
+		{ScenarioBlueprint: scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{Name: "ZeroCount"}}, Count: 0},
+		{ScenarioBlueprint: scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{Name: "OneCount"}}, Count: 1},
+	}
+
+	taskCh := runner.startDataSource(context.Background(), scenarios)
+	tasks := []taskBundle{}
+	for task := range taskCh {
+		tasks = append(tasks, task)
+	}
+
+	if len(tasks) != 2 {
+		t.Fatalf("expected exactly 2 tasks (a zero-count scenario still emits one task, just not marked to run), got %d", len(tasks))
+	}
+
+	for _, task := range tasks {
+		switch task.Config.Name {
+		case "ZeroCount":
+			if task.run {
+				t.Errorf("expected run=false for a scenario with Count=0")
+			}
+		case "OneCount":
+			if !task.run {
+				t.Errorf("expected run=true for a scenario with Count=1")
+			}
+		}
+	}
+}
+
 func TestRunner_GoroutineLeakage(t *testing.T) {
 	defer goleak.VerifyNone(t)
 

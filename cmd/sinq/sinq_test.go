@@ -21,12 +21,13 @@ import (
 	"time"
 
 	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/spinq"
 )
 
 func withCapturedIO(t *testing.T, out, err io.Writer) {
 	t.Helper()
 	oldOut, oldErr := stdout, stderr
-	stdout, stderr = out, err
+	stdout, stderr = out, spinq.SpinqWriterPassthrough{Writer: err}
 	t.Cleanup(func() {
 		stdout, stderr = oldOut, oldErr
 	})
@@ -228,7 +229,7 @@ func TestSinq_EndToEnd_Stress(t *testing.T) {
 	defer srv.Close()
 
 	oldStderr := os.Stderr
-	devNull, err := os.Open(os.DevNull)
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	if err == nil {
 		os.Stderr = devNull
 		defer devNull.Close()
@@ -282,7 +283,7 @@ func TestSinq_CLI_BasicFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			oldStdout, oldStderr := os.Stdout, os.Stderr
-			devNull, _ := os.Open(os.DevNull)
+			devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 			os.Stdout, os.Stderr = devNull, devNull
 			defer func() {
 				os.Stdout, os.Stderr = oldStdout, oldStderr
@@ -310,7 +311,7 @@ func TestSinq_CLI_OutputFormatters(t *testing.T) {
 	}
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.Open(os.DevNull)
+	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	os.Stdout, os.Stderr = devNull, devNull
 	defer func() {
 		os.Stdout, os.Stderr = oldStdout, oldStderr
@@ -334,7 +335,7 @@ func TestSinq_CLI_ListScenarios(t *testing.T) {
 	args2 := []string{"--list", "--tag", "nonexistent", tmpDir}
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.Open(os.DevNull)
+	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	os.Stdout, os.Stderr = devNull, devNull
 	defer func() {
 		os.Stdout, os.Stderr = oldStdout, oldStderr
@@ -368,7 +369,7 @@ func TestSinq_CLI_HandleReporting_Failure(t *testing.T) {
 	}
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.Open(os.DevNull)
+	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	os.Stdout, os.Stderr = devNull, devNull
 	defer func() {
 		os.Stdout, os.Stderr = oldStdout, oldStderr
@@ -443,7 +444,7 @@ func TestSinq_EndToEnd_SingleFile(t *testing.T) {
 	}
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.Open(os.DevNull)
+	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	os.Stdout, os.Stderr = devNull, devNull
 	defer func() {
 		os.Stdout, os.Stderr = oldStdout, oldStderr
@@ -467,7 +468,7 @@ func TestSinq_EndToEnd_SingleFile_ParseFailure(t *testing.T) {
 	}
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.Open(os.DevNull)
+	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	os.Stdout, os.Stderr = devNull, devNull
 	defer func() {
 		os.Stdout, os.Stderr = oldStdout, oldStderr
@@ -522,11 +523,8 @@ func TestOSWorkspaceMkDirall(t *testing.T) {
 }
 
 func TestInTermWantColor_NilFile(t *testing.T) {
-	inTerm, wantColor := inTermWantColor(nil, config.SaneDefaults())
-	if inTerm {
-		t.Error("expected inTerm to be false for a nil file")
-	}
-	if wantColor {
+	got := wantColor(nil, config.SaneDefaults())
+	if got {
 		t.Error("expected wantColor to be false for a nil file")
 	}
 }

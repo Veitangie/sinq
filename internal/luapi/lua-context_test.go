@@ -176,3 +176,66 @@ func TestLuaContext_PrintAndWrite(t *testing.T) {
 		t.Errorf("Expected printed output %q, got %q", expected, out)
 	}
 }
+
+func TestLuaContext_WriteNumber(t *testing.T) {
+	buf := &bytes.Buffer{}
+	lc := NewLuaContext(timer.DefaultClock{}, true, nil, buf)
+	defer lc.Close()
+	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+	err := lc.DoString(`io.write(42, " ", 3.5)`)
+	if err != nil {
+		t.Fatalf("Lua execution failed: %v", err)
+	}
+
+	if out := buf.String(); out != "42 3.5" {
+		t.Errorf("Expected printed output %q, got %q", "42 3.5", out)
+	}
+}
+
+func TestLuaContext_RetryStopSentinel(t *testing.T) {
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+	defer lc.Close()
+	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+	stop := lc.retryTable.RawGetString("stop")
+	if stop != lua.LNumber(-1) {
+		t.Errorf("Expected sinq.retry.stop to be -1, got %v", stop)
+	}
+}
+
+func TestLuaContext_TimeConstants(t *testing.T) {
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+	defer lc.Close()
+	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+	tests := []struct {
+		key  string
+		want lua.LNumber
+	}{
+		{"ms", 1},
+		{"second", 1000},
+		{"minute", 60000},
+		{"hour", 3600000},
+	}
+	for _, tt := range tests {
+		if got := lc.timeTable.RawGetString(tt.key); got != tt.want {
+			t.Errorf("sinq.time.%s = %v, want %v", tt.key, got, tt.want)
+		}
+	}
+}
+
+func TestLuaContext_SetupRequestEnvironment_ResponseIndex(t *testing.T) {
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+	defer lc.Close()
+	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+	lc.SetupRequestEnvironment(2)
+
+	if got := lc.allResponsesTable.RawGetInt(3); got != lc.ResponseTable {
+		t.Errorf("expected response table to be recorded at index requestIdx+1=3, got %v", got)
+	}
+	if got := lc.allResponsesTable.RawGetInt(2); got == lc.ResponseTable {
+		t.Errorf("did not expect the response table at index requestIdx=2")
+	}
+}

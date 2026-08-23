@@ -4,6 +4,7 @@
 package reporter
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 type mockReporter struct {
 	id            int
+	err           error
 	receivedCount atomic.Int32
 }
 
@@ -22,7 +24,7 @@ func (m *mockReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 		m.receivedCount.Add(1)
 	}
 	<-timer
-	return nil
+	return m.err
 }
 
 func TestReporterPool_ConcurrencyRaceAndDelivery(t *testing.T) {
@@ -90,5 +92,25 @@ func TestReporterPool_Register(t *testing.T) {
 	defer pool.lock.RUnlock()
 	if len(pool.reporters) != numReporters {
 		t.Errorf("Expected pool to have %d reporters, got %d", numReporters, len(pool.reporters))
+	}
+}
+
+func TestReporterPool_PropagatesReporterError(t *testing.T) {
+	wantErr := errors.New("reporter blew up")
+	good := &mockReporter{id: 1}
+	bad := &mockReporter{id: 2, err: wantErr}
+
+	pool := NewPool(good, bad)
+
+	sourceCh := make(chan runner.ScenarioResult, 1)
+	timerCh := make(chan time.Duration, 1)
+	sourceCh <- runner.ScenarioResult{Name: "Payload"}
+	close(sourceCh)
+	timerCh <- 1 * time.Millisecond
+	close(timerCh)
+
+	err := pool.Report(sourceCh, timerCh, 1)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected pool.Report to propagate the reporter's error, got: %v", err)
 	}
 }

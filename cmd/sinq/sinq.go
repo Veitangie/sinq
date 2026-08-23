@@ -23,10 +23,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"veitangie.dev/sinq/internal/config"
 	"veitangie.dev/sinq/internal/reporter"
 	"veitangie.dev/sinq/internal/reporter/junit"
 	"veitangie.dev/sinq/internal/reporter/result"
+	"veitangie.dev/sinq/internal/reporter/spinner"
 	"veitangie.dev/sinq/internal/reporter/standard"
 	"veitangie.dev/sinq/internal/runner"
 	"veitangie.dev/sinq/internal/scenario"
@@ -39,7 +41,8 @@ import (
 const sinqLuaPath = "SINQ_LUA_PATH"
 
 var stdout io.Writer = os.Stdout
-var stderr io.Writer = os.Stderr
+var stderr spinq.SpinqWriter = spinq.SpinqWriterPassthrough{Writer: os.Stderr}
+var getWidth func() int = func() int { return 0 }
 var isInCi = os.Getenv("NO_COLOR") != "" || os.Getenv("SINQ_NO_COLOR") != "" || os.Getenv("CI") != ""
 
 func populateConfigInRuntime(cfg *config.Config) error {
@@ -84,9 +87,16 @@ func populateConfigInRuntime(cfg *config.Config) error {
 	return nil
 }
 
-func setupSpinner(inTermErr, inTermOut, color bool, ctx context.Context) (context.CancelFunc, func(*slog.Logger)) {
-	if inTermErr && !isInCi {
-		pair, err := spinq.WrapPair(ctx, stdout, stderr, ui.GetFrame(color, timer.DefaultClock{}), spinq.Every(100*time.Millisecond))
+func setupSpinner(color bool, ctx context.Context) (context.CancelFunc, func(*slog.Logger)) {
+	if !isInCi {
+		opts := make([]spinq.WrapOptionsFunc, 0, 1)
+		cachedGetWidth, err := spinq.DefaultGetWidth(ctx)
+		if err == nil {
+			opts = append(opts, spinq.WrapWithResizeDetection(cachedGetWidth))
+			getWidth = cachedGetWidth
+		}
+
+		pair, err := spinq.WrapOS(ctx, ui.GetSimpleFrame(color, timer.DefaultClock{}, "Starting"), spinq.Every(100*time.Millisecond), opts...)
 		if err != nil {
 			fmt.Fprintf(stderr, "Failed to set up spinner: %s", err.Error())
 			return func() {}, func(*slog.Logger) {}
@@ -96,9 +106,7 @@ func setupSpinner(inTermErr, inTermOut, color bool, ctx context.Context) (contex
 			return func() {}, func(*slog.Logger) {}
 		}
 		stderr = pair.Spinny
-		if inTermOut {
-			stdout = pair.Standard
-		}
+		stdout = pair.Standard
 		return pair.Close, func(l *slog.Logger) {
 			if l == nil {
 				return
@@ -158,13 +166,11 @@ func parseFilePath(ctx context.Context, path string, walker *treewalker.Treewalk
 	return res, fs, nil
 }
 
-func inTermWantColor(fd *os.File, cfg config.Config) (bool, bool) {
+func wantColor(fd *os.File, cfg config.Config) bool {
 	if fd == nil {
-		return false, false
+		return false
 	}
-	fi, err := fd.Stat()
-	inTerm := err == nil && fi.Mode()&os.ModeCharDevice != 0
-	return inTerm, cfg.Reporter.Color == config.Always || (cfg.Reporter.Color == config.Auto && !isInCi && inTerm)
+	return cfg.Reporter.Color == config.Always || (cfg.Reporter.Color == config.Auto && !isInCi && (isatty.IsTerminal(fd.Fd()) || isatty.IsCygwinTerminal(fd.Fd())))
 }
 
 func sinq(args []string) int {
@@ -209,13 +215,13 @@ func sinq(args []string) int {
 		return 0
 	}
 
-	inTermOut, wantColorOut := inTermWantColor(os.Stdout, cfg)
-	inTermErr, wantColorErr := inTermWantColor(os.Stderr, cfg)
+	wantColorOut := wantColor(os.Stdout, cfg)
+	wantColorErr := wantColor(os.Stderr, cfg)
 
 	attachSpinnerLogger := func(*slog.Logger) {}
 	if !cfg.NoSpinner {
 		var stopSpinner context.CancelFunc
-		stopSpinner, attachSpinnerLogger = setupSpinner(inTermErr, inTermOut, wantColorErr, ctx)
+		stopSpinner, attachSpinnerLogger = setupSpinner(wantColorErr, ctx)
 		defer stopSpinner()
 	}
 	err = infoPrinter.SetWriter(stdout)
@@ -248,6 +254,7 @@ func sinq(args []string) int {
 	}
 
 	scenarioCount := 0
+	willRunCount := 0
 	allScenarios := []runner.ScenarioBundle{}
 	for _, path := range cfg.Paths {
 		res, fs, err := parseFilePath(ctx, path, walker)
@@ -278,7 +285,9 @@ func sinq(args []string) int {
 				count = 0
 				scenarioCount += variantCount
 			}
-			scenarioCount += int(count) * variantCount
+			variantCount *= int(count)
+			scenarioCount += variantCount
+			willRunCount += variantCount
 			allScenarios = append(allScenarios, runner.ScenarioBundle{ScenarioBlueprint: scenarioBlueprint, Workspace: fs, Count: count})
 		}
 	}
@@ -330,7 +339,7 @@ func sinq(args []string) int {
 
 	resultCh, durationCh, errorCh := rn.RunScenarios(ctx, allScenarios, secrets, &mainTimer)
 
-	code := handleReporting(cfg, logger, resultCh, durationCh, errorCh, scenarioCount, wantColorErr, wantColorOut)
+	code := handleReporting(cfg, logger, resultCh, durationCh, errorCh, scenarioCount, willRunCount, wantColorErr, wantColorOut)
 
 	return code
 }
@@ -342,12 +351,23 @@ func handleReporting(
 	durationCh <-chan time.Duration,
 	errorCh <-chan error,
 	scenarioCount int,
+	willRunCount int,
 	wantColorErr, wantColorOut bool,
 ) int {
 
 	resultReporter := result.NewResultReporter()
 
 	report := reporter.NewPool(resultReporter)
+
+	spinnerReporter, err := spinner.NewSpinnerReporter(stderr, timer.DefaultClock{}, getWidth, willRunCount, wantColorErr)
+	if err == nil {
+		err = report.Register(spinnerReporter)
+	}
+
+	if err != nil {
+		logger.Warn("[sinq] Failed to attach spinner reporter", "error", err)
+	}
+
 	if cfg.Out != "" {
 		err := report.Register(createReporter(cfg, stderr, wantColorErr))
 		if err != nil {

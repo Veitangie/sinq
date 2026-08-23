@@ -250,3 +250,58 @@ func TestStandardReporter_OutputPrint(t *testing.T) {
 		t.Errorf("Wanted: %s, got: %s", want, outStr)
 	}
 }
+
+func TestFmtDuration(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+		want string
+	}{
+		{"just under a microsecond", 999 * time.Nanosecond, "999ns"},
+		{"exactly a microsecond", 1 * time.Microsecond, "1µs"},
+		{"just under a millisecond", 999 * time.Microsecond, "999µs"},
+		{"exactly a millisecond", 1 * time.Millisecond, "1ms"},
+		{"just under a second", 999 * time.Millisecond, "999ms"},
+		{"exactly a second", 1 * time.Second, "1.00s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := fmtDuration(tt.d); got != tt.want {
+				t.Errorf("fmtDuration(%v) = %q, want %q", tt.d, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReportTime(t *testing.T) {
+	tests := []struct {
+		name      string
+		d         time.Duration
+		wantWrite bool
+	}{
+		{"negative duration is a no-op", -1 * time.Nanosecond, false},
+		{"zero duration is a no-op", 0, false},
+		{"positive duration writes", 1 * time.Nanosecond, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			n, err := reportTime(buf, "Pre: %8s\n", tt.d)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantWrite {
+				if n == 0 || buf.Len() == 0 {
+					t.Errorf("expected reportTime to write for duration %v, wrote nothing", tt.d)
+				}
+			} else {
+				if n != 0 || buf.Len() != 0 {
+					t.Errorf("expected reportTime to be a no-op for duration %v, got n=%d buf=%q", tt.d, n, buf.String())
+				}
+			}
+		})
+	}
+}

@@ -120,8 +120,16 @@ func TestJUnitReporter_Comprehensive(t *testing.T) {
 		t.Fatalf("Expected 5 test cases, got %d", len(suite.TestCases))
 	}
 
+	if suite.TestCases[0].Failure != nil || suite.TestCases[0].Error != nil || suite.TestCases[0].Skipped != nil {
+		t.Errorf("Expected SuccessReq to have no failure/error/skipped, got %+v", suite.TestCases[0])
+	}
+
 	if suite.TestCases[1].Error == nil || suite.TestCases[1].Error.Message != "runtime err" {
 		t.Errorf("Expected error on second request, got %v", suite.TestCases[1].Error)
+	}
+
+	if suite.TestCases[2].Failure == nil || suite.TestCases[2].Failure.Message != "bad body" {
+		t.Errorf("Expected FailReq to report a failure with message 'bad body', got %v", suite.TestCases[2].Failure)
 	}
 
 	if suite.TestCases[3].Skipped == nil {

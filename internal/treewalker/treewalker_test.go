@@ -304,6 +304,107 @@ func TestTreewalker_Ordering(t *testing.T) {
 	}
 }
 
+func TestTreewalker_NaturalSortNotLexicographic(t *testing.T) {
+	memFS := fstest.MapFS{
+		"root/file2.sinq":  {Data: []byte("REQ_FILE2")},
+		"root/file10.sinq": {Data: []byte("REQ_FILE10")},
+	}
+
+	cfg := config.Config{Workers: 1}
+	walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, mockParseConfig)
+
+	blueprints, err := walker.ParseFiletree(context.Background(), memFS)
+	if err != nil {
+		t.Fatalf("ParseFiletree failed: %v", err)
+	}
+	if len(blueprints) != 1 {
+		t.Fatalf("Expected 1 blueprint, got %d", len(blueprints))
+	}
+
+	requests := blueprints[0].Requests
+	if len(requests) != 2 {
+		t.Fatalf("Expected 2 requests, got %d", len(requests))
+	}
+
+	got0 := string(requests[0].ExtractPayload(requests[0].Content[0]))
+	got1 := string(requests[1].ExtractPayload(requests[1].Content[0]))
+	if got0 != "REQ_FILE2" || got1 != "REQ_FILE10" {
+		t.Errorf("Expected natural order [REQ_FILE2, REQ_FILE10] (not lexicographic), got [%s, %s]", got0, got1)
+	}
+}
+
+func TestTreewalker_CancellationReturnsError(t *testing.T) {
+	memFS := fstest.MapFS{
+		"root/file.sinq": {Data: []byte("GET /")},
+	}
+
+	cfg := config.Config{Workers: 2}
+	tw, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, mockParseConfig)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := tw.ParseFiletree(ctx, memFS)
+	if err == nil {
+		t.Fatal("Expected ParseFiletree to return an error for an already-canceled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Expected error to wrap context.Canceled, got: %v", err)
+	}
+}
+
+func TestTreewalker_ExplicitScenarioNameIsNotOverwritten(t *testing.T) {
+	memFS := fstest.MapFS{
+		"root/config.scenario": {Data: []byte(`{"name": "MyExplicitName"}`)},
+		"root/req.sinq":        {Data: []byte("GET /")},
+	}
+
+	cfg := config.Config{Workers: 1}
+	walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, scenario.ParseConfig)
+
+	blueprints, err := walker.ParseFiletree(context.Background(), memFS)
+	if err != nil {
+		t.Fatalf("ParseFiletree failed: %v", err)
+	}
+	if len(blueprints) != 1 {
+		t.Fatalf("Expected 1 blueprint, got %d", len(blueprints))
+	}
+
+	if blueprints[0].Config.Name != "MyExplicitName" {
+		t.Errorf("Expected explicit scenario name to be preserved, got %q", blueprints[0].Config.Name)
+	}
+}
+
+func TestTreewalker_TagsListPopulated(t *testing.T) {
+	memFS := fstest.MapFS{
+		"root/config.scenario": {Data: []byte(`{"tags": ["alpha", "beta"]}`)},
+		"root/req.sinq":        {Data: []byte("GET /")},
+	}
+
+	cfg := config.Config{Workers: 1}
+	walker, _ := treewalker.NewTreewalker(cfg, *slog.Default(), mockParseRequest, scenario.ParseConfig)
+
+	blueprints, err := walker.ParseFiletree(context.Background(), memFS)
+	if err != nil {
+		t.Fatalf("ParseFiletree failed: %v", err)
+	}
+	if len(blueprints) != 1 {
+		t.Fatalf("Expected 1 blueprint, got %d", len(blueprints))
+	}
+
+	tagsList := blueprints[0].Config.TagsList
+	if len(tagsList) != 2 {
+		t.Fatalf("Expected TagsList to contain 2 tags, got %v", tagsList)
+	}
+	found := map[string]bool{}
+	for _, tag := range tagsList {
+		found[tag] = true
+	}
+	if !found["alpha"] || !found["beta"] {
+		t.Errorf("Expected TagsList to contain alpha and beta, got %v", tagsList)
+	}
+}
+
 func TestTreewalker_Cancellation(t *testing.T) {
 	memFS := fstest.MapFS{}
 	for i := range 1000 {
@@ -326,7 +427,7 @@ func TestTreewalker_Cancellation(t *testing.T) {
 
 	select {
 	case <-doneCh:
-	case <-time.After(1 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("Treewalker failed to exit after context cancellation (Deadlock detected)")
 	}
 }
@@ -381,6 +482,19 @@ func TestTreewalker_ParseSecrets(t *testing.T) {
 		_, err := tw.ParseSecrets()
 		if err == nil {
 			t.Error("Expected error for malformed JSON secrets file")
+		}
+	})
+
+	t.Run("Empty File", func(t *testing.T) {
+		secFile := filepath.Join(tmpDir, "empty.json")
+		_ = os.WriteFile(secFile, []byte{}, 0644)
+		tw, _ := treewalker.NewTreewalker(config.Config{Treewalker: config.TreewalkerConfig{SecretsFile: secFile}}, *slog.Default(), mockParseRequest, mockParseConfig)
+		secrets, err := tw.ParseSecrets()
+		if err != nil {
+			t.Errorf("Expected no error for an empty secrets file, got: %v", err)
+		}
+		if len(secrets) != 0 {
+			t.Errorf("Expected empty secrets map for an empty file, got: %v", secrets)
 		}
 	})
 

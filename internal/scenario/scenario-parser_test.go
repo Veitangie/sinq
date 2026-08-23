@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/scanner"
 )
 
 type errorReader struct{}
@@ -259,6 +260,34 @@ two lines, and ignores }"
 			input:   "GET /api/v1/resource\\",
 			wantErr: true,
 		},
+		{
+			name:           "Single Retry Script (no false duplicate error)",
+			input:          `$RETRY{ return 1 }GET /`,
+			wantRetry:      " return 1 ",
+			wantContent:    "GET /",
+			checkValidHTTP: true,
+		},
+		{
+			name:           "Single Post Script (no false duplicate error)",
+			input:          `$POST{ sinq.test.fail("boom") }GET /`,
+			wantPost:       ` sinq.test.fail("boom") `,
+			wantContent:    "GET /",
+			checkValidHTTP: true,
+		},
+		{
+			name:           "Lua Trap: Single-quoted string",
+			input:          `$PRE{ msg = 'hello' }GET /`,
+			wantPre:        ` msg = 'hello' `,
+			wantContent:    "GET /",
+			checkValidHTTP: true,
+		},
+		{
+			name:           "Lua Trap: Near-miss long bracket closer with brace inside",
+			input:          `$PRE{ x = [=[ a]b} c ]=] }GET /`,
+			wantPre:        ` x = [=[ a]b} c ]=] `,
+			wantContent:    "GET /",
+			checkValidHTTP: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -314,6 +343,79 @@ two lines, and ignores }"
 				if unicode.IsSpace(firstChar) {
 					t.Errorf("Invalid HTTP: Content starts with whitespace (char code %d). Expected Method (GET/POST/etc). content: %q", firstChar, result.String())
 				}
+			}
+		})
+	}
+}
+
+func TestScriptError_IncludesScriptName(t *testing.T) {
+	input := `$PRE{ x = "unterminated`
+	r := strings.NewReader(input)
+	_, err := ParseRequestBlueprints(r, "test.sinq")
+
+	if err == nil {
+		t.Fatalf("Expected an error for an unterminated string, got nil")
+	}
+	if !strings.Contains(err.Error(), `"PRE"`) {
+		t.Errorf(`Expected error to mention the script name "PRE", got: %v`, err)
+	}
+}
+
+func TestParseDelimiter_NoSpuriousEmptyTextTokenAtBoundary(t *testing.T) {
+	input := "$X{ a=1 }\n###\nGET /"
+	r := strings.NewReader(input)
+	blueprints, err := ParseRequestBlueprints(r, "boundary.sinq")
+	if err != nil {
+		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+	}
+
+	if len(blueprints) != 2 {
+		t.Fatalf("Expected 2 blueprints, got %d", len(blueprints))
+	}
+
+	if len(blueprints[0].Content) != 1 {
+		t.Errorf("Expected exactly 1 content token (the script), with no spurious empty text token before the delimiter, got %d: %+v", len(blueprints[0].Content), blueprints[0].Content)
+	}
+}
+
+func TestParseScript_ErrorTokenKeepsSentinelPayloadBounds(t *testing.T) {
+	p := &parser{ByteScanner: scanner.NewByteScanner([]byte("X"))}
+	tok, err := p.parseScript()
+	if err == nil {
+		t.Fatalf("Expected an error when the script doesn't start with '$'")
+	}
+	if tok.PayloadStart != -1 {
+		t.Errorf("Expected PayloadStart to remain at sentinel -1 on early parse failure, got %d", tok.PayloadStart)
+	}
+	if tok.PayloadEnd != -1 {
+		t.Errorf("Expected PayloadEnd to remain at sentinel -1 on early parse failure, got %d", tok.PayloadEnd)
+	}
+}
+
+func TestParseRequestBlueprint_TruncatedLongBracket(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "Truncated long bracket opener (EOF while counting =)",
+			input: `$PRE{ x = [==`,
+		},
+		{
+			name:  "Truncated long bracket closer (EOF while counting =)",
+			input: `$PRE{ x = [=[ hello ]=`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := strings.NewReader(tt.input)
+			_, err := ParseRequestBlueprints(r, "truncated.sinq")
+			if err == nil {
+				t.Fatalf("Expected a clean parse error for truncated input %q, got nil", tt.input)
+			}
+			if !strings.Contains(err.Error(), "Unexpected EOF") {
+				t.Errorf("Expected error to mention Unexpected EOF, got: %v", err)
 			}
 		})
 	}
@@ -488,6 +590,9 @@ func TestParseDelimiter_BugTrailingNewline(t *testing.T) {
 	req1 := string(blueprints[0].ExtractPayload(blueprints[0].Content[0]))
 	if strings.HasSuffix(req1, "\n") {
 		t.Errorf("BUG FOUND: The preceding request ends with a trailing newline that was meant to be part of the delimiter.\nPayload: %q", req1)
+	}
+	if req1 != "GET /" {
+		t.Errorf("Expected the payload to be trimmed to exactly %q (excluding both the newline and the delimiter's '#'), got %q", "GET /", req1)
 	}
 }
 

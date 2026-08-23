@@ -266,6 +266,54 @@ func TestMakeIntermediate_CopyToFileError(t *testing.T) {
 	}
 }
 
+type drainTrackingBody struct {
+	data           []byte
+	pos            int
+	drainAttempted bool
+}
+
+func (d *drainTrackingBody) Read(p []byte) (int, error) {
+	if d.pos >= len(d.data) {
+		return 0, io.EOF
+	}
+	d.drainAttempted = true
+	n := copy(p, d.data[d.pos:])
+	d.pos += n
+	return n, nil
+}
+
+func (d *drainTrackingBody) Close() error { return nil }
+
+func TestMakeIntermediate_OversizedBody_DrainsRemainder(t *testing.T) {
+	maxBodySize := int64(5)
+	full := []byte("0123456789")
+	body := &drainTrackingBody{data: full}
+
+	resp := &http.Response{
+		StatusCode: 200,
+		Status:     "200 OK",
+		Proto:      "HTTP/1.1",
+		Header:     http.Header{},
+		Body:       body,
+	}
+
+	ws := &mockWorkspace{FS: fstest.MapFS{}}
+	result, err := makeIntermediate(ws, "", maxBodySize, resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.oversized {
+		t.Fatal("expected result.oversized to be true")
+	}
+
+	if !body.drainAttempted {
+		t.Error("expected the remaining bytes past the truncation point to be drained from the body, but nothing was read")
+	}
+	if body.pos != len(full) {
+		t.Errorf("expected the body to be fully drained (pos=%d), got pos=%d", len(full), body.pos)
+	}
+}
+
 func TestMakeIntermediate_ReadBodyError(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: 200,

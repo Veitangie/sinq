@@ -55,4 +55,9 @@ func TestCachedLoader_Load(t *testing.T) {
 	if ret3.Type() != lua.LTString {
 		t.Errorf("Expected error string, got %v", ret3.Type())
 	}
+
+	ret4 := callLoad("missing")
+	if ret4.Type() != lua.LTString {
+		t.Errorf("Expected a cached error string on the second lookup of a missing module, got %v", ret4.Type())
+	}
 }

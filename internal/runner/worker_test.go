@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -498,4 +500,334 @@ func TestWorker_MaterializeRequest_UnexpectedDelimiter(t *testing.T) {
 	if !strings.Contains(err.Error(), "delimiter") {
 		t.Errorf("expected the error to mention a delimiter, got %q", err.Error())
 	}
+}
+
+func TestWorker_LoggingContext(t *testing.T) {
+	w := setupTestWorker(t, nil)
+
+	baseCtx := context.Background()
+	got := w.loggingContext(baseCtx)
+	for i := 0; i+1 < len(got); i += 2 {
+		if got[i] == string(scenarioNameContext) || got[i] == string(requestNameContext) {
+			t.Errorf("expected no scenario/request name keys for a bare context, got %v", got)
+		}
+	}
+
+	withScenario := context.WithValue(baseCtx, scenarioNameContext, "myScenario")
+	got2 := w.loggingContext(withScenario)
+	found := false
+	for i := 0; i+1 < len(got2); i += 2 {
+		if got2[i] == string(scenarioNameContext) && got2[i+1] == "myScenario" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected scenarioName to be included when present in the context, got %v", got2)
+	}
+
+	withRequest := context.WithValue(baseCtx, requestNameContext, "myRequest")
+	got3 := w.loggingContext(withRequest)
+	found = false
+	for i := 0; i+1 < len(got3); i += 2 {
+		if got3[i] == string(requestNameContext) && got3[i+1] == "myRequest" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected requestName to be included when present in the context, got %v", got3)
+	}
+}
+
+func TestWorker_ProcessRequest_ClearsDumpWhenNoAssertionFailures(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	w := setupTestWorker(t, context.Background())
+	w.lc.SetupRequestEnvironment(0)
+	w.env.cfg.DumpOnFailure = true
+
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET "+srv.URL+" HTTP/1.1\r\n\r\n"), "ok.sinq")
+	if err != nil {
+		t.Fatalf("failed to parse blueprint: %v", err)
+	}
+
+	scenarioBp := &scenario.ScenarioBlueprint{
+		Config: &scenario.ScenarioConfig{
+			Name:       "NoFailureScenario",
+			ReqTimeout: scenario.Duration{Duration: 2 * time.Second},
+		},
+		Requests: reqBp,
+	}
+
+	status := Success
+	result := &RequestResult{}
+
+	if _, err := w.processRequest(context.Background(), scenarioBp, 0, srv.Client(), &status, result); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Request != "" || result.Response != "" {
+		t.Errorf("expected Request/Response dumps to be cleared when there are no assertion failures, got Request=%q Response=%q", result.Request, result.Response)
+	}
+	if status == Failure || result.Status == Failure {
+		t.Errorf("expected no failure when assertionFailures is empty, got status=%v result.Status=%v", status, result.Status)
+	}
+}
+
+func TestWorker_ProcessScenario_MaxRedirectsBoundary(t *testing.T) {
+	finalSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer finalSrv.Close()
+
+	redirectSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, finalSrv.URL, http.StatusFound)
+	}))
+	defer redirectSrv.Close()
+
+	run := func(maxRedirects int) ResultStatus {
+		w := setupTestWorker(t, context.Background())
+		resCh := make(chan ScenarioResult, 1)
+		errorCh := make(chan error, 1)
+		w.resCh = resCh
+		w.errorCh = errorCh
+
+		bp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET "+redirectSrv.URL+" HTTP/1.1\r\n\r\n"), "redirect.sinq")
+		if err != nil {
+			t.Fatalf("failed to parse blueprint: %v", err)
+		}
+
+		bundle := taskBundle{
+			ScenarioBlueprint: scenario.ScenarioBlueprint{
+				Config: &scenario.ScenarioConfig{
+					Name:         "RedirectScenario",
+					ReqTimeout:   scenario.Duration{Duration: 2 * time.Second},
+					MaxRedirects: maxRedirects,
+				},
+				Requests: bp,
+			},
+			workspace: &mockWorkspace{},
+			env:       map[string]any{},
+			run:       true,
+		}
+
+		w.processScenario(context.Background(), bundle)
+
+		select {
+		case res := <-resCh:
+			return res.Status
+		case <-time.After(2 * time.Second):
+			t.Fatal("processScenario deadlocked")
+		}
+		return Unset
+	}
+
+	if status := run(1); status != Error {
+		t.Errorf("expected MaxRedirects=1 with exactly one redirect present to fail with Error, got %v", status)
+	}
+	if status := run(2); status != Success {
+		t.Errorf("expected MaxRedirects=2 with exactly one redirect present to succeed, got %v", status)
+	}
+}
+
+func TestWorker_ProcessRequest_PostScriptFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	w := setupTestWorker(t, context.Background())
+	w.lc.SetupRequestEnvironment(0)
+
+	rawSinq := "GET " + srv.URL + "\n$POST{\nerror(\"boom\")\n}"
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "post_fail.sinq")
+	if err != nil {
+		t.Fatalf("failed to parse blueprint: %v", err)
+	}
+
+	scenarioBp := &scenario.ScenarioBlueprint{
+		Config: &scenario.ScenarioConfig{
+			Name:          "PostFailScenario",
+			ReqTimeout:    scenario.Duration{Duration: 2 * time.Second},
+			ScriptTimeout: scenario.Duration{Duration: 2 * time.Second},
+		},
+		Requests: reqBp,
+	}
+
+	status := Success
+	result := &RequestResult{}
+
+	shouldContinue, err := w.processRequest(context.Background(), scenarioBp, 0, srv.Client(), &status, result)
+	if shouldContinue {
+		t.Error("expected shouldContinue to be false when the post script fails")
+	}
+	if err == nil {
+		t.Fatal("expected an error from the failing post script")
+	}
+}
+
+func TestWorker_ProcessScenario_SetsMaxRequestIdx(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+	w.env.transport = mockRoundTripper{}
+	resCh := make(chan ScenarioResult, 1)
+	errorCh := make(chan error, 1)
+	w.resCh = resCh
+	w.errorCh = errorCh
+
+	bp1, _ := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req.sinq")
+	bp2, _ := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req2.sinq")
+
+	bundle := taskBundle{
+		ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config:   &scenario.ScenarioConfig{Name: "TwoRequests"},
+			Requests: []*scenario.RequestBlueprint{bp1[0], bp2[0]},
+		},
+		workspace: &mockWorkspace{},
+		env:       map[string]any{},
+		run:       true,
+	}
+
+	w.processScenario(context.Background(), bundle)
+
+	if w.maxRequestIdx != 1 {
+		t.Errorf("expected maxRequestIdx to be len(Requests)-1 = 1, got %d", w.maxRequestIdx)
+	}
+
+	select {
+	case <-resCh:
+	case <-time.After(1 * time.Second):
+		t.Fatal("processScenario did not report a result")
+	}
+}
+
+func TestWorker_ProcessScenario_ZeroRequests(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+	resCh := make(chan ScenarioResult, 1)
+	errorCh := make(chan error, 1)
+	w.resCh = resCh
+	w.errorCh = errorCh
+
+	bundle := taskBundle{
+		ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config:   &scenario.ScenarioConfig{Name: "ZeroRequestScenario"},
+			Requests: []*scenario.RequestBlueprint{},
+		},
+		workspace: &mockWorkspace{},
+		env:       map[string]any{},
+		run:       true,
+	}
+
+	w.processScenario(context.Background(), bundle)
+
+	select {
+	case res := <-resCh:
+		if res.Status != Success {
+			t.Errorf("expected a scenario with zero requests to succeed trivially, got %v", res.Status)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("processScenario deadlocked or panicked on zero requests")
+	}
+}
+
+func TestWorker_ProcessScenario_LogsRequestFailure(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	w := setupTestWorker(t, context.Background())
+	w.env.logger = logger
+
+	resCh := make(chan ScenarioResult, 1)
+	errorCh := make(chan error, 1)
+	w.resCh = resCh
+	w.errorCh = errorCh
+
+	bundle := taskBundle{
+		ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config:   &scenario.ScenarioConfig{Name: "FailLogScenario", ReqTimeout: scenario.Duration{Duration: time.Second}},
+			Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
+		},
+		workspace: &mockWorkspace{FS: fstest.MapFS{}},
+		env:       map[string]any{},
+		run:       true,
+	}
+
+	w.processScenario(context.Background(), bundle)
+
+	select {
+	case <-resCh:
+	case <-time.After(1 * time.Second):
+		t.Fatal("processScenario deadlocked")
+	}
+
+	if !strings.Contains(buf.String(), "Request failed") {
+		t.Errorf("expected a 'Request failed' debug log line when processRequest returns an error, got log: %q", buf.String())
+	}
+}
+
+func TestWorker_MaterializeRequest_CapacityHintDoesNotPanic(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	req := &scenario.RequestBlueprint{
+		Source: []byte("GET / HTTP/1.1\r\n\r\n"),
+		Content: []scenario.Token{
+			{Type: scenario.Text, Start: 0, End: 18, PayloadStart: 0, PayloadEnd: 18},
+		},
+	}
+
+	materialized, err := w.materializeRequest(context.Background(), req, time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error (or panic averted): %v", err)
+	}
+	if string(materialized) != "GET / HTTP/1.1\r\n\r\n" {
+		t.Errorf("unexpected materialized content: %q", materialized)
+	}
+}
+
+func TestWorker_MaterializeRequest_ScriptTokenError(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	source := []byte("if then")
+	req := &scenario.RequestBlueprint{
+		Source:   source,
+		Filename: "script_fail.sinq",
+		Content: []scenario.Token{
+			{Type: scenario.Script, Name: "BAD_SCRIPT", Line: 1, PayloadStart: 0, PayloadEnd: len(source)},
+		},
+	}
+
+	materialized, err := w.materializeRequest(context.Background(), req, time.Second)
+	if err == nil {
+		t.Fatal("expected an error when the embedded script fails to execute")
+	}
+	if len(materialized) != 0 {
+		t.Errorf("expected empty materialized bytes on script error, got %q", materialized)
+	}
+}
+
+func TestWorker_MaterializeRequest_ScriptTokenSuccess(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	source := []byte(`return "computed"`)
+	req := &scenario.RequestBlueprint{
+		Source:   source,
+		Filename: "script_ok.sinq",
+		Content: []scenario.Token{
+			{Type: scenario.Script, Name: "OK_SCRIPT", Line: 1, PayloadStart: 0, PayloadEnd: len(source)},
+		},
+	}
+
+	materialized, err := w.materializeRequest(context.Background(), req, time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(materialized) != "computed" {
+		t.Errorf("expected materialized content 'computed', got %q", materialized)
+	}
+}
+
+func TestWorker_Close_NilLuaContext(t *testing.T) {
+	w := &worker{}
+	w.Close()
 }

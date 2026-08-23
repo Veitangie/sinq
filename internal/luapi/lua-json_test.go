@@ -4,6 +4,8 @@
 package luapi
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	lua "github.com/yuin/gopher-lua"
@@ -532,6 +534,36 @@ func TestSerializeToJSON(t *testing.T) {
 		}
 		if valRes != lua.LNil {
 			t.Errorf("expected value to be nil on error, got %v", valRes)
+		}
+	})
+}
+
+func TestJSONParser_ParseLiteral_JSONNumber(t *testing.T) {
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+	defer lc.Close()
+
+	p := lc.parser
+
+	t.Run("Valid numeric string", func(t *testing.T) {
+		val, err := p.parseLiteral(json.Number("42.5"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if val.Type() != lua.LTNumber || float64(val.(lua.LNumber)) != 42.5 {
+			t.Errorf("expected number 42.5, got %v (%v)", val, val.Type())
+		}
+	})
+
+	t.Run("Invalid numeric string", func(t *testing.T) {
+		val, err := p.parseLiteral(json.Number("not-a-number"))
+		if err == nil {
+			t.Fatalf("expected error, got nil (val=%v)", val)
+		}
+		if !strings.Contains(err.Error(), "Failed to convert JSON number") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+		if val != nil {
+			t.Errorf("expected nil value on error, got %v", val)
 		}
 	})
 }

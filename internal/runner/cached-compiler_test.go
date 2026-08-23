@@ -11,6 +11,7 @@ import (
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
+	"github.com/yuin/gopher-lua/parse"
 	"veitangie.dev/sinq/internal/scenario"
 )
 
@@ -124,5 +125,60 @@ func TestCachedCompiler_OptimisticConcurrency(t *testing.T) {
 	cc.cache.Range(func(key, value any) bool { count++; return true })
 	if count != 1 {
 		t.Errorf("Cache corruption! Expected exactly 1 entry in map, found %d", count)
+	}
+}
+
+func TestCachedCompiler_LineColumnPadding(t *testing.T) {
+	cc := setupTestCompiler()
+
+	token := scenario.Token{Name: "ABCDE", Line: 4, Offset: 3}
+	extract := func(scenario.Token) []byte { return []byte("~") }
+
+	_, err := cc.compileScript(token, extract, "pad.sinq")
+	if err == nil {
+		t.Fatal("expected a parse error for a lone '~' token")
+	}
+
+	perr, ok := err.(*parse.Error)
+	if !ok {
+		t.Fatalf("expected *parse.Error, got %T: %v", err, err)
+	}
+	if perr.Pos.Line != 4 {
+		t.Errorf("expected the padded script to land on line 4, got %d", perr.Pos.Line)
+	}
+	if perr.Pos.Column != 10 {
+		t.Errorf("expected the padded script to start at column 10, got %d", perr.Pos.Column)
+	}
+}
+
+func TestCachedCompiler_CapacityCalc_LargeOffset(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("compileScript panicked (capacity calculation went negative): %v", r)
+		}
+	}()
+
+	cc := setupTestCompiler()
+	token := scenario.Token{Name: "", Line: 1, Offset: 10}
+	extract := func(scenario.Token) []byte { return []byte("") }
+
+	if _, err := cc.compileScript(token, extract, "cap1.sinq"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCachedCompiler_CapacityCalc_MinimalTerms(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("compileScript panicked (capacity calculation went negative): %v", r)
+		}
+	}()
+
+	cc := setupTestCompiler()
+	token := scenario.Token{Name: "", Line: 0, Offset: 0}
+	extract := func(scenario.Token) []byte { return []byte("") }
+
+	if _, err := cc.compileScript(token, extract, "cap2.sinq"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

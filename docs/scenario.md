@@ -4,7 +4,7 @@ In `sinq`, a **Scenario** is simply a sequence of HTTP requests that are execute
 
 ## Writing Requests
 
-A `.sinq` file is essentially a standard HTTP request. You can define multiple requests in a single file by separating them with the `###` delimiter.
+A `.sinq` file is essentially a standard HTTP request. You can define multiple requests in a single file by separating them with the `###` delimiter. The text after `###` on the same line names the request that *follows* it — this name shows up in `--list` output and in the standard/JUnit reports.
 
 ```http
 ### Login Request
@@ -15,6 +15,13 @@ POST /api/auth
 GET /api/data
 ```
 
+A leading `###` (before any request content) works the same way and names the file's *first* request, even if the file only contains one:
+
+```http
+### Healthcheck
+GET /health
+```
+
 To make your requests dynamic, you can use Lua scripts. `sinq` provides two ways to run scripts:
 
 1. **Inline Interpolation (`${...}`)**: Used to dynamically insert values into headers, URLs, or JSON payloads (e.g., `${env.BASE_URL}`).
@@ -22,9 +29,9 @@ To make your requests dynamic, you can use Lua scripts. `sinq` provides two ways
 
 ## Configuration
 
-You can configure timeouts, environment variables, and limits using `.scenario` JSON files. 
+You can configure timeouts, environment variables, and limits using JSON files ending in `.scenario` — the filename itself is arbitrary, only the extension matters (e.g. `config.scenario`, `00_base.scenario`).
 
-When you place a `config.scenario` file in a directory, those settings apply to all tests in that directory and its subdirectories.
+When you place a `.scenario` file in a directory, those settings apply to all tests in that directory and its subdirectories.
 
 Here are the available settings you can configure:
 

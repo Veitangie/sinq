@@ -4,6 +4,7 @@
 package scenario
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -91,6 +92,27 @@ func TestToken_IsSpecialScript(t *testing.T) {
 				t.Errorf("IsSpecialScript() = %v, want %v", got, tt.wantSpecial)
 			}
 		})
+	}
+}
+
+func TestScenarioBlueprintString_AndThenSeparator(t *testing.T) {
+	bp := ScenarioBlueprint{
+		Config: &ScenarioConfig{},
+		Requests: []*RequestBlueprint{
+			{Filename: "first.sinq"},
+			{Filename: "second.sinq"},
+			{Filename: "third.sinq"},
+		},
+	}
+	str := bp.String()
+
+	gotCount := strings.Count(str, " and then ")
+	if gotCount != 2 {
+		t.Errorf("Expected ' and then ' to separate every request but the last (2 occurrences for 3 requests), got %d in: %q", gotCount, str)
+	}
+
+	if strings.Contains(str, "and then \nConfig:") {
+		t.Errorf("Did not expect ' and then ' to trail after the last request, got: %q", str)
 	}
 }
 
