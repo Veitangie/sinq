@@ -71,7 +71,7 @@ func TestGetFrame_Color(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := fmt.Sprintf(" %s%s%s Running (0.0s)\r", ColorStates[0], spinq.DotsStates[0], spinq.ResetColor)
+	expected := fmt.Sprintf(" %s%s%s Running (0.0s)\r", ColorStates[0], spinq.DotsStates[0], spinq.ResetStyle)
 	if string(got) != expected {
 		t.Errorf("got %q, want %q", got, expected)
 	}
@@ -86,7 +86,7 @@ func TestGetFrame_Color_AdvancesOncePerFullSpinnerCycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("call %d: unexpected error: %v", i, err)
 		}
-		expected := fmt.Sprintf(" %s%s%s Running (0.0s)\r", ColorStates[0], spinq.DotsStates[i], spinq.ResetColor)
+		expected := fmt.Sprintf(" %s%s%s Running (0.0s)\r", ColorStates[0], spinq.DotsStates[i], spinq.ResetStyle)
 		if string(got) != expected {
 			t.Errorf("call %d: got %q, want %q", i, got, expected)
 		}
@@ -96,7 +96,7 @@ func TestGetFrame_Color_AdvancesOncePerFullSpinnerCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := fmt.Sprintf(" %s%s%s Running (0.0s)\r", ColorStates[1], spinq.DotsStates[0], spinq.ResetColor)
+	expected := fmt.Sprintf(" %s%s%s Running (0.0s)\r", ColorStates[1], spinq.DotsStates[0], spinq.ResetStyle)
 	if string(got) != expected {
 		t.Errorf("got %q, want %q (color should have advanced)", got, expected)
 	}
@@ -146,7 +146,7 @@ func TestGetStartingFrame_Color(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := fmt.Sprintf(" %s%s%s Starting (0.0s)\r", ColorStates[0], spinq.DotsStates[0], spinq.ResetColor)
+	expected := fmt.Sprintf(" %s%s%s Starting (0.0s)\r", ColorStates[0], spinq.DotsStates[0], spinq.ResetStyle)
 	if string(got) != expected {
 		t.Errorf("got %q, want %q", got, expected)
 	}
@@ -212,16 +212,16 @@ func TestGetBarFrame_Color_WrapsDotsAndBarInAnsiCodes(t *testing.T) {
 	if !strings.Contains(gotStr, spinq.Green) {
 		t.Errorf("expected bar to be wrapped in green, got %q", gotStr)
 	}
-	if !strings.Contains(gotStr, spinq.ResetColor) {
+	if !strings.Contains(gotStr, spinq.ResetStyle) {
 		t.Errorf("expected color reset codes present, got %q", gotStr)
 	}
 
-	wantPrefix := fmt.Sprintf(" %s%s%s Running | %s", ColorStates[0], spinq.DotsStates[0], spinq.ResetColor, spinq.Green)
+	wantPrefix := fmt.Sprintf(" %s%s%s Running | %s", ColorStates[0], spinq.DotsStates[0], spinq.ResetStyle, spinq.Green)
 	if !strings.HasPrefix(gotStr, wantPrefix) {
 		t.Errorf("got %q, want prefix %q", gotStr, wantPrefix)
 	}
 
-	wantSuffix := spinq.ResetColor + " |  3/42\r"
+	wantSuffix := spinq.ResetStyle + " |  3/42\r"
 	if !strings.HasSuffix(gotStr, wantSuffix) {
 		t.Errorf("got %q, want suffix %q", gotStr, wantSuffix)
 	}
@@ -340,8 +340,8 @@ func TestGetBarFrame_Color_EmptyCellsMatchFullGlyphInBlack(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	wantBar := " Running | " + spinq.Green + "━" + black + strings.Repeat("━", 10) + spinq.ResetColor
-	want := " " + ColorStates[0] + spinq.DotsStates[0] + spinq.ResetColor + wantBar + " | " + " 0/10" + "\r"
+	wantBar := " Running | " + spinq.Green + "━" + spinq.Black + strings.Repeat("━", 10) + spinq.ResetStyle
+	want := " " + ColorStates[0] + spinq.DotsStates[0] + spinq.ResetStyle + wantBar + " | " + " 0/10" + "\r"
 	if string(got) != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

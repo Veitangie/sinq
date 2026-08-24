@@ -54,7 +54,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{spinq.Red + "✗" + spinq.ResetColor + " Scenario: Color Scenario", "   " + spinq.Red + "✗" + spinq.ResetColor + " ReqColor", "     " + spinq.Red + "✗" + spinq.ResetColor + " Error: boom", spinq.Red + "✗" + spinq.ResetColor + " FAILED in 100ms | Scenarios: 1" + spinq.Red + "✗" + spinq.ResetColor + " | 1 requests sent"},
+			wantOutput: []string{spinq.Red + "✗" + spinq.ResetStyle + " Scenario: Color Scenario", "   " + spinq.Red + "✗" + spinq.ResetStyle + " ReqColor", "     " + spinq.Red + "✗" + spinq.ResetStyle + " Error: boom", spinq.Red + "✗" + spinq.ResetStyle + " FAILED in 100ms | Scenarios: 1" + spinq.Red + "✗" + spinq.ResetStyle + " | 1 requests sent"},
 		},
 		{
 			name: "Verbose Timings and Assertions",
@@ -102,7 +102,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{spinq.Yellow + "○" + spinq.ResetColor + " Scenario: Aborted Scenario", "   " + spinq.Yellow + "○" + spinq.ResetColor + " ReqA"},
+			wantOutput: []string{spinq.Yellow + "○" + spinq.ResetStyle + " Scenario: Aborted Scenario", "   " + spinq.Yellow + "○" + spinq.ResetStyle + " ReqA"},
 		},
 		{
 			name: "Skipped Status Formatting",
@@ -116,7 +116,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					},
 				},
 			},
-			wantOutput: []string{spinq.Gray + "-" + spinq.ResetColor + " Scenario: Skipped Scenario", " " + spinq.Gray + "-" + spinq.ResetColor + " SKIPPED in 100ms | Scenarios: 1" + spinq.Gray + "-" + spinq.ResetColor + " | 0 requests sent"},
+			wantOutput: []string{spinq.Gray + "-" + spinq.ResetStyle + " Scenario: Skipped Scenario", " " + spinq.Gray + "-" + spinq.ResetStyle + " SKIPPED in 100ms | Scenarios: 1" + spinq.Gray + "-" + spinq.ResetStyle + " | 0 requests sent"},
 		},
 		{
 			name: "Show NoSkip filters Skipped",

@@ -70,7 +70,7 @@ func (p InfoPrinter) PrintScenarios(allScenarios []runner.ScenarioBundle, cfg co
 	reset := ""
 	if wantColor {
 		cyan = spinq.Cyan
-		reset = spinq.ResetColor
+		reset = spinq.ResetStyle
 	}
 	skipHighlight := cyan + "┃" + reset
 	middleHighlight := cyan + "┣━" + reset

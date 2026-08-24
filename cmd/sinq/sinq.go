@@ -42,7 +42,6 @@ const sinqLuaPath = "SINQ_LUA_PATH"
 
 var stdout io.Writer = os.Stdout
 var stderr spinq.SpinqWriter = spinq.SpinqWriterPassthrough{Writer: os.Stderr}
-var getWidth func() int = func() int { return 0 }
 var isInCi = os.Getenv("NO_COLOR") != "" || os.Getenv("SINQ_NO_COLOR") != "" || os.Getenv("CI") != ""
 
 func populateConfigInRuntime(cfg *config.Config) error {
@@ -89,14 +88,7 @@ func populateConfigInRuntime(cfg *config.Config) error {
 
 func setupSpinner(color bool, ctx context.Context) (context.CancelFunc, func(*slog.Logger)) {
 	if !isInCi {
-		opts := make([]spinq.WrapOptionsFunc, 0, 1)
-		cachedGetWidth, err := spinq.DefaultGetWidth(ctx)
-		if err == nil {
-			opts = append(opts, spinq.WrapWithResizeDetection(cachedGetWidth))
-			getWidth = cachedGetWidth
-		}
-
-		pair, err := spinq.WrapOS(ctx, ui.GetSimpleFrame(color, timer.DefaultClock{}, "Starting"), spinq.Every(100*time.Millisecond), opts...)
+		pair, err := spinq.WrapOS(ctx, ui.GetSimpleFrame(color, timer.DefaultClock{}, "Starting"), spinq.Every(100*time.Millisecond), spinq.WrapWithDefaultResizeDetection(ctx))
 		if err != nil {
 			fmt.Fprintf(stderr, "Failed to set up spinner: %s", err.Error())
 			return func() {}, func(*slog.Logger) {}
@@ -359,7 +351,7 @@ func handleReporting(
 
 	report := reporter.NewPool(resultReporter)
 
-	spinnerReporter, err := spinner.NewSpinnerReporter(stderr, timer.DefaultClock{}, getWidth, willRunCount, wantColorErr)
+	spinnerReporter, err := spinner.NewSpinnerReporter(stderr, timer.DefaultClock{}, willRunCount, wantColorErr)
 	if err == nil {
 		err = report.Register(spinnerReporter)
 	}

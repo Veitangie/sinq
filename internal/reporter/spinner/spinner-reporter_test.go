@@ -24,26 +24,16 @@ func (m *mockClock) Now() time.Time {
 
 var _ timer.Clock = &mockClock{}
 
-func noopGetWidth() int { return 0 }
-
 func TestNewSpinnerReporter_NilSpinner(t *testing.T) {
-	_, err := NewSpinnerReporter(nil, timer.DefaultClock{}, noopGetWidth, 10, false)
+	_, err := NewSpinnerReporter(nil, timer.DefaultClock{}, 10, false)
 	if err == nil {
 		t.Fatal("expected an error for a nil spinner, got nil")
 	}
 }
 
-func TestNewSpinnerReporter_NilGetWidth(t *testing.T) {
-	spinner := spinq.SpinqWriterPassthrough{Writer: &bytes.Buffer{}}
-	_, err := NewSpinnerReporter(spinner, timer.DefaultClock{}, nil, 10, false)
-	if err == nil {
-		t.Fatal("expected an error for a nil getWidth, got nil")
-	}
-}
-
 func TestNewSpinnerReporter_NilClock_DefaultsWithoutError(t *testing.T) {
 	spinner := spinq.SpinqWriterPassthrough{Writer: &bytes.Buffer{}}
-	rep, err := NewSpinnerReporter(spinner, nil, noopGetWidth, 10, false)
+	rep, err := NewSpinnerReporter(spinner, nil, 10, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +44,7 @@ func TestNewSpinnerReporter_NilClock_DefaultsWithoutError(t *testing.T) {
 
 func TestSpinnerReporter_Report_SimpleMode_DrainsResults(t *testing.T) {
 	spinner := spinq.SpinqWriterPassthrough{Writer: &bytes.Buffer{}}
-	rep, err := NewSpinnerReporter(spinner, timer.DefaultClock{}, noopGetWidth, 5, false)
+	rep, err := NewSpinnerReporter(spinner, timer.DefaultClock{}, 5, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,7 +64,7 @@ func TestSpinnerReporter_Report_SimpleMode_DrainsResults(t *testing.T) {
 
 func TestSpinnerReporter_Report_BarMode_DrainsResults(t *testing.T) {
 	spinner := spinq.SpinqWriterPassthrough{Writer: &bytes.Buffer{}}
-	rep, err := NewSpinnerReporter(spinner, timer.DefaultClock{}, noopGetWidth, 20, false)
+	rep, err := NewSpinnerReporter(spinner, timer.DefaultClock{}, 20, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -102,7 +92,7 @@ func TestSpinnerReporter_Report_SwallowsErrClosedFromStop(t *testing.T) {
 	}
 	pair.Close()
 
-	rep, err := NewSpinnerReporter(pair.Spinny, timer.DefaultClock{}, noopGetWidth, 1, false)
+	rep, err := NewSpinnerReporter(pair.Spinny, timer.DefaultClock{}, 1, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,7 +121,7 @@ func TestSpinnerReporter_Report_AlwaysStopsSpinner(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	rep, err := NewSpinnerReporter(pair.Spinny, timer.DefaultClock{}, noopGetWidth, 1, false)
+	rep, err := NewSpinnerReporter(pair.Spinny, timer.DefaultClock{}, 1, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

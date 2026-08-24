@@ -55,14 +55,14 @@ func newReportData(cfg config.ReporterConfig, writer io.Writer, size int) *repor
 	}
 
 	if cfg.Color != config.Never {
-		result.markSuccess = spinq.Green + result.markSuccess + spinq.ResetColor
-		result.markFail = spinq.Red + result.markFail + spinq.ResetColor
-		result.markAborted = spinq.Yellow + result.markAborted + spinq.ResetColor
-		result.markSkipped = spinq.Gray + result.markSkipped + spinq.ResetColor
+		result.markSuccess = spinq.Green + result.markSuccess + spinq.ResetStyle
+		result.markFail = spinq.Red + result.markFail + spinq.ResetStyle
+		result.markAborted = spinq.Yellow + result.markAborted + spinq.ResetStyle
+		result.markSkipped = spinq.Gray + result.markSkipped + spinq.ResetStyle
 		result.cyan = spinq.Cyan
 		result.magenta = spinq.Magenta
 		result.lightGray = LightGray
-		result.reset = spinq.ResetColor
+		result.reset = spinq.ResetStyle
 	}
 	result.prefixedScenarioWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "   %s┃%s ", result.magenta, result.reset), underlying: writer}
 	result.prefixedRequestWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "     %s┃%s ", result.cyan, result.reset), underlying: writer}

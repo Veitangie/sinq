@@ -10,12 +10,10 @@ import (
 
 var ColorStates []string = []string{spinq.Red, spinq.Yellow, spinq.Green, spinq.Cyan, spinq.Blue, spinq.Magenta}
 
-const black = "\033[0;30m"
-
 func GetSimpleFrame(color bool, clock timer.Clock, label string) spinq.FrameFunc {
 	dotsSpinner := spinq.Simple(spinq.DotsStates)
 	if color {
-		dotsSpinner = spinq.Join("", spinq.SimpleOnceEvery(ColorStates, len(spinq.DotsStates)), dotsSpinner, spinq.Static(spinq.ResetColor))
+		dotsSpinner = spinq.Join("", spinq.SimpleOnceEvery(ColorStates, len(spinq.DotsStates)), dotsSpinner, spinq.Static(spinq.ResetStyle))
 	}
 	return spinq.Join("",
 		spinq.Surrounded(" ", dotsSpinner, " "+label+" ("),
@@ -32,10 +30,10 @@ func GetBarFrame(color bool, maxCount int, progress func() (int, int), getWidth 
 	divider := "━"
 	empty := " "
 	if color {
-		dotsSpinner = spinq.Join("", spinq.SimpleOnceEvery(ColorStates, len(spinq.DotsStates)), dotsSpinner, spinq.Static(spinq.ResetColor))
+		dotsSpinner = spinq.Join("", spinq.SimpleOnceEvery(ColorStates, len(spinq.DotsStates)), dotsSpinner, spinq.Static(spinq.ResetStyle))
 		barStart = barStart + spinq.Green
-		barEnd = barEnd + spinq.ResetColor
-		divider = divider + black
+		barEnd = barEnd + spinq.ResetStyle
+		divider = divider + spinq.Black
 		empty = full
 	}
 	maxCountDigits := 0
