@@ -1,0 +1,12 @@
+{
+  "name": "Checkout",
+  "env_matrix": [
+    {
+      "card": { "method": "card", "expected_status": 200 },
+      "crypto": { "method": "crypto", "expected_status": 202 },
+      "paypal": { "method": "paypal", "expected_status": 200 },
+      "bank": { "method": "bank_transfer", "expected_status": 202 }
+    }
+  ],
+  "tags": ["PAYMENTS"]
+}

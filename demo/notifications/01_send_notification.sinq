@@ -1,0 +1,16 @@
+$PRE{
+    targetUser = sinq.fake.uuid()
+    message = sinq.fake.word() .. " " .. sinq.fake.word()
+}
+POST ${env.BASE_URL}/notifications
+Authorization: Bearer ${AUTH_TOKEN}
+Content-Type: application/json
+
+{
+    "user_id": "${targetUser}",
+    "message": "${message}"
+}
+
+$ASSERT{ sinq.assert.code(202, "Failed to queue notification") }
+
+$POST{ NOTIFICATION_ID = res.json().id }

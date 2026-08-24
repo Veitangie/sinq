@@ -1,0 +1,6 @@
+GET ${env.BASE_URL}/orders/${ORDER_ID}/shipment
+Authorization: Bearer ${AUTH_TOKEN}
+
+$RETRY{ return sinq.retry.when(res.json().status ~= "delivered", 200) }
+
+$ASSERT{ sinq.assert.equals(res.json(), {status = "delivered"}) }

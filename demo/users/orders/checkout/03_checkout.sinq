@@ -1,0 +1,11 @@
+POST ${env.BASE_URL}/orders/${ORDER_ID}/checkout
+Authorization: Bearer ${AUTH_TOKEN}
+Content-Type: application/json
+
+{
+    "method": "${env.method}"
+}
+
+$ASSERT{
+    sinq.assert.code(env.expected_status, "Checkout failed for method " .. env.method)
+}

@@ -1,0 +1,6 @@
+{
+  "name": "sinq showcase",
+  "description": "A tour through sinq's feature set against a local demo API.",
+  "env": { "BASE_URL": "http://localhost:8085" },
+  "req_timeout": "5s"
+}

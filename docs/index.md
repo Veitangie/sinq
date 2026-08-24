@@ -4,6 +4,8 @@
 
 Unlike traditional API testing tools that treat tests as a collection of independent requests, `sinq` is built around the concept of **stateful workflows**. You describe real user flows directly in files, and `sinq` compiles them into executable scenarios that run natively in parallel.
 
+![sinq running 15 scenarios: auth, an environment matrix, retries, and a failed Lua assertion with captured output](assets/demo.gif)
+
 ---
 
 ## Why sinq?

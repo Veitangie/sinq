@@ -1,0 +1,7 @@
+POST ${env.BASE_URL}/session/refresh
+Authorization: Bearer ${AUTH_TOKEN}
+
+$ASSERT{
+    sinq.assert.code(200, "Failed to refresh session")
+    sinq.assert.isTrue(type(res.json().token) == "string", "Refreshed token missing")
+}

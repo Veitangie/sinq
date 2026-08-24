@@ -1,0 +1,11 @@
+POST ${env.BASE_URL}/login
+Content-Type: application/json
+
+{
+    "user": "demo_user",
+    "password": "hunter2"
+}
+
+$ASSERT{ sinq.assert.code(200, "Login failed") }
+
+$POST{ AUTH_TOKEN = res.json().token }

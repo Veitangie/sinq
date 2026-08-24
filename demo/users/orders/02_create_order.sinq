@@ -1,0 +1,15 @@
+$PRE{
+    if not USER_ID then error("User ID missing") end
+}
+POST ${env.BASE_URL}/orders
+Authorization: Bearer ${AUTH_TOKEN}
+Content-Type: application/json
+
+{
+    "user_id": "${USER_ID}",
+    "items": ["health_potion", "steel_sword"]
+}
+
+$ASSERT{ sinq.assert.code(201, "Failed to create order") }
+
+$POST{ ORDER_ID = res.json().id }

@@ -1,0 +1,14 @@
+$PRE{
+    print("Fetching export for report " .. REPORT_ID)
+}
+GET ${env.BASE_URL}/reports/${REPORT_ID}/export
+Authorization: Bearer ${AUTH_TOKEN}
+
+$RETRY{ return sinq.retry.when(res.json().status ~= "complete", 300) }
+
+$ASSERT{
+    local data = res.json()
+    print("Report status: " .. data.status)
+    print("Records returned: " .. data.records)
+    sinq.assert.isTrue(data.records == 256, "Expected 256 records, got " .. data.records)
+}

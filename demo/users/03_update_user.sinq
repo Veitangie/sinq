@@ -1,0 +1,12 @@
+$PRE{
+    newCompany = sinq.fake.company()
+}
+PATCH ${env.BASE_URL}/users/${USER_ID}
+Authorization: Bearer ${AUTH_TOKEN}
+Content-Type: application/json
+
+{
+    "company": "${newCompany}"
+}
+
+$ASSERT{ sinq.assert.code(200, "Failed to update user") }

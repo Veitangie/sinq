@@ -1,0 +1,11 @@
+POST ${env.BASE_URL}/reports
+Authorization: Bearer ${AUTH_TOKEN}
+Content-Type: application/json
+
+{
+    "type": "weekly_sales"
+}
+
+$ASSERT{ sinq.assert.code(202, "Failed to start report generation") }
+
+$POST{ REPORT_ID = res.json().id }

@@ -1,0 +1,3 @@
+GET ${env.BASE_URL}/health
+
+$ASSERT{ sinq.assert.code(200, "Healthcheck failed") }

@@ -1,0 +1,10 @@
+POST ${env.BASE_URL}/inventory/reserve
+Authorization: Bearer ${AUTH_TOKEN}
+Content-Type: application/json
+
+{
+    "sku": "health_potion",
+    "qty": 2
+}
+
+$ASSERT{ sinq.assert.code(200, "Failed to reserve stock") }

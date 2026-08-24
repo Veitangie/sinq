@@ -1,0 +1,9 @@
+POST ${env.BASE_URL}/admin/wipe
+Authorization: Bearer ${AUTH_TOKEN}
+Content-Type: application/json
+
+{
+    "confirm": true
+}
+
+$ASSERT{ sinq.assert.code(401, "Regular users should never be able to wipe the server") }

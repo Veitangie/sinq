@@ -1,0 +1,7 @@
+GET ${env.BASE_URL}/users/${USER_ID}
+Authorization: Bearer ${AUTH_TOKEN}
+
+$ASSERT{
+    sinq.assert.code(200, "Failed to fetch user")
+    sinq.assert.isTrue(res.json().id == USER_ID, "Returned wrong user")
+}

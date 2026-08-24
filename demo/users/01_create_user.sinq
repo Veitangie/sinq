@@ -1,0 +1,16 @@
+$PRE{
+    userName = sinq.fake.name()
+    userEmail = sinq.fake.email()
+}
+POST ${env.BASE_URL}/users
+Authorization: Bearer ${AUTH_TOKEN}
+Content-Type: application/json
+
+{
+    "name": "${userName}",
+    "email": "${userEmail}"
+}
+
+$ASSERT{ sinq.assert.code(201, "Failed to create user") }
+
+$POST{ USER_ID = res.json().id }

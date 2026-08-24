@@ -8,6 +8,10 @@
 
 Have you ever felt the pain of wiring up a bunch of independent requests into one stateful flow from start to finish? I have, and while manageable, one thing always bugged me. Why do we treat end-to-end API tests as a bunch of independent requests that we have to somehow bundle together, when they actually are much closer to stateful workflows? That's why this tool was born. It is designed to do one job - execute sequences of requests to walk through different workflow scenarios. Instead of maintaining large request collections or YAML-heavy test definitions, I wanted to describe real user workflows directly in files and let `sinq` compile them into executable scenarios. And make it natively parallel, why not? So I present to you:
 
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="sinq running 15 scenarios: auth, an environment matrix, retries, and a failed Lua assertion with captured output" width="800">
+</p>
+
 # sinq 
 
 `sinq` is a concurrent integration and end-to-end http testing tool that treats your filesystem as a workflow definition.

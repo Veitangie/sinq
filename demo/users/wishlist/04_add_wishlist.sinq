@@ -1,0 +1,12 @@
+$PRE{
+    wishedProduct = sinq.fake.word()
+}
+POST ${env.BASE_URL}/users/${USER_ID}/wishlist
+Authorization: Bearer ${AUTH_TOKEN}
+Content-Type: application/json
+
+{
+    "product": "${wishedProduct}"
+}
+
+$ASSERT{ sinq.assert.code(200, "Failed to add wishlist item") }

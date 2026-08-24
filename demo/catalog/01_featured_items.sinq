@@ -1,0 +1,4 @@
+GET ${env.BASE_URL}/catalog/featured
+Authorization: Bearer ${AUTH_TOKEN}
+
+$ASSERT{ sinq.assert.code(200, "Failed to fetch featured catalog") }

@@ -1,0 +1,6 @@
+GET ${env.BASE_URL}/search?q=potion
+Authorization: Bearer ${AUTH_TOKEN}
+
+$RETRY{ return sinq.retry.when(res.json().indexed == false, 250) }
+
+$ASSERT{ sinq.assert.isTrue(res.json().indexed, "Search index never caught up") }

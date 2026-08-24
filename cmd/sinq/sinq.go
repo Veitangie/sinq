@@ -93,30 +93,35 @@ func setupSpinner(color bool, ctx context.Context) (context.CancelFunc, func(*sl
 			fmt.Fprintf(stderr, "Failed to set up spinner: %s", err.Error())
 			return func() {}, func(*slog.Logger) {}
 		}
+
+		fmt.Fprint(stderr, spinq.HideCursor)
 		if err = pair.Spinny.Start(ctx); err != nil {
-			fmt.Fprintf(stderr, "Failed to start spinner: %s", err.Error())
+			fmt.Fprintf(stderr, "%sFailed to start spinner: %s", spinq.ShowCursor, err.Error())
 			return func() {}, func(*slog.Logger) {}
 		}
 		stderr = pair.Spinny
 		stdout = pair.Standard
-		return pair.Close, func(l *slog.Logger) {
-			if l == nil {
-				return
-			}
-			l.Debug("[sinq] Attached spinner logger")
-			for err := range pair.Err() {
-				l.Debug("[sinq] Spinner encountered error, restarting", "error", err.Error())
-				err = pair.Spinny.Start(ctx)
-				if errors.Is(err, spinq.ErrClosed) {
-					l.Debug("[sinq] Got ErrClosed from spinner, detaching")
+		return func() {
+				pair.Close()
+				fmt.Fprint(stderr, spinq.ShowCursor)
+			}, func(l *slog.Logger) {
+				if l == nil {
 					return
 				}
-				if err != nil {
-					l.Debug("[sinq] Failed to restart spinner", "error", err.Error())
+				l.Debug("[sinq] Attached spinner logger")
+				for err := range pair.Err() {
+					l.Debug("[sinq] Spinner encountered error, restarting", "error", err.Error())
+					err = pair.Spinny.Start(ctx)
+					if errors.Is(err, spinq.ErrClosed) {
+						l.Debug("[sinq] Got ErrClosed from spinner, detaching")
+						return
+					}
+					if err != nil {
+						l.Debug("[sinq] Failed to restart spinner", "error", err.Error())
+					}
 				}
+				l.Debug("[sinq] Spinner was closed, detaching")
 			}
-			l.Debug("[sinq] Spinner was closed, detaching")
-		}
 	}
 
 	return func() {}, func(*slog.Logger) {}
