@@ -80,7 +80,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **-w**, **--workers** *int*
 : Number of concurrent workers (default 10).
 
-**-c**, **--count** *int*
+**-c**, **--count** *uint*
 : Number of launches for every scenario.
 
 **-s**, **--secret** *string*
@@ -129,7 +129,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows.
 
 **--max-cache-size** *string*
-: Global maximum response size for cached requests, default 5MB.
+: Global maximum response size for cached requests, default 5MiB.
 
 **--cache-timeout** *string*
 : Global timeout for the cached requests, default 10s.

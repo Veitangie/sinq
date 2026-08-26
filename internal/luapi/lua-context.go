@@ -136,6 +136,7 @@ func (lc *LuaContext) SetupScenarioEnvironment(setIdx lua.LGFunction, finishScen
 	lc.cryptoTable.RawSetString("sha256", lc.NewFunction(SHA256Hash))
 	lc.cryptoTable.RawSetString("sha512", lc.NewFunction(SHA512Hash))
 	lc.cryptoTable.RawSetString("hmac", lc.NewFunction(HMACHash))
+	lc.cryptoTable.RawSetString("md5", lc.NewFunction(MD5Hash))
 	lc.sinqTable.RawSetString("crypto", lc.cryptoTable)
 
 	lc.timeTable = lc.NewTable()

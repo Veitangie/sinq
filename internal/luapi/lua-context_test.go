@@ -5,6 +5,9 @@ package luapi
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
+	"fmt"
 	"testing"
 	"time"
 
@@ -82,6 +85,23 @@ func TestLuaContext_JSONParserEquality(t *testing.T) {
 		assert(tbl.a == sinq.json.null, "Expected nested parsed null to exactly equal json.null singleton")
 	`); err != nil {
 		t.Fatalf("Lua JSON equality test failed: %v", err)
+	}
+}
+
+func TestLuaContext_CryptoMD5Registered(t *testing.T) {
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+	defer lc.Close()
+
+	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+	expected := md5.Sum([]byte("test payload"))
+	script := fmt.Sprintf(`
+		local got = sinq.crypto.md5("test payload")
+		assert(got == %q, "sinq.crypto.md5 returned an unexpected hash: " .. tostring(got))
+	`, hex.EncodeToString(expected[:]))
+
+	if err := lc.DoString(script); err != nil {
+		t.Fatalf("sinq.crypto.md5 is not reachable through the registered Lua table: %v", err)
 	}
 }
 
