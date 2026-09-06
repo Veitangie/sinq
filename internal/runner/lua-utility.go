@@ -6,8 +6,10 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +21,273 @@ import (
 	"veitangie.dev/sinq/internal/scenario"
 	"veitangie.dev/sinq/internal/timer"
 )
+
+type preScriptResultBuilder struct {
+	workspace Workspace
+	filename  string
+	res       preScriptResult
+}
+
+type preScriptResult struct {
+	multipart   multipartData
+	filenameIn  string
+	filenameOut string
+	cache       bool
+	skip        bool
+}
+
+func (b *preScriptResultBuilder) attach() lua.LGFunction {
+	return func(ls *lua.LState) int {
+		attachedPath := ls.CheckString(1)
+		if filepath.IsAbs(attachedPath) {
+			ls.RaiseError("req.attach: invalid file path '%s', should not be absolute", attachedPath)
+			return 0
+		}
+
+		resolvedPath := filepath.Join(filepath.Dir(b.filename), attachedPath)
+
+		info, err := b.workspace.Stat(resolvedPath)
+		if err != nil || info.IsDir() {
+			ls.RaiseError("req.attach: invalid file path '%s' (resolved as '%s')", attachedPath, resolvedPath)
+			return 0
+		}
+		b.res.filenameIn = resolvedPath
+		return 0
+	}
+}
+
+func (b *preScriptResultBuilder) saveTo() lua.LGFunction {
+	return func(ls *lua.LState) int {
+		savePath := ls.CheckString(1)
+		if filepath.IsAbs(savePath) {
+			ls.RaiseError("req.saveResponseTo: invalid file path '%s', should not be absolute", savePath)
+			return 0
+		}
+
+		resolvedPath := filepath.Join(filepath.Dir(b.filename), savePath)
+		resolvedPathDir := filepath.Dir(resolvedPath)
+
+		info, err := b.workspace.Stat(resolvedPathDir)
+		if os.IsNotExist(err) {
+			err = b.workspace.MkDirall(resolvedPathDir)
+			if err != nil {
+				ls.RaiseError("req.saveResponseTo: invalid file path '%s' (failed to create directory at %s)", savePath, resolvedPathDir)
+				return 0
+			}
+			info, err = b.workspace.Stat(resolvedPathDir)
+		}
+
+		if err != nil || !info.IsDir() {
+			ls.RaiseError("req.saveResponseTo: invalid file path '%s' (resolved path '%s' is not a directory)", savePath, resolvedPathDir)
+			return 0
+		}
+		b.res.filenameOut = resolvedPath
+		return 0
+	}
+}
+
+func (b *preScriptResultBuilder) cache() lua.LGFunction {
+	return func(ls *lua.LState) int {
+		flag := ls.OptBool(1, true)
+		b.res.cache = flag
+		return 0
+	}
+}
+
+func (b *preScriptResultBuilder) skip() lua.LGFunction {
+	return func(ls *lua.LState) int {
+		flag := ls.OptBool(1, true)
+
+		b.res.skip = flag
+		return 0
+	}
+}
+
+func lTableToHeaders(value *lua.LTable) (map[string][]string, error) {
+	res := make(map[string][]string, value.Len())
+	var err error
+	value.ForEach(func(key, value lua.LValue) {
+		if err != nil {
+			return
+		}
+
+		keyString, ok := key.(lua.LString)
+		if !ok {
+			err = errors.New("header key must be a string")
+			return
+		}
+		actualKey := textproto.CanonicalMIMEHeaderKey(string(keyString))
+
+		existing := res[actualKey]
+		switch typed := value.(type) {
+		case lua.LString:
+			res[actualKey] = append(existing, string(typed))
+		case lua.LNumber:
+			res[actualKey] = append(existing, typed.String())
+		case lua.LBool:
+			res[actualKey] = append(existing, typed.String())
+		default:
+			err = errors.New("header value must be a string, number or bool")
+		}
+	})
+	return res, err
+}
+
+func stringOrNil(tbl *lua.LTable, key string) (string, error) {
+	value := tbl.RawGetString(key)
+	switch typed := value.(type) {
+	case *lua.LNilType:
+		return "", nil
+	case lua.LString:
+		return string(typed), nil
+	default:
+		return "", fmt.Errorf("expected %s to be string, got %s", key, value.Type().String())
+	}
+}
+
+func allArgs(ls *lua.LState) []*lua.LTable {
+	top := ls.GetTop()
+	args := make([]*lua.LTable, 0, top)
+	for i := 1; i <= top; i++ {
+		args = append(args, ls.CheckTable(i))
+	}
+
+	if len(args) == 1 && args[0].Len() != 0 {
+		tbl := args[0]
+		newArgs := make([]*lua.LTable, 0, tbl.Len())
+		for i := 1; i <= tbl.MaxN(); i++ {
+			if next, ok := tbl.RawGetInt(i).(*lua.LTable); ok {
+				newArgs = append(newArgs, next)
+			} else {
+				break
+			}
+		}
+
+		if len(newArgs) == tbl.Len() {
+			args = newArgs
+		}
+	}
+
+	return args
+}
+
+func contentDispositionAndTypeFromTable(tbl *lua.LTable, source string) (string, string, error) {
+	var contentDisposition, contentType string
+	var err error
+	if contentDisposition, err = stringOrNil(tbl, "contentDisposition"); err != nil {
+		return "", "", err
+	}
+	if contentType, err = stringOrNil(tbl, "contentType"); err != nil {
+		return "", "", err
+	}
+	if contentDisposition == "" {
+		var name, filename string
+		if name, err = stringOrNil(tbl, "name"); err != nil {
+			return "", "", err
+		}
+		if name == "" {
+			return "", "", errors.New("entry has neither contentDisposition nor name")
+		}
+
+		if useSource, ok := tbl.RawGetString("filename").(lua.LBool); ok {
+			if bool(useSource) && source != "" {
+				filename = filepath.Base(source)
+			}
+		} else if filename, err = stringOrNil(tbl, "filename"); err != nil {
+			return "", "", err
+		}
+
+		trailer := ""
+		if filename != "" {
+			trailer = fmt.Sprintf("; filename=\"%s\"", filename)
+			if contentType == "" {
+				contentType = contentTypeFromFile(filepath.Base(filename))
+			}
+			if contentType == "" {
+				contentType = contentTypeFromFile(filepath.Base(source))
+			}
+			if contentType == "" {
+				contentType = octetStream
+			}
+		}
+		contentDisposition = fmt.Sprintf("form-data; name=\"%s\"%s", name, trailer)
+	}
+	return contentDisposition, contentType, nil
+}
+
+func (b *preScriptResultBuilder) multipart() lua.LGFunction {
+	return func(ls *lua.LState) int {
+		args := allArgs(ls)
+		acc := make([]multipartEntry, 0, len(args))
+		for _, tbl := range args {
+			headers := make(map[string][]string)
+			if headersTable, ok := tbl.RawGetString("headers").(*lua.LTable); ok {
+				var err error
+				headers, err = lTableToHeaders(headersTable)
+				if err != nil {
+					ls.RaiseError("req.multipart: invalid headers: %s", err.Error())
+					return 0
+				}
+			}
+
+			var data, source, contentDisposition, contentType string
+			var err error
+			if data, err = stringOrNil(tbl, "data"); err != nil {
+				ls.RaiseError("req.multipart: %s", err.Error())
+				return 0
+			}
+			if source, err = stringOrNil(tbl, "source"); err != nil {
+				ls.RaiseError("req.multipart: %s", err.Error())
+				return 0
+			}
+			if data != "" && source != "" {
+				ls.RaiseError("req.multipart: entry has both data and source")
+				return 0
+			}
+
+			if source != "" {
+				if filepath.IsAbs(source) {
+					ls.RaiseError("req.multipart: invalid source path '%s', should not be absolute", source)
+					return 0
+				}
+
+				resolvedPath := filepath.Join(filepath.Dir(b.filename), source)
+
+				info, err := b.workspace.Stat(resolvedPath)
+				if err != nil || info.IsDir() {
+					ls.RaiseError("req.multipart: invalid source path '%s' (resolved as '%s')", source, resolvedPath)
+					return 0
+				}
+				source = resolvedPath
+			}
+
+			contentDisposition, contentType, err = contentDispositionAndTypeFromTable(tbl, source)
+			if err != nil {
+				ls.RaiseError("req.multipart: %s", err.Error())
+				return 0
+			}
+
+			acc = append(acc, multipartEntry{
+				data:               data,
+				source:             source,
+				contentDisposition: contentDisposition,
+				contentType:        contentType,
+				headers:            headers,
+			})
+		}
+		b.res.multipart.entries = append(b.res.multipart.entries, acc...)
+
+		return 0
+	}
+}
+
+func (b *preScriptResultBuilder) multipartBoundary() lua.LGFunction {
+	return func(ls *lua.LState) int {
+		boundary := ls.CheckString(1)
+		b.res.multipart.boundary = boundary
+		return 0
+	}
+}
 
 func (w *worker) setRequestIdx(ls *lua.LState) int {
 	nextIdxFloat := ls.CheckNumber(1)
@@ -48,70 +317,22 @@ func (w *worker) runEffectfulScript(token scenario.Token, extract extractPayload
 	return w.safeExecute(token, extract, filename, executionTimeout)
 }
 
-func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (string, string, bool, bool, error) {
-	var filenameIn, filenameOut string
-	var cache, skip bool
+func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (preScriptResult, error) {
+	resBuilder := preScriptResultBuilder{workspace: w.env.workspace, filename: filename}
 
-	w.lc.SetupPreScript(func(ls *lua.LState) int {
-		attachedPath := ls.CheckString(1)
-		if filepath.IsAbs(attachedPath) {
-			ls.RaiseError("req.attach: invalid file path '%s', should not be absolute", attachedPath)
-			return 0
-		}
-
-		resolvedPath := filepath.Join(filepath.Dir(filename), attachedPath)
-
-		info, err := w.env.workspace.Stat(resolvedPath)
-		if err != nil || info.IsDir() {
-			ls.RaiseError("req.attach: invalid file path '%s' (resolved as '%s')", attachedPath, resolvedPath)
-			return 0
-		}
-		filenameIn = resolvedPath
-		return 0
-	}, func(ls *lua.LState) int {
-		savePath := ls.CheckString(1)
-		if filepath.IsAbs(savePath) {
-			ls.RaiseError("req.saveResponseTo: invalid file path '%s', should not be absolute", savePath)
-			return 0
-		}
-
-		resolvedPath := filepath.Join(filepath.Dir(filename), savePath)
-		resolvedPathDir := filepath.Dir(resolvedPath)
-
-		info, err := w.env.workspace.Stat(resolvedPathDir)
-		if os.IsNotExist(err) {
-			err = w.env.workspace.MkDirall(resolvedPathDir)
-			if err != nil {
-				ls.RaiseError("req.saveResponseTo: invalid file path '%s' (failed to create directory at %s)", savePath, resolvedPathDir)
-				return 0
-			}
-			info, err = w.env.workspace.Stat(resolvedPathDir)
-		}
-
-		if err != nil || !info.IsDir() {
-			ls.RaiseError("req.saveResponseTo: invalid file path '%s' (resolved path '%s' is not a directory)", savePath, resolvedPathDir)
-			return 0
-		}
-		filenameOut = resolvedPath
-		return 0
-	},
-		func(ls *lua.LState) int {
-			flag := ls.OptBool(1, true)
-			cache = flag
-			return 0
-		},
-		func(ls *lua.LState) int {
-			flag := ls.OptBool(1, true)
-
-			skip = flag
-			return 0
-		},
+	w.lc.SetupPreScript(
+		resBuilder.attach(),
+		resBuilder.saveTo(),
+		resBuilder.cache(),
+		resBuilder.skip(),
+		resBuilder.multipart(),
+		resBuilder.multipartBoundary(),
 	)
 	defer w.lc.TearDownPreScript()
 
 	err := w.runEffectfulScript(token, extract, filename, executionTimeout)
 
-	return filenameIn, filenameOut, cache, skip, err
+	return resBuilder.res, err
 }
 
 func (w *worker) runRetryScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (int64, error) {

@@ -1,20 +1,21 @@
 # Architecture Overview
 
-`sinq` is designed to be highly concurrent, allowing complex, multi-step API tests to run as fast as your network allows without stepping on each other's toes.
-
-To achieve this, `sinq` splits its workload across three primary components:
+`sinq` works in three stages: it discovers the tests on disk, runs them across a worker pool, and reports the results.
 
 ## 1. Treewalker
-The Treewalker is the discovery engine. It scans your physical filesystem and builds a list of "Scenarios" to execute. Instead of one massive YAML file, `sinq` uses folders to organize test flows, allowing child folders to inherit setup files and configurations from their parent folders.
 
-[Read more about the Treewalker & Configuration Aggregation](treewalker.md)
+The Treewalker walks the directories you point `sinq` at and turns them into a list of scenarios. Test flows are folders rather than one large file, and a child folder inherits the setup files and configuration of its parents.
+
+[Treewalker & configuration aggregation](treewalker.md)
 
 ## 2. Execution Runner
-Once the Treewalker discovers all the scenarios, it hands them off to the Runner. The Runner manages a pool of independent workers. Each worker gets its own isolated Lua environment and HTTP cookie jar, ensuring that Scenario A never accidentally shares state or sessions with Scenario B, even while executing concurrently.
 
-[Read more about the Runner & Concurrency](runner.md)
+The Runner takes the scenarios from the Treewalker and runs them on a pool of workers. Each worker has its own Lua state and its own HTTP cookie jar, so one scenario cannot see another's variables or session even though they run at the same time.
+
+[Runner & concurrency](runner.md)
 
 ## 3. Reporters
-As the Runner executes scenarios, it streams the results to Reporters. Reporters format the output for human readability in the terminal, or generate structured artifacts like JUnit XML for your CI/CD pipelines.
 
-[Read more about CI/CD Integration](ci-cd-integration.md)
+The Runner streams results to a reporter as scenarios finish. Reporters render the console output or write a JUnit XML file for CI.
+
+[CI/CD integration](ci-cd-integration.md)

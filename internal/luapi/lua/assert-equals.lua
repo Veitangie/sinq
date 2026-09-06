@@ -1,10 +1,15 @@
 -- sinq - A concurrent integration testing tool
 -- Copyright (C) 2026 Veitangie
 -- SPDX-License-Identifier: GPL-3.0-or-later
-local actual, expected = ...
+local actual, expected, message = ...
+local function messageOr(otherMessage)
+  if type(message) ~= "string" then return otherMessage end
+  return message
+end
+
 if type(actual) ~= type(expected) then
   sinq.assert.fail(
-    "sinq.assert.equals: Expected type " .. type(expected) .. ", got type " .. type(actual) .. " instead."
+    messageOr("sinq.assert.equals: Expected type " .. type(expected) .. ", got type " .. type(actual) .. " instead.")
   )
   return
 end
@@ -17,7 +22,15 @@ if type(expected) == "table" then
       local haveV = have[k]
       if type(v) ~= type(haveV) then
         sinq.assert.fail(
-          "sinq.assert.equals: Expected type " .. type(v) .. ", got type " .. type(haveV) .. " in field " .. prefix .. k
+          messageOr(
+            "sinq.assert.equals: Expected type "
+              .. type(v)
+              .. ", got type "
+              .. type(haveV)
+              .. " in field "
+              .. prefix
+              .. k
+          )
         )
         goto continue
       end
@@ -29,13 +42,15 @@ if type(expected) == "table" then
 
       if v ~= haveV then
         sinq.assert.fail(
-          "sinq.assert.equals: Expected value "
-            .. tostring(v)
-            .. ", got "
-            .. tostring(haveV)
-            .. " in field "
-            .. prefix
-            .. k
+          messageOr(
+            "sinq.assert.equals: Expected value "
+              .. tostring(v)
+              .. ", got "
+              .. tostring(haveV)
+              .. " in field "
+              .. prefix
+              .. k
+          )
         )
       end
       ::continue::
@@ -47,5 +62,7 @@ if type(expected) == "table" then
 end
 
 if actual ~= expected then
-  sinq.assert.fail("sinq.assert.equals: Expected " .. tostring(expected) .. ", got " .. tostring(actual) .. " instead")
+  sinq.assert.fail(
+    messageOr("sinq.assert.equals: Expected " .. tostring(expected) .. ", got " .. tostring(actual) .. " instead")
+  )
 end

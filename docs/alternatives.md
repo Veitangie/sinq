@@ -1,38 +1,74 @@
 # Alternatives & Comparisons
 
-When deciding on an API testing tool, it's important to choose the right fit for your workflow. Here is a comparison of `sinq` against other popular tools in the space.
+How `sinq` compares to the API testing tools people bring up most, starting with the ones closest to it in approach.
+
+| Tool | Tests written as | Scripting | Parallel by default | Built for |
+| --- | --- | --- | --- | --- |
+| **sinq** | Plain-text `.sinq` (raw HTTP) + directory tree | Embedded Lua | Yes | Stateful HTTP workflows in CI |
+| Hurl | Plain-text `.hurl` (raw HTTP) | Predicates and filters | No | Plain-text HTTP tests from the CLI |
+| Venom | YAML | Go templates and `govaluate` | Yes | Multi-protocol integration tests in CI |
+| Postman / Insomnia | GUI collections (JSON) | JavaScript | No | Interactive API exploration |
+| Bruno | Plain-text collections (`.bru`) | JavaScript (Node) | No | Git-friendly Postman-style client |
+| REST Client / httpyac | `.http` / `.rest` files | Limited, or JS in httpyac | No | Sending requests from your editor |
+| k6 | JavaScript | JavaScript | Yes (virtual users) | Load and performance testing |
 
 ## Sinq vs. Hurl
 
-[Hurl](https://hurl.dev) is an incredible tool and arguably the closest in philosophy to `sinq`. Both tools use plain text files to define HTTP requests and assertions, keeping you close to the raw HTTP protocol. 
+[Hurl](https://hurl.dev) is probably the closest tool to `sinq`. Both keep requests and assertions in plain-text files that stay close to raw HTTP.
 
-However, `sinq` diverges in three major ways:
+The differences:
 
-1.  **Full Scripting Language:** Hurl relies on a built-in set of predicates and filters. When you hit a complex edge case (e.g., parsing a specific JWT claim, generating dynamic payloads, or implementing complex retry logic based on response bodies), you might get stuck. `sinq` embeds a complete Lua VM. If you can code it in Lua, you can do it in `sinq`.
-2.  **Concurrency by Default:** `sinq` treats every leaf directory as an isolated scenario and runs all of them concurrently out-of-the-box. This drastically reduces execution time for large test suites without requiring external parallelization tools.
-3.  **DRY-ness (Don't Repeat Yourself):** In `sinq`, scenarios inherit requests and configuration from parent directories. If 50 endpoints require the same authentication and setup flow, you define it **once** at the root of the folder. Hurl typically requires you to either repeat the setup in each file or pass state manually.
+- **Scripting.** Hurl provides a fixed set of predicates and filters. For things outside that set (pulling one claim out of a JWT, generating a payload on the fly, retrying based on what came back in the body) you reach the limit of what they can express. `sinq` runs a full Lua VM, so those cases are just code.
+- **Concurrency.** `sinq` runs every leaf directory as its own scenario and fires them all at once. Hurl runs files one after another unless you parallelize it yourself.
+- **Reuse.** A `sinq` scenario inherits requests and config from the directories above it, so shared auth and setup live in one file at the root. With Hurl, that setup is usually repeated per file or passed along as state you manage yourself.
+
+If your assertions stay simple, Hurl is the lighter choice: no scripting language to learn and a longer track record.
+
+## Sinq vs. Venom
+
+[Venom](https://github.com/ovh/venom) is OVHcloud's test runner. Like `sinq` it ships as a single Go binary, runs headless in CI, and writes JUnit XML. Suites are YAML: a suite holds test cases, a test case holds steps, and each step runs an "executor" with assertions attached.
+
+- **Format.** Venom suites are YAML, with logic written as Go templates and `govaluate` expressions inside strings. `sinq` files are near-raw HTTP with Lua for the dynamic parts.
+- **Structure.** Venom describes the flow inside the YAML. `sinq` uses the directory layout, and child folders inherit setup and config from their parents.
+- **Concurrency.** `sinq` runs scenarios in parallel by default.
+
+Venom also covers far more than HTTP, with executors for gRPC, SQL, SSH, Kafka, Redis, AMQP, IMAP, and shell commands. `sinq` is HTTP-only, so if a suite also needs to talk to a database or a queue, Venom is the better fit.
 
 ## Sinq vs. Postman / Insomnia
 
-Postman and Insomnia are GUI-first tools for API exploration.
+[Postman](https://www.postman.com) and [Insomnia](https://insomnia.rest) are GUI-first tools for exploring and testing APIs interactively.
 
-*   **Workflow:** They require you to manually chain requests together or write complex JavaScript in a built-in editor window to extract variables between requests. `sinq` allows you to define requests, assertions, scripts all in your code editor of choice, chaining sequences of requests by default.
-*   **Performance:** `sinq` executes independent scenarios concurrently by default.
-*   **Version Control:** `sinq` uses plain-text `.sinq` files that live alongside your code. No need for syncing JSON collections, dealing with git conflicts in JSON blobs, or relying on paid team workspaces to collaborate.
+- **Workflow.** Chaining requests is done by wiring them together in the UI or writing JavaScript in the app's script panel. In `sinq` the chain is the order of the files, and everything lives in your editor.
+- **Concurrency.** `sinq` runs independent scenarios in parallel.
+- **Version control.** `sinq` tests are plain `.sinq` files next to your code, with no exported JSON collections to sync or JSON diffs to review, and no paid workspace for team access.
+
+Their strength is the interface: a visual request explorer, built-in mock servers, and shared team workspaces. `sinq` is a CLI and does not offer those.
 
 ## Sinq vs. Bruno
 
-Bruno is a great modern alternative to Postman that stores collections in plain text, making it much better for git version control.
+[Bruno](https://www.usebruno.com) is a Postman-style client that stores collections as plain text, which makes it much friendlier under git.
 
-*   **State Management:** Bruno is still fundamentally built around "Collections of Requests". `sinq` is built around workflows - "Scenarios" and directory trees, making it much easier to write complete end-to-end integration flows without managing a massive global environment state.
-*   **Scripting:** Bruno relies on Node.js/JavaScript, requiring a heavier runtime footprint. `sinq` embeds a lightweight Lua VM directly into a single compiled binary.
+- **Model.** Bruno is organized as collections of requests. `sinq` is organized as scenarios and directory trees, which suits end-to-end flows without one large shared environment.
+- **Scripting.** Bruno scripts in JavaScript on Node. `sinq` has a small Lua VM built into the binary, with nothing to install.
+
+Bruno also keeps a desktop GUI for building and browsing requests, so if you want plain-text storage together with a visual client, that is what it offers.
 
 ## Sinq vs. REST Client / httpyac
 
-These are fantastic tools for executing requests directly from your editor (VSCode).
+The VS Code [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) and [httpyac](https://httpyac.github.io) are made for sending requests straight from your editor as you work.
 
-*   **CI/CD Focus:** While you can run them in CI, they are primarily built for interactive editor usage. `sinq` is built from the ground-up to be a headless test runner. It features retry logic, native JUnit XML reporting, and environment matrices for parameterized testing, making it better fit for CI/CD pipelines.
+They fit the edit-and-send loop during development. `sinq` is made to run headless in CI, with retry policies, JUnit XML, environment matrices for parameterized runs, tag and name filters, and parallel execution. If you mainly want to hit an endpoint from your editor, they do that well.
+
+## Sinq vs. k6
+
+[k6](https://k6.io) is a load and performance testing tool from Grafana. Tests are JavaScript, executed by a Go engine that can drive many virtual users at once.
+
+- **Goal.** k6 measures how a system behaves under load: throughput, latency percentiles, error rate at a given number of virtual users. `sinq` checks whether a workflow returns the correct result, and runs scenarios concurrently to finish the suite sooner rather than to generate load.
+- **Assertions.** k6 uses lightweight checks and thresholds suited to load runs. `sinq` is built around per-request assertion hooks for functional correctness.
+- **Reporting.** k6 produces load metrics and time series. `sinq` produces per-scenario pass/fail and JUnit XML for CI gating.
+
+For measuring how fast or how reliable a service is under pressure, use k6. For confirming that a multi-step flow does the right thing, use `sinq`. The two work well side by side.
 
 ## Summary
 
-Choose `sinq` if you want a lightweight, fast, filesystem-based CLI tool designed specifically for writing **stateful HTTP workflows**, staying DRY, and running them in CI/CD pipelines.
+Reach for `sinq` when you want a small, fast, file-based CLI for writing stateful HTTP workflows, keeping them DRY, and running them in CI.

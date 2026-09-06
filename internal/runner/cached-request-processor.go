@@ -81,7 +81,7 @@ func (sp *cachedRequestProcessor) process(
 
 		resp, err := client.Do(betterRequest)
 		if err != nil {
-			return intermediate{}, err
+			return intermediate{}, fixClientErr(err)
 		}
 
 		res, err := makeIntermediate(workspace, filenameTo, int64(sp.maxCacheSize.ByteAmount), resp)
@@ -98,7 +98,7 @@ func singleflightSafe(underlying func() (any, error)) func() (any, error) {
 			panickedWith := recover()
 			if panickedWith != nil {
 				result = nil
-				err = fmt.Errorf("Caugh a panic in single flight: %v", panickedWith)
+				err = fmt.Errorf("Caught a panic in single flight: %v", panickedWith)
 			}
 		}()
 		result, err = underlying()

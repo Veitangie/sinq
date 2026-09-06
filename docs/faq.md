@@ -1,7 +1,5 @@
 # Frequently Asked Questions (FAQ)
 
-Here are some of the most common questions regarding `sinq`.
-
 ## Is `sinq` Open Source? Can I contribute?
 
 `sinq` is free and Open Source software, distributed under the GNU General Public License v3 (GPLv3). 
@@ -31,15 +29,15 @@ Authorization: Bearer ${AUTH_TOKEN}
 
 When you point `sinq` at a root directory, it recursively scans for files. **Every leaf directory (a folder with no subfolders) becomes an isolated "Scenario".** 
 
-`sinq` runs all of these Scenarios concurrently by default, bounded only by the `-w/--workers` flag (which defaults to 10). Because each Scenario gets its own dedicated Lua VM and environment sandbox, they run entirely in parallel without any race conditions.
+`sinq` runs all of these Scenarios concurrently by default, bounded only by the `-w/--workers` flag (which defaults to 10). Each Scenario gets its own Lua VM and environment sandbox, so there is no shared state to race on.
 
 ## Can I share state between different scenarios?
 
-**No.** By design, every scenario runs in complete isolation. This is what guarantees that your tests can be run safely in parallel. If you need a shared setup step (like fetching an authentication token or creating a base database record), place that `.sinq` file in a parent directory. Every child scenario will inherit that file and execute the setup independently before running its own specific tests.
+**No.** Every scenario runs in isolation, which is what makes running them in parallel safe. If you need a shared setup step (like fetching an authentication token or creating a base database record), place that `.sinq` file in a parent directory. Every child scenario will inherit that file and execute the setup independently before running its own specific tests.
 
 ## How do I do Data-Driven / Parameterized Testing?
 
-`sinq` supports this natively through the `env_matrix` configuration in `.scenario` files. You can define an array of environments, and `sinq` will automatically duplicate and execute the scenario once for each environment payload in the matrix. See the [Environment Matrix documentation](env-matrix.md) for detailed examples.
+Use the `env_matrix` key in a `.scenario` file. You define an array of environments and `sinq` runs the scenario once per combination. See the [Environment Matrix documentation](env-matrix.md) for examples.
 
 ## How do I handle secrets securely?
 
@@ -58,13 +56,39 @@ POST ${env.BASE_URL}/login
 
 ## How do I upload a file?
 
-To send raw file contents as the request body, use the `$PRE` hook's `req.attach()` method. This instructs `sinq` to stream the file directly from disk into the HTTP request body.
+If the whole request body **is** the file, use `req.attach()` in `$PRE`. `sinq` streams the file straight from disk into the body:
 
 ```http
 POST ${env.BASE_URL}/upload
 Content-Type: application/octet-stream
 
 $PRE{ req.attach("path/to/my_file.bin") }
+```
+
+For a real HTML-style upload (a file plus other form fields), use `req.multipart()` in `$PRE`. Each argument is one part; `filename` makes a part a file part (`true` reuses the source's basename), and the `Content-Type` is sniffed from the extension when omitted:
+
+```http
+POST ${env.BASE_URL}/avatar
+
+$PRE{
+    req.multipart(
+        { name = "user_id", data = env.USER_ID },
+        { name = "avatar", source = "fixtures/face.png", filename = true }
+    )
+}
+```
+
+`sinq` sets `Content-Type: multipart/form-data; boundary=…` for you (unless you set a `Content-Type` yourself). See the [Lua API reference](lua-api.md#multipart-bodies) for every entry key.
+
+## How do I send a form (`application/x-www-form-urlencoded`) body?
+
+There is no dedicated helper. Build the body with `sinq.encoding.urlEncode` and set the header explicitly:
+
+```http
+POST ${env.BASE_URL}/login
+Content-Type: application/x-www-form-urlencoded
+
+${ "username=" .. sinq.encoding.urlEncode(env.USER) .. "&password=" .. sinq.encoding.urlEncode(secrets.PASS) }
 ```
 
 ## How do I enable request caching?
@@ -126,7 +150,7 @@ $RETRY{
     return -1
 }
 ```
-You can also use the built-in helpers like `sinq.retry.when(condition, delay)` for cleaner code!
+The `sinq.retry.*` helpers wrap this pattern, e.g. `sinq.retry.when(condition, delay)`.
 
 ## How do I override a deeply nested env/secret key or value?
 

@@ -210,7 +210,7 @@ func TestWorker_AttachInvalidFileFastFails(t *testing.T) {
 	extract := func(scenario.Token) []byte { return script }
 	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
 
-	_, _, _, _, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+	_, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
 
 	if err == nil {
 		t.Fatal("Expected runPreScript to fail on missing file, but it succeeded")
@@ -228,12 +228,12 @@ func TestWorker_SkipRequest(t *testing.T) {
 	extract := func(scenario.Token) []byte { return script }
 	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
 
-	_, _, _, skip, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+	res, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
 
 	if err != nil {
 		t.Fatalf("Expected runPreScript to succeed, but got error: %v", err)
 	}
-	if !skip {
+	if !res.skip {
 		t.Errorf("Expected skip to be true, got false")
 	}
 }
@@ -1234,6 +1234,29 @@ func TestRequestProcessor_GetHash_CachesResult(t *testing.T) {
 	}
 }
 
+func TestRequestProcessor_GetHash_IncludesMultipartHeaders(t *testing.T) {
+	w := setupTestWorker(t, nil)
+
+	mk := func(headerVal string) string {
+		p := &RequestProcessor{
+			w:            w,
+			materialized: []byte("POST http://x/\n\n"),
+			httpRequest:  &http.Request{URL: &url.URL{}},
+			client:       &http.Client{},
+			multipart: multipartData{entries: []multipartEntry{{
+				contentDisposition: `form-data; name="a"`,
+				data:               "1",
+				headers:            map[string][]string{"X-Sig": {headerVal}},
+			}}},
+		}
+		return p.getHash()
+	}
+
+	if mk("AAA") == mk("BBB") {
+		t.Fatal("multipart requests differing only by a per-part header hash identically")
+	}
+}
+
 func TestRequestProcessor_Send_ConflictingBodyAndFile(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.lc.SetupRequestEnvironment(0)
@@ -1247,6 +1270,7 @@ func TestRequestProcessor_Send_ConflictingBodyAndFile(t *testing.T) {
 		httpRequest:  req,
 		client:       &http.Client{},
 		filenameFrom: "attached.txt",
+		requestBody:  []byte("body content"),
 		requestTimer: timer.NewTimer(timer.DefaultClock{}),
 		result:       &RequestResult{},
 		status:       new(ResultStatus),
@@ -1254,7 +1278,7 @@ func TestRequestProcessor_Send_ConflictingBodyAndFile(t *testing.T) {
 	}
 
 	_, err := processor.send()
-	if err == nil || !strings.Contains(err.Error(), "both attached body and body content") {
+	if err == nil || !strings.Contains(err.Error(), "more than one body") {
 		t.Errorf("expected a conflict error for attached file + body content, got: %v", err)
 	}
 }
@@ -1309,6 +1333,7 @@ func TestRequestProcessor_SendCached_ConflictingBodyAndFile(t *testing.T) {
 		httpRequest:  req,
 		client:       &http.Client{},
 		filenameFrom: "attached.txt",
+		requestBody:  []byte("body content"),
 		requestTimer: timer.NewTimer(timer.DefaultClock{}),
 		result:       &RequestResult{},
 		status:       new(ResultStatus),
@@ -1316,7 +1341,7 @@ func TestRequestProcessor_SendCached_ConflictingBodyAndFile(t *testing.T) {
 	}
 
 	_, err := processor.sendCached()
-	if err == nil || !strings.Contains(err.Error(), "both attached body and body content") {
+	if err == nil || !strings.Contains(err.Error(), "more than one body") {
 		t.Errorf("expected a conflict error for attached file + body content in the cached path, got: %v", err)
 	}
 }

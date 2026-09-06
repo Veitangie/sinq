@@ -27,13 +27,13 @@ func GetBarFrame(color bool, maxCount int, progress func() (int, int), getWidth 
 	barStart := " Running | "
 	barEnd := ""
 	full := "━"
-	divider := "━"
+	divider := ""
 	empty := " "
 	if color {
 		dotsSpinner = spinq.Join("", spinq.SimpleOnceEvery(ColorStates, len(spinq.DotsStates)), dotsSpinner, spinq.Static(spinq.ResetStyle))
 		barStart = barStart + spinq.Green
 		barEnd = barEnd + spinq.ResetStyle
-		divider = divider + spinq.Black
+		divider = spinq.Black
 		empty = full
 	}
 	maxCountDigits := 0

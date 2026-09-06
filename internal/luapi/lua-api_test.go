@@ -165,6 +165,27 @@ func TestLuaAssertions(t *testing.T) {
 			wantFailures:  1,
 			failureSubstr: "Expected type string, got type nil in field status",
 		},
+		{
+			name:          "AssertEquals: Scalar Mismatch With Custom Message",
+			protoFunc:     AssertEquals,
+			args:          []any{"actualSecret", "expectedSecret", "tokens differ"},
+			wantFailures:  1,
+			failureSubstr: "tokens differ",
+		},
+		{
+			name:          "AssertEquals: Table Value Mismatch With Custom Message",
+			protoFunc:     AssertEquals,
+			args:          []any{map[string]any{"token": "abc"}, map[string]any{"token": "xyz"}, "token mismatch"},
+			wantFailures:  1,
+			failureSubstr: "token mismatch",
+		},
+		{
+			name:          "AssertEquals: Non-String Custom Message Falls Back To Default",
+			protoFunc:     AssertEquals,
+			args:          []any{"admin", "user", 42},
+			wantFailures:  1,
+			failureSubstr: "Expected user, got admin instead",
+		},
 	}
 
 	for _, tt := range tests {

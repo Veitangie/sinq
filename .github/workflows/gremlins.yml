@@ -1,8 +1,12 @@
 name: Mutation Testing Badge
 
+# DISABLED. gremlins can't complete a run on GitHub hosted runners - the runner
+# VM is killed mid-run every time, surfacing as a "send on closed channel" panic
+# in gremlins' signal handler. Tried worker/cpu/timeout limits, moving the build
+# cache to /mnt, pinning gremlins past v0.6.0, and excluding the parser files;
+# none helped. Re-enable by restoring the `schedule` trigger and removing the
+# `if: false` below once it can run reliably (bigger runner, or self-hosted).
 on:
-  schedule:
-    - cron: '0 6 * * 1'  # Every Monday at 06:00 UTC
   workflow_dispatch: {}
 
 permissions:
@@ -11,6 +15,7 @@ permissions:
 jobs:
   gremlins:
     name: Update test efficacy badge
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sinq source
@@ -49,16 +54,35 @@ jobs:
 
       - name: Install gremlins
         if: steps.check.outputs.skip != 'true'
-        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@b48a4aad17
 
       - name: Run mutation testing
+        id: mutation
         if: steps.check.outputs.skip != 'true'
+        continue-on-error: true
+        timeout-minutes: 50
         working-directory: sinq
-        run: gremlins unleash --workers 2 --timeout-coefficient 8 -o ../gremlins-report.json .
+        env:
+          GOCACHE: /mnt/gocache
+          TMPDIR: /mnt/tmp
+        run: |
+          sudo mkdir -p /mnt/gocache /mnt/tmp
+          sudo chown "$USER" /mnt/gocache /mnt/tmp
+          chmod 1777 /mnt/tmp
+          df -h / /mnt
+          gremlins unleash \
+            --workers 1 --test-cpu 1 --timeout-coefficient 3 \
+            -E '(scenario-parser|internal/runner/parser|byte-scanner)\.go$' \
+            -o ../gremlins-report.json .
+          df -h / /mnt
 
       - name: Generate badge JSON
         if: steps.check.outputs.skip != 'true'
         run: |
+          if ! jq -e '.test_efficacy' gremlins-report.json >/dev/null 2>&1; then
+            echo "::warning::gremlins did not produce a usable report; leaving the badge unchanged."
+            exit 0
+          fi
           mkdir -p assets/badges/sinq
           # floor, not round - that's the house convention for this metric
           efficacy="$(jq '.test_efficacy | floor' gremlins-report.json)"

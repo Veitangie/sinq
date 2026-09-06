@@ -1,23 +1,23 @@
 # Treewalker & Configuration
 
-The **Treewalker** is the part of `sinq` responsible for discovering your tests and figuring out how to run them. Instead of forcing you to write one massive, monolithic test file, the Treewalker lets you organize your API requests into separate files and folders.
+The **Treewalker** discovers your tests and works out how to run them. API requests live in separate files and folders instead of one large file.
 
 ## How it Discovers Tests
 
-When you point `sinq` at a directory, the Treewalker scans it for `.sinq` and `.scenario` files. 
+When you point `sinq` at a directory, the Treewalker scans it for `.sinq` and `.scenario` files.
 
-* **Parent folders** hold shared setup steps (like a `01_login.sinq` script). 
-* **Child folders** (leaf directories) represent a specific scenario (like `create_user` or `delete_user`).
+* **Parent folders** hold shared setup steps, such as a `01_login.sinq` script.
+* **Leaf folders** (no subdirectories) are one scenario each, such as `create_user` or `delete_user`.
 
-When `sinq` runs a child folder, it automatically "inherits" all the test scripts from its parent folders. This means you can write your login logic once in a parent folder, and every child scenario will automatically execute that login step before running its own specific requests!
+A leaf folder inherits every script from its parent folders. Write the login once in a parent folder and every leaf scenario runs it before its own requests.
 
 ## Sharing Configuration
 
-You don't just share test scripts; you can also share configuration variables across your scenarios.
+Configuration is inherited the same way as scripts.
 
-You can place a JSON file ending in `.scenario` (e.g. `config.scenario`) in any directory to set environment variables or execution limits — the filename itself doesn't matter, only the `.scenario` extension. When a child scenario runs, it inherits configurations from its parent directories.
+Put a JSON file ending in `.scenario` (for example `config.scenario`) in any directory to set environment variables or execution limits. Only the extension matters, not the filename. A leaf scenario inherits the `.scenario` files from every directory above it.
 
-If a child folder defines the same variable as a parent, the child's value overwrites the parent's. This is called **deep merging**.
+When a child and a parent set the same key, the child's value wins. This per-key merge is called **deep merging**.
 
 **Parent `config.scenario`:**
 ```json
@@ -73,4 +73,4 @@ Under the hood, the Treewalker treats your physical filesystem as a Directed Acy
 
 ### Scenario Ordering
 
-Scenarios parsed by the Treewalker tend to seem deterministically parsed, but **Treewalker doesn't guarantee deterministic scenario ordering**. The blueprints are handed off to the execution pool without strict global execution order guarantees.
+**The Treewalker does not guarantee the order scenarios run in.** Blueprints go to the worker pool with no global ordering. Files *within* one scenario always run in natural-sorted order; only the order of scenarios relative to each other is unspecified.

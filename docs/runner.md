@@ -1,47 +1,48 @@
 # Execution Runner
 
-The **Runner** is the engine that executes the scenarios discovered by the Treewalker. It is built for maximum speed and isolation.
+The **Runner** executes the scenarios the Treewalker discovered.
 
 ## Concurrent Execution
 
-In `sinq`, the absolute unit of concurrency is the **Scenario** (an entire workflow chain), not the individual HTTP Request.
+The unit of concurrency is the **scenario**, a whole workflow chain, not the individual request.
 
-When you run `sinq`, it spins up a pool of concurrent workers (default is 10, configurable via the `-w` or `--workers` flag). If you have 10 workers and 10 scenarios that each contain 5 requests, all 10 scenarios will execute simultaneously! 
+`sinq` runs a pool of workers (10 by default, set with `-w` / `--workers`). With 10 workers and 10 scenarios of 5 requests each, all 10 scenarios run at once.
 
-However, the 5 requests *within* each scenario are strictly guaranteed to execute sequentially. This design choice ensures that complex, multi-step workflows (like logging in, extracting a token, and polling a background job) execute with perfect determinism, while your test suite as a whole finishes as fast as your network allows.
+The 5 requests inside a scenario always run in order. A login-then-extract-token-then-poll chain behaves predictably, while unrelated scenarios still overlap.
 
 ## Network & Session State
 
-While the workers operate independently, they share underlying resources to optimize performance:
+Workers run independently but share two things:
 
-* **Connection Pooling:** All workers share a single, underlying TCP transport pool. This allows `sinq` to reuse keep-alive connections across different scenarios.
-* **Cookie Isolation:** Despite sharing the TCP transport layer, every single scenario execution creates a brand new, isolated `http.CookieJar`. Cookies set by a server in Scenario A will be completely invisible to Scenario B.
+* **Connection pool.** All workers use one TCP transport pool, so keep-alive connections are reused across scenarios.
+* **Cookie isolation.** Each scenario run still gets its own `http.CookieJar`. A cookie set for Scenario A is not visible to Scenario B.
 
 ---
 
 ## Concurrency Architecture
 
-The `sinq` execution engine is built around a classic coordinator-worker pool pattern in Go.
+The engine is a coordinator-worker pool.
 
 ### The Coordinator-Worker Model
 
-The Treewalker emits a slice of scenario blueprints. The main Runner coordinator then feeds these blueprints into a buffered Go channel. As soon as a worker finishes a scenario, it pulls the next one from the channel queue until it is empty.
+The Treewalker emits a slice of scenario blueprints. The coordinator feeds them into a buffered channel, and each worker pulls the next blueprint when it finishes the current one, until the channel is empty.
 
-Each concurrent worker gets its own isolated Lua VM. Because the Treewalker branches the DAG at the directory level, if Leaf A and Leaf B both inherit `01_login.sinq`, they will each execute it independently in their own VMs.
+Every worker has its own Lua VM. If Leaf A and Leaf B both inherit `01_login.sinq`, each runs its own copy in its own VM.
 
 ### AST Bytecode Caching & Request Collapsing
 
-When a worker encounters a Lua script block (like a `$PRE` or `$ASSERT` block), it does not execute the raw string. It parses and compiles the script into an Abstract Syntax Tree (AST) bytecode. 
+A worker does not run a Lua block as raw text. It compiles the block to bytecode (an AST) first.
 
-To prevent 100 workers from simultaneously compiling the exact same `01_login.sinq` script, the Runner maintains a thread-safe, globally shared AST cache. The cache key is bound to the physical byte-offset of the script in the `.sinq` file.
+So that 100 workers do not all compile the same `01_login.sinq` script at once, the Runner keeps one shared, thread-safe AST cache, keyed by the script's byte offset in the file.
 
-Furthermore, `sinq` can cache the actual HTTP responses to avoid re-executing identical requests. This is **opt-in per request** by calling `req.cache(true)` in the request's `$PRE` block. When enabled, `sinq` behaves both as a concurrent singleflight coalescer and a global response cache across all workers. If multiple workers attempt the exact same request simultaneously, the first worker executes it while the others pause and receive the result instantly. The response is then cached for the duration specified by `--cache-timeout` (default 10s) up to a maximum response body size of `--max-cache-size`. **Note that the request cache itself is unbounded and has no eviction policy. It will store all uniquely cached requests indefinitely until the test suite finishes.**
+`sinq` can also cache the HTTP responses themselves, opt-in per request via `req.cache(true)` in `$PRE`. With it enabled, the cache doubles as a singleflight coalescer: if several workers fire the identical request at the same time, the first one runs it and the rest wait and take its result. The response is kept for `--cache-timeout` (default 10s), up to `--max-cache-size` of body. The cache has no eviction: every distinct cached request stays until the run ends.
 
-### Context Cancellation & Graceful Degradation
+### Context Cancellation
 
-The runner relies on Go's `context` package to manage the lifecycle of the test suite. 
+The Runner drives the suite lifecycle with Go's `context`.
 
-If a scenario exceeds its configured `timeout`, or if a user sends an interrupt signal (`SIGINT` / `Ctrl+C`) to the CLI, the context is immediately canceled. 
-* Any in-flight HTTP requests are terminated.
-* Any sleeping `$RETRY` loops are woken up and aborted.
-* The worker marks the scenario as `Aborted` and skips all remaining requests in that chain.
+When a scenario exceeds its `timeout`, or you send `SIGINT` / `Ctrl+C`, the context is canceled:
+
+* in-flight requests are dropped,
+* sleeping `$RETRY` loops wake and stop,
+* the worker marks the scenario `Aborted` and skips the rest of its requests.

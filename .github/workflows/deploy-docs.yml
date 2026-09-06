@@ -22,11 +22,11 @@ jobs:
         with:
           python-version: '3.11'
           
-      - name: Install MkDocs Material
-        run: pip install mkdocs-material
-        
+      - name: Install docs dependencies
+        run: pip install -r docs/requirements.txt
+
       - name: Build Docs
-        run: mkdocs build
+        run: mkdocs build --strict
         
       - name: Deploy to VPS via rsync
         env:

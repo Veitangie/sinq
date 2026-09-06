@@ -13,7 +13,7 @@ _sinq() {
         '(-i --insecure)'{-i,--insecure}'[Disable SSL/TLS certificate verification]' \
         '(-V --verbose)'{-V,--verbose}'[Enable verbose reporting (reports each stage duration, only affects "std" format)]' \
         '(-l --list)'{-l,--list}'[Parse and list scenarios at specified directories]' \
-        '(-u --unrestricted)'{-u,--unrestricted}'[Load lua "os" and "io" modules for scripts]' \
+        '(-u --unrestricted)'{-u,--unrestricted}'[Load Lua os/io modules - disables the script sandbox]' \
         '(-p --print)'{-p,--print}'[Capture lua output and show it in the report]' \
         '(-w --workers)'{-w,--workers}'[Number of concurrent workers]:workers' \
         '*'{-s,--secret}'[Key=value pair overrides for scenario secrets]:secret (KEY=VALUE)' \

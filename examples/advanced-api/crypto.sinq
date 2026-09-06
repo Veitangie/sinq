@@ -8,7 +8,7 @@ $PRE{
     local payload = "some data\n\n"
     local secret = secrets.CRYPTO_SECRET
     env.signature = sinq.crypto.hmac(payload, "sha256", secret)
-    env.b64_sig = sinq.crypto.base64Encode(env.signature)
+    env.b64_sig = sinq.encoding.base64Encode(env.signature)
 }
 
 $ASSERT{

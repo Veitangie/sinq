@@ -4,10 +4,12 @@
 package luapi
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
+	"veitangie.dev/sinq/internal/timer"
 )
 
 type MockClock struct {
@@ -145,5 +147,91 @@ func TestLuaTime_ToString(t *testing.T) {
 				t.Errorf("expected %q got %q", tt.want, valRes.String())
 			}
 		})
+	}
+}
+
+func callSleep(t *testing.T, ctx context.Context, arg lua.LValue) (time.Duration, error) {
+	t.Helper()
+	L := lua.NewState()
+	defer L.Close()
+	L.SetContext(ctx)
+
+	L.Push(L.NewFunction(Sleep))
+	L.Push(arg)
+	start := time.Now()
+	err := L.PCall(1, 0, nil)
+	return time.Since(start), err
+}
+
+func TestSleep_Blocks(t *testing.T) {
+	elapsed, err := callSleep(t, context.Background(), lua.LNumber(40))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if elapsed < 30*time.Millisecond {
+		t.Errorf("sleep(40ms) returned after only %v", elapsed)
+	}
+}
+
+func TestSleep_InterruptedByContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	elapsed, err := callSleep(t, ctx, lua.LNumber(10_000))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("sleep did not honour context cancellation: waited %v", elapsed)
+	}
+}
+
+func TestSleep_PreCancelledContextReturnsImmediately(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	elapsed, err := callSleep(t, ctx, lua.LNumber(5000))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("sleep with a pre-cancelled context waited %v", elapsed)
+	}
+}
+
+func TestSleep_NonPositiveReturnsImmediately(t *testing.T) {
+	for _, ms := range []int{0, -100} {
+		elapsed, err := callSleep(t, context.Background(), lua.LNumber(ms))
+		if err != nil {
+			t.Fatalf("sleep(%d) errored: %v", ms, err)
+		}
+		if elapsed > 200*time.Millisecond {
+			t.Errorf("sleep(%d) waited %v, expected an immediate return", ms, elapsed)
+		}
+	}
+}
+
+func TestSleep_RejectsNonNumber(t *testing.T) {
+	if _, err := callSleep(t, context.Background(), lua.LString("soon")); err == nil {
+		t.Fatal(`expected sleep("soon") to raise`)
+	}
+}
+
+func TestSleep_WiredIntoTimeTable(t *testing.T) {
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+	defer lc.Close()
+	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+	lc.SetContext(context.Background())
+
+	if err := lc.DoString(`
+		assert(type(sinq.time.sleep) == "function", "sinq.time.sleep must be a function")
+		local t0 = sinq.time.now()
+		sinq.time.sleep(20)
+		assert(sinq.time.now() - t0 >= 15, "sleep(20) should advance the wall clock by ~20ms")
+	`); err != nil {
+		t.Fatalf("sinq.time.sleep wiring/behaviour check failed: %v", err)
 	}
 }

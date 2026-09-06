@@ -30,6 +30,7 @@ type LuaContext struct {
 	jsonTable         *lua.LTable
 	timeTable         *lua.LTable
 	cryptoTable       *lua.LTable
+	encodingTable     *lua.LTable
 	jwtTable          *lua.LTable
 	fakeTable         *lua.LTable
 	RequestTable      *lua.LTable
@@ -126,18 +127,23 @@ func (lc *LuaContext) SetupScenarioEnvironment(setIdx lua.LGFunction, finishScen
 	lc.sinqTable.RawSetString("json", lc.jsonTable)
 
 	lc.cryptoTable = lc.NewTable()
-	lc.cryptoTable.RawSetString("base64Encode", lc.NewFunction(Base64Encode))
-	lc.cryptoTable.RawSetString("base64Decode", lc.NewFunction(Base64Decode))
-	lc.cryptoTable.RawSetString("base64UrlEncode", lc.NewFunction(Base64UrlEncode))
-	lc.cryptoTable.RawSetString("base64UrlDecode", lc.NewFunction(Base64UrlDecode))
-	lc.cryptoTable.RawSetString("hexEncode", lc.NewFunction(HexEncode))
-	lc.cryptoTable.RawSetString("hexDecode", lc.NewFunction(HexDecode))
 	lc.cryptoTable.RawSetString("sha1", lc.NewFunction(SHA1Hash))
 	lc.cryptoTable.RawSetString("sha256", lc.NewFunction(SHA256Hash))
 	lc.cryptoTable.RawSetString("sha512", lc.NewFunction(SHA512Hash))
 	lc.cryptoTable.RawSetString("hmac", lc.NewFunction(HMACHash))
 	lc.cryptoTable.RawSetString("md5", lc.NewFunction(MD5Hash))
 	lc.sinqTable.RawSetString("crypto", lc.cryptoTable)
+
+	lc.encodingTable = lc.NewTable()
+	lc.encodingTable.RawSetString("base64Encode", lc.NewFunction(Base64Encode))
+	lc.encodingTable.RawSetString("base64Decode", lc.NewFunction(Base64Decode))
+	lc.encodingTable.RawSetString("base64UrlEncode", lc.NewFunction(Base64UrlEncode))
+	lc.encodingTable.RawSetString("base64UrlDecode", lc.NewFunction(Base64UrlDecode))
+	lc.encodingTable.RawSetString("hexEncode", lc.NewFunction(HexEncode))
+	lc.encodingTable.RawSetString("hexDecode", lc.NewFunction(HexDecode))
+	lc.encodingTable.RawSetString("urlEncode", lc.NewFunction(UrlEncode))
+	lc.encodingTable.RawSetString("urlDecode", lc.NewFunction(UrlDecode))
+	lc.sinqTable.RawSetString("encoding", lc.encodingTable)
 
 	lc.timeTable = lc.NewTable()
 	lc.timeTable.RawSetString("ms", lua.LNumber(1))
@@ -147,6 +153,7 @@ func (lc *LuaContext) SetupScenarioEnvironment(setIdx lua.LGFunction, finishScen
 	lc.timeTable.RawSetString("now", lc.NewFunction(lc.Now))
 	lc.timeTable.RawSetString("fromString", lc.NewFunction(TimeFromString))
 	lc.timeTable.RawSetString("toString", lc.NewFunction(TimeToString))
+	lc.timeTable.RawSetString("sleep", lc.NewFunction(Sleep))
 	lc.sinqTable.RawSetString("time", lc.timeTable)
 
 	lc.jwtTable = lc.NewTable()
@@ -239,11 +246,20 @@ func (lc *LuaContext) RecordResponseBody(data []byte, oversized bool) {
 	lc.ResponseTable.RawSetString("json", lc.NewClosure(lc.ExtractBodyJsonUnsafe, lc.ResponseTable))
 }
 
-func (lc *LuaContext) SetupPreScript(attach lua.LGFunction, saveTo lua.LGFunction, cache lua.LGFunction, skip lua.LGFunction) {
+func (lc *LuaContext) SetupPreScript(
+	attach lua.LGFunction,
+	saveTo lua.LGFunction,
+	cache lua.LGFunction,
+	skip lua.LGFunction,
+	multipart lua.LGFunction,
+	multipartBoundary lua.LGFunction,
+) {
 	lc.RequestTable.RawSetString("attach", lc.NewFunction(attach))
 	lc.RequestTable.RawSetString("saveResponseTo", lc.NewFunction(saveTo))
 	lc.RequestTable.RawSetString("cache", lc.NewFunction(cache))
 	lc.RequestTable.RawSetString("skip", lc.NewFunction(skip))
+	lc.RequestTable.RawSetString("multipart", lc.NewFunction(multipart))
+	lc.RequestTable.RawSetString("multipartBoundary", lc.NewFunction(multipartBoundary))
 }
 
 func (lc *LuaContext) TearDownPreScript() {
@@ -251,6 +267,8 @@ func (lc *LuaContext) TearDownPreScript() {
 	lc.RequestTable.RawSetString("saveResponseTo", lua.LNil)
 	lc.RequestTable.RawSetString("cache", lua.LNil)
 	lc.RequestTable.RawSetString("skip", lua.LNil)
+	lc.RequestTable.RawSetString("multipart", lua.LNil)
+	lc.RequestTable.RawSetString("multipartBoundary", lua.LNil)
 }
 
 func (lc *LuaContext) SetupRetryScript() {

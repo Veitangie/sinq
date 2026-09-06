@@ -13,7 +13,7 @@ require github.com/golang-jwt/jwt/v5 v5.3.1
 require (
 	github.com/mattn/go-isatty v0.0.24
 	github.com/spf13/pflag v1.0.10
-	veitangie.dev/spinq v1.0.0-rc.9
+	veitangie.dev/spinq v1.0.0-rc.13
 )
 
 require (

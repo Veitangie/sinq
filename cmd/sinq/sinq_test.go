@@ -27,7 +27,7 @@ import (
 func withCapturedIO(t *testing.T, out, err io.Writer) {
 	t.Helper()
 	oldOut, oldErr := stdout, stderr
-	stdout, stderr = out, spinq.SpinqWriterPassthrough{Writer: err}
+	stdout, stderr = out, spinq.WriterPassthrough{Writer: err}
 	t.Cleanup(func() {
 		stdout, stderr = oldOut, oldErr
 	})

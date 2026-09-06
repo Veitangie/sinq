@@ -1,6 +1,6 @@
 # CI/CD Integration & Reporting
 
-`sinq` is designed to run natively in Continuous Integration environments (GitHub Actions, GitLab CI, Jenkins) with minimal dependency overhead.
+`sinq` runs in CI (GitHub Actions, GitLab CI, Jenkins) with nothing to install beyond the binary.
 
 ## Exit Codes
 
@@ -11,7 +11,7 @@
 
 ## JUnit XML Reporting
 
-While standard console output works for debugging and local test runs, most CI platforms rely on JUnit XML files to generate test metrics, track regressions, and visually highlight failing steps.
+The console output is for local runs. Most CI platforms read JUnit XML to track results over time and surface failing steps.
 
 To generate a JUnit report, use the `-f junit` flag and output it to a file:
 ```bash

@@ -148,7 +148,7 @@ Flags:
   -i, --insecure          Disable SSL/TLS certificate verification
   -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
   -l, --list              Parse and list scenarios at specified directories
-  -u, --unrestricted      Load lua "os" and "io" modules for scripts
+  -u, --unrestricted      Load Lua os/io modules - disables the script sandbox
   -p, --print             Capture lua output and show it in the report
   -w, --workers int       Number of concurrent workers (default 10)
   -c, --count int         Number of launches for every scenario

@@ -3,7 +3,6 @@
 [![CodeFactor](https://www.codefactor.io/repository/github/veitangie/sinq/badge)](https://www.codefactor.io/repository/github/veitangie/sinq)
 [![Code Quality](https://app.codacy.com/project/badge/Grade/bd32a7efb2b444f78e55cd2f351c613c)](https://app.codacy.com/gh/Veitangie/sinq/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 ![Pipeline Status](https://github.com/Veitangie/sinq/actions/workflows/ci.yml/badge.svg)
-[![Test Efficacy](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Veitangie/assets/main/badges/sinq/gremlins.json)](https://github.com/Veitangie/sinq/actions/workflows/gremlins.yml)
 ![Release Version](https://img.shields.io/github/v/release/Veitangie/sinq?include_prereleases&logo=github)
 
 Have you ever felt the pain of wiring up a bunch of independent requests into one stateful flow from start to finish? I have, and while manageable, one thing always bugged me. Why do we treat end-to-end API tests as a bunch of independent requests that we have to somehow bundle together, when they actually are much closer to stateful workflows? That's why this tool was born. It is designed to do one job - execute sequences of requests to walk through different workflow scenarios. Instead of maintaining large request collections or YAML-heavy test definitions, I wanted to describe real user workflows directly in files and let `sinq` compile them into executable scenarios. And make it natively parallel, why not? So I present to you:
@@ -28,21 +27,20 @@ Write requests as near-raw HTTP, add Lua where logic is needed, and organize fil
 * [Secrets & Security](#secrets--security)
 * [Usage](#usage)
 * [When To Choose Sinq](#when-to-choose-sinq)
+* [Versioning & Compatibility](#versioning--compatibility)
 * [Useful Links](#useful-links)
 * [Acknowledgments & Credits](#acknowledgments--credits)
 * [License](#license)
 
 ## Why sinq?
 
-`sinq` is:
-* **Workflow-Oriented:**
-    - Build authentication, creation, processing and verification flows as file trees.
-    - Shared setup lives in parent directories.
-    - Leaf directories become executable scenarios.
-* **Simple:** A `.sinq` file is just **raw HTTP + Lua**. There are no abstractions to fight, what you write is what gets sent over the wires. If you can write a cURL command and a basic script, you can write a `sinq` test.
-* **Natively parallel:** Scenarios don't share global state, which allows to run all of them in parallel, bounded only by network (or configuration).
-* **Fully scriptable:** Pass JWTs, correlation IDs, and dynamic payloads between chained requests, manage execution flow, run scripts on lifecycle hooks and more.
-* **Lightweight & built for CI/CD:** Distributed both as a lightweight binary and a container, requires minimal setup to run. Native support for JUnit XML reporting.
+Most API testing tools treat a test as a collection of independent requests that you stitch together after the fact. `sinq` treats it as a workflow: an ordered run of requests that pass state from one to the next, the way a real session does. Log in, hold the token, create a record, poll until it settles, check the result.
+
+That workflow is your directory layout. A folder is a flow and the files inside it are its steps, in natural-sorted order. Setup that several flows share, like authentication, goes in a parent folder and everything beneath it inherits it. Each leaf folder is one scenario with its own Lua state and its own cookie jar, so nothing bleeds between them. Since scenarios share nothing, `sinq` runs them all at once by default, limited only by the worker count and your network.
+
+A `.sinq` file is a plain HTTP request with Lua wherever you need logic. Nothing sits between what you write and what goes on the wire. Four hooks cover the rest of the lifecycle: `$PRE` for setup and file I/O, `$RETRY` for polling, `$ASSERT` for checks, and `$POST` for pulling values out of a response so later requests can use them.
+
+It ships as one static binary or a small container with nothing else to install, and it writes JUnit XML for CI.
 
 ![sinq performance: 30000 requests across 15000 scenarios in 5.08s](docs/assets/performance.png)
 
@@ -222,7 +220,7 @@ curl -sL https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/instal
 </details>
 
 <details>
-<summary><strong>🐹 Go Install (Requires Go 1.26+)</strong></summary>
+<summary><strong>🐹 Go Install (Requires Go 1.26.6+)</strong></summary>
 
 If you have a Go environment set up, you can compile and install directly from the module.
 
@@ -351,6 +349,8 @@ There are two categories of scripts within a `.sinq` file:
     * `req.saveResponseTo("path/download.bin")` — Streams the incoming response body directly to disk, bypassing the Lua memory buffer.
     * `req.cache(bool?)` — Opts-in to client-side request caching. Parameter defaults to `true` if omitted. The cache is based on the data sent over the wire and any attached filenames.
     * `req.skip(bool?)` — Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` without throwing a failure.
+    * `req.multipart(entry, ...)` — Builds a `multipart/form-data` body from one or more part tables (`{ name, data | source, filename?, contentType?, contentDisposition?, headers? }`), passed positionally or as one array table. Repeated calls accumulate. Mutually exclusive with `req.attach` and a literal body.
+    * `req.multipartBoundary(string)` — Pins the multipart boundary instead of using a random one.
 
 * **`$RETRY` (Retry Policies):** Executes immediately after receiving the HTTP response. **This is the only lifecycle script that must return a value.** It must return a Lua number representing milliseconds to wait before retrying, or a negative number to stop retrying.
     * Scope-Exclusive API: `sinq.retry.when()`, `sinq.retry.whenExponential()`, `sinq.retry.withJitter()`.
@@ -383,10 +383,13 @@ There are two categories of scripts within a `.sinq` file:
 ### Additional APIs
 
 **Time API (`sinq.time`)**
-* Functions: `now()`, `fromString(str, format?)`, `toString(ms, format?)`
+* Functions: `now()`, `fromString(str, format?)`, `toString(ms, format?)`, `sleep(ms)`
+
+**Encoding API (`sinq.encoding`)**
+* Base64/hex: `base64Encode(str)`, `base64Decode(str)`, `base64UrlEncode(str)`, `base64UrlDecode(str)`, `hexEncode(str)`, `hexDecode(str)`
+* URL: `urlEncode(str)`, `urlDecode(str)` — for query strings and `application/x-www-form-urlencoded` bodies
 
 **Crypto API (`sinq.crypto`)**
-* Encoding: `base64Encode(str)`, `base64Decode(str)`, `base64UrlEncode(str)`, `base64UrlDecode(str)`, `hexEncode(str)`, `hexDecode(str)`
 * Hashing: `md5(str, enc?)`, `sha1(str, enc?)`, `sha256(str, enc?)`, `sha512(str, enc?)`, `hmac(str, algo?, key?, enc?)`
 
 **JWT API (`sinq.jwt`)**
@@ -460,7 +463,9 @@ Default configuration that can be overridden in `.scenario` files:
 
 Secrets are loaded from a JSON file provided through `--secrets-file` and overrides passed with `--secret|-s` flag (for multiple overrides use the flag multiple times).
 
-To reduce the risk of accidental exposure, some error messages intentionally omit possibly sensitive data. Verbose mode (`--verbose`) as well as `--log-level debug` and `--dump-on-failure` may include additional debugging information and **should be used carefully in CI environments where logs are retained**.
+To reduce the risk of accidental exposure, some error messages intentionally omit possibly sensitive data. Verbose mode (`--verbose`) as well as `--log-level debug` and `--dump-on-failure` may include additional debugging information and **should be used carefully in CI environments where logs are retained**. Note that `sinq.assert.equals` and `sinq.assert.contains` include the values they compare in the failure message (shown in normal reports and JUnit XML) — pass a custom message when asserting against a secret.
+
+`--unrestricted` (`-u`) loads the full Lua `os` and `io` libraries, which lets scenario scripts run shell commands, access the filesystem outside the scenario directory, and terminate `sinq`. Only use it with scenario files you fully trust. See [Libraries](https://sinq.veitangie.dev/lua-api/#12-libraries) for details.
 
 ---
 
@@ -493,7 +498,7 @@ sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
   -i, --insecure          Disable SSL/TLS certificate verification
   -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
   -l, --list              Parse and list scenarios at specified directories
-  -u, --unrestricted      Load lua "os" and "io" modules for scripts
+  -u, --unrestricted      Load Lua os/io modules - disables the script sandbox
   -p, --print             Capture lua output and show it in the report
   -w, --workers int       Number of concurrent workers (default 10)
   -c, --count int         Number of launches for every scenario
@@ -532,6 +537,32 @@ Choose another tool when:
 - You need a graphical API explorer.
 - You need browser automation.
 - You need fully custom test frameworks written in a general-purpose language.
+
+---
+
+## Versioning & Compatibility
+
+From `v1.0.0` onward, `sinq` follows [Semantic Versioning](https://semver.org/):
+
+- **Patch** (`v1.0.x`): bug fixes only, with no intended change to behavior or output.
+- **Minor** (`v1.x.0`): new, backward-compatible functionality. New flags, new Lua
+  APIs, or new config keys with safe defaults.
+- **Major** (`vX.0.0`): any breaking change.
+
+The compatibility promise covers:
+
+- CLI flag names, their semantics and defaults, and process exit codes.
+- The `.sinq` file format and the `.scenario` configuration schema.
+- The Lua API surface exposed to scripts (globals, the `sinq.*` namespace, and the
+  lifecycle scopes).
+- The structure of the JUnit XML report.
+
+It does **not** cover, and any of the following may change in any release:
+
+- The exact text, layout, and colors of the human-readable `std` reporter.
+- Log message wording and formatting.
+- Anything under `internal/` (this module exposes no importable Go API).
+- Performance characteristics.
 
 ---
 

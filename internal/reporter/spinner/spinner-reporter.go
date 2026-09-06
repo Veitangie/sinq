@@ -15,13 +15,13 @@ import (
 )
 
 type SpinnerReporter struct {
-	spinner spinq.SpinqWriter
+	spinner spinq.Writer
 	clock   timer.Clock
 	willRun int
 	color   bool
 }
 
-func NewSpinnerReporter(spinner spinq.SpinqWriter, clock timer.Clock, willRun int, color bool) (*SpinnerReporter, error) {
+func NewSpinnerReporter(spinner spinq.Writer, clock timer.Clock, willRun int, color bool) (*SpinnerReporter, error) {
 	if spinner == nil {
 		return nil, errors.New("Unable to construct spinner reporter: spinner is nil")
 	}
@@ -58,7 +58,7 @@ func (r *SpinnerReporter) Report(source <-chan runner.ScenarioResult, duration <
 
 func (r *SpinnerReporter) handleBar(source <-chan runner.ScenarioResult) error {
 	ran := &atomic.Int64{}
-	err := r.spinner.Set(ui.GetBarFrame(r.color, r.willRun, func() (int, int) { return int(ran.Load()), r.willRun }, r.spinner.GetWidth()))
+	err := r.spinner.SetFrame(ui.GetBarFrame(r.color, r.willRun, func() (int, int) { return int(ran.Load()), r.willRun }, r.spinner.GetWidth()))
 	for res := range source {
 		if res.Status != runner.Unset && res.Status != runner.Skipped {
 			ran.Add(1)
@@ -68,7 +68,7 @@ func (r *SpinnerReporter) handleBar(source <-chan runner.ScenarioResult) error {
 }
 
 func (r *SpinnerReporter) handleSimple(source <-chan runner.ScenarioResult) error {
-	err := r.spinner.Set(ui.GetSimpleFrame(r.color, r.clock, "Running"))
+	err := r.spinner.SetFrame(ui.GetSimpleFrame(r.color, r.clock, "Running"))
 	for range source {
 	}
 	return err

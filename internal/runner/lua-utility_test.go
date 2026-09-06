@@ -424,12 +424,12 @@ func TestWorker_SaveResponseTo_Mkdir(t *testing.T) {
 	extract := func(scenario.Token) []byte { return []byte(script) }
 	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
 
-	_, filenameOut, _, _, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+	res, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if filenameOut != "newdir/out.txt" {
-		t.Errorf("Expected filenameOut to be newdir/out.txt, got %s", filenameOut)
+	if res.filenameOut != "newdir/out.txt" {
+		t.Errorf("Expected filenameOut to be newdir/out.txt, got %s", res.filenameOut)
 	}
 	if len(trackFS.createdDirs) != 1 || trackFS.createdDirs[0] != "newdir" {
 		t.Errorf("Expected newdir to be created, got %v", trackFS.createdDirs)
@@ -439,7 +439,7 @@ func TestWorker_SaveResponseTo_Mkdir(t *testing.T) {
 	scriptFail := `req.saveResponseTo('faildir/out.txt')`
 	extractFail := func(scenario.Token) []byte { return []byte(scriptFail) }
 
-	_, _, _, _, errFail := w.runPreScript(token, extractFail, "test.sinq", 1*time.Second)
+	_, errFail := w.runPreScript(token, extractFail, "test.sinq", 1*time.Second)
 	if errFail == nil {
 		t.Fatal("Expected error on mkdir failure, got nil")
 	}

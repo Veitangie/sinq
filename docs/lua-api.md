@@ -1,8 +1,6 @@
 # sinq Lua API & Type Translation
 
-Because `sinq` bridges a Go runtime with a Lua Virtual Machine, data must be translated back and forth across the boundary. `sinq` provides a sandboxed Lua environment to give you scriptable control over the HTTP request lifecycle.
-
-To ensure thread safety and prevent side-effect leaks between concurrent scenarios, **the API is strictly scoped**. Certain functions are only available during specific lifecycle hooks.
+`sinq` runs your Lua in a sandbox and translates values across the Go/Lua boundary. The API is **scoped**: some functions are only available inside specific lifecycle hooks, which keeps concurrent scenarios from leaking state into each other.
 
 ---
 
@@ -31,13 +29,13 @@ Shorthands for the *current* request and response being processed.
 * **`sinq.finishScenario()`**: Alters execution flow. Tells `sinq` to finish the scenario once the current request completes its life cycle. Useful for gracefully finishing loops or conditional scenario shutdowns.
 
 ### Standard Output (`print` & `io.write`)
-The standard Lua `print` function (and `io.write` if the `io` library is enabled via `--unrestricted`) is available in all scripts. However, since the runner executes all scenarios in parallel, just printing everything out results in a poor experience. To accommodate the best practices of debugging with `print` statements `sinq` provides a `-p` / `--print` flag, which buffers all the output in memory and reports it as part of the scenario result. Without the flag all the calls to these functions are discarded.
+`print` (and `io.write`, if `io` is enabled via `--unrestricted`) works in every script. Because scenarios run in parallel, printing straight to the terminal would interleave badly, so this output is discarded by default. Pass `-p` / `--print` to buffer it and attach it to the scenario result instead.
 
 ---
 
 ## 2. Variable Scoping (Local vs. Global)
 
-To prevent cache poisoning and unintended side effects, you should strictly control your variable scoping.
+Control variable scoping carefully to avoid leaking state between requests.
 
 * **Temporary Math & Logic:** Use the `local` keyword. This ensures the variable is garbage-collected immediately after the script block finishes.
   ```lua
@@ -99,9 +97,51 @@ Executes before the HTTP request is materialized. Used for file I/O operations.
 * **`req.saveResponseTo(filepath string)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. Automatically creates missing directories in the filepath. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
 * **`req.cache(enable bool?)`**: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo). The parameter defaults to `true` if omitted.
 * **`req.skip(enable bool?)`**: Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
+* **`req.multipart(entry table, ...)`**: Builds a `multipart/form-data` request body from one or more part definitions. See [Multipart Bodies](#multipart-bodies) below.
+* **`req.multipartBoundary(boundary string)`**: Overrides the randomly generated multipart boundary. See [Multipart Bodies](#multipart-bodies).
 
 !!! note
-    Both of the file functions expect the path to be relative to the current file. Passing in an absolute path will fail.
+    `req.attach`, `req.saveResponseTo`, and a multipart entry's `source` all expect a path relative to the current `.sinq` file. Passing an absolute path fails.
+
+#### Multipart Bodies
+
+**`req.multipart(entry table, ...)`** assembles a `multipart/form-data` body. Parts may be passed as positional arguments (`req.multipart(a, b)`) or as a single contiguous array table (`req.multipart{ a, b }`); both forms are equivalent. Repeated calls **accumulate** parts in order, and duplicate field names are allowed.
+
+Each `entry` is a table with these keys (all optional unless noted):
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | Form field name. **Required** unless `contentDisposition` is set. |
+| `data` | string | Literal part body. Mutually exclusive with `source`. |
+| `source` | string | Path to a file whose contents become the part body. Mutually exclusive with `data`. Resolved relative to the current `.sinq` file; absolute paths and paths that do not resolve to a readable file are rejected. |
+| `filename` | string \| boolean | A string sets the advertised filename and makes this a *file* part. `true` uses `basename(source)`. Omitted (or `false`) produces a plain *field* part with no `filename` parameter. |
+| `contentType` | string | The part's `Content-Type`. If omitted **and** the part has a filename, it is sniffed from the filename extension, then the `source` extension, falling back to `application/octet-stream`. Field parts get no `Content-Type` unless you set one. |
+| `contentDisposition` | string | Sets the raw `Content-Disposition` header verbatim. When present, `name` and `filename` are ignored. |
+| `headers` | table | Extra per-part headers, e.g. `{ ["X-Chunk"] = "3" }`. Keys are canonicalised; values may be string, number, or boolean. An explicit `contentType` / `contentDisposition` wins over a same-named `headers` entry. |
+
+A non-string value for any of the string-typed keys is an error, as is providing both `data` and `source`, or an entry with neither `name` nor `contentDisposition`. A table that mixes array entries with named keys uses only the array entries.
+
+`name` and `filename` only apply when `sinq` builds the `Content-Disposition` header for you. If you set `contentDisposition` yourself, it is used verbatim and `name` / `filename` on that entry are ignored entirely (not even type-checked).
+
+**`req.multipartBoundary(boundary string)`** replaces the random boundary with a fixed one. It is validated (RFC 2046) when the body is assembled; an invalid value fails the request. It is a no-op without `req.multipart`, and you are responsible for ensuring the boundary does not occur in any part's content.
+
+!!! note
+    `req.multipart` sets `Content-Type: multipart/form-data; boundary=…` on the request **only if you have not already set a `Content-Type` header yourself**. A header written in the `.sinq` file (even one with a deliberately mismatched boundary) is left untouched. `req.multipart` is mutually exclusive with `req.attach` and with a literal body in the `.sinq` file. The assembled body is buffered in memory, so it is meant for form fields and modestly sized files rather than multi-gigabyte uploads.
+
+```text
+POST ${env.BASE_URL}/avatar
+Authorization: Bearer ${AUTH_TOKEN}
+
+$PRE{
+    req.multipart(
+        { name = "caption", data = "vacation 2026" },
+        { name = "photo", source = "fixtures/beach.jpg", filename = true },
+        { name = "meta", data = sinq.json.serialize({ album = "trips" }), contentType = "application/json" }
+    )
+}
+
+$ASSERT{ sinq.assert.code(201) }
+```
 
 ### `$RETRY` (Polling Phase)
 Executes after receiving a response. The script **must** return a number indicating how many milliseconds to wait before retrying, or a negative number to stop.
@@ -134,8 +174,8 @@ Executes after the retry loop finishes. Used to validate the final state of the 
     }
     ```
 * **`sinq.assert.code(expectedHttpCode number, message string?)`**: Fails if the actual status code does not match.
-* **`sinq.assert.equals(actual any, expected any)`**: Fails if `actual` does not equal `expected`. When comparing tables, checks that every key-value pair in `expected` recursively matches those in `actual`, but ignores pairs from `actual` not present in `expected`.
-* **`sinq.assert.contains(source string, substring string, message string?)`**: Fails if the string does not contain the specified substring.
+* **`sinq.assert.equals(actual any, expected any, message string?)`**: Fails if `actual` does not equal `expected`. When comparing tables, checks that every key-value pair in `expected` recursively matches those in `actual`, but ignores pairs from `actual` not present in `expected`. Without `message`, the failure text includes both values (and, for tables, the mismatching field). Pass `message` to suppress that when comparing secrets.
+* **`sinq.assert.contains(source string, substring string, message string?)`**: Fails if the string does not contain the specified substring. Without `message`, the failure text includes `source` and `substring`. Pass `message` to suppress that when either may be sensitive.
 * **`sinq.assert.isTrue(condition boolean, message string?)`**: Fails if the condition resolves to `false` or `nil`.
 * **`sinq.assert.fileMatches(filepath string)`**: Fails if the response previously saved using `req.saveResponseTo()` does not exactly match the contents of `filepath`. Fails immediately if `req.saveResponseTo()` was not called.
 
@@ -213,12 +253,15 @@ HTTP headers are complex because a single key can have multiple values. `sinq` h
 * [`sinq.time.now()`](#functions)
 * [`sinq.time.fromString(str string, format string?)`](#functions)
 * [`sinq.time.toString(ms number, format string?)`](#functions)
-* [`sinq.crypto.base64Encode(source string)`](#encoding)
-* [`sinq.crypto.base64Decode(source string)`](#encoding)
-* [`sinq.crypto.base64UrlEncode(source string)`](#encoding)
-* [`sinq.crypto.base64UrlDecode(source string)`](#encoding)
-* [`sinq.crypto.hexEncode(source string)`](#encoding)
-* [`sinq.crypto.hexDecode(source string)`](#encoding)
+* [`sinq.time.sleep(ms number)`](#functions)
+* [`sinq.encoding.base64Encode(source string)`](#encoding)
+* [`sinq.encoding.base64Decode(source string)`](#encoding)
+* [`sinq.encoding.base64UrlEncode(source string)`](#encoding)
+* [`sinq.encoding.base64UrlDecode(source string)`](#encoding)
+* [`sinq.encoding.hexEncode(source string)`](#encoding)
+* [`sinq.encoding.hexDecode(source string)`](#encoding)
+* [`sinq.encoding.urlEncode(source string)`](#encoding)
+* [`sinq.encoding.urlDecode(source string)`](#encoding)
 * [`sinq.crypto.md5(source string, encoding string?)`](#hashing)
 * [`sinq.crypto.sha1(source string, encoding string?)`](#hashing)
 * [`sinq.crypto.sha256(source string, encoding string?)`](#hashing)
@@ -254,28 +297,58 @@ Built-in constants and functions to make time-based logic and parsing possible.
 * **`sinq.time.toString(ms number, format string?)`**: Formats a UNIX timestamp (milliseconds) into a time string.
     * **Returns:** `string`
     * **Format Rules:** Uses [Go's time layout rules](https://pkg.go.dev/time#pkg-constants). If omitted, defaults to ISO8601.
+* **`sinq.time.sleep(ms number)`**: Blocks the current script for `ms` milliseconds, then returns nothing. Useful as an unconditional delay before a request fires (e.g. `$PRE{ sinq.time.sleep(2 * sinq.time.second) }` to wait out a fixed propagation delay).
+    * The sleep is interrupted immediately by `Ctrl+C` or the scenario `timeout`.
+    * It counts against `script_timeout` like any other script time. A sleep longer than `script_timeout` will time the script out (or, if it is the last statement in the block, be cut short at the `script_timeout` mark). Raise `script_timeout` in the `.scenario` file for longer waits.
+    * A worker running a sleep cannot pick up another scenario, exactly like a `$RETRY` backoff.
+    * Prefer a `$RETRY` policy (`sinq.retry.when(condition, delay)`) whenever the endpoint gives you a readiness signal; reach for `sleep` only for genuinely unconditional waits.
+
+    !!! note
+        A non-numeric argument is an error. A negative or zero `ms` returns immediately.
 
 ---
 
-## 8. Crypto API (`sinq.crypto.*`)
+## 8. Encoding & Crypto APIs
 
-Provides standard cryptographic encoding and hashing functions.
+`sinq.encoding.*` holds reversible, non-cryptographic transforms (Base64, hex, URL
+escaping). `sinq.crypto.*` holds hashing and message authentication. They are
+separate namespaces, and the encoding helpers are **not** reachable via `sinq.crypto`.
 
 ### Encoding
-* **`sinq.crypto.base64Encode(source string)`**: Encodes a string into standard Base64.
+
+`sinq.encoding.*`
+
+* **`sinq.encoding.base64Encode(source string)`**: Encodes a string into standard (padded) Base64.
     * **Returns:** `string`
-* **`sinq.crypto.base64Decode(source string)`**: Decodes a standard Base64 string.
+* **`sinq.encoding.base64Decode(source string)`**: Decodes a standard Base64 string.
     * **Returns:** `(result string, error string)`
-* **`sinq.crypto.base64UrlEncode(source string)`**: Encodes a string into URL-safe Base64.
+* **`sinq.encoding.base64UrlEncode(source string)`**: Encodes a string into URL-safe Base64.
     * **Returns:** `string`
-* **`sinq.crypto.base64UrlDecode(source string)`**: Decodes a URL-safe Base64 string.
+* **`sinq.encoding.base64UrlDecode(source string)`**: Decodes a URL-safe Base64 string.
     * **Returns:** `(result string, error string)`
-* **`sinq.crypto.hexEncode(source string)`**: Encodes a string into a hexadecimal representation.
+* **`sinq.encoding.hexEncode(source string)`**: Encodes a string into a hexadecimal representation.
     * **Returns:** `string`
-* **`sinq.crypto.hexDecode(source string)`**: Decodes a hexadecimal string.
+* **`sinq.encoding.hexDecode(source string)`**: Decodes a hexadecimal string.
     * **Returns:** `(result string, error string)`
+* **`sinq.encoding.urlEncode(source string)`**: Percent-encodes a string for use in a query string or an `application/x-www-form-urlencoded` body. Spaces become `+`.
+    * **Returns:** `string`
+* **`sinq.encoding.urlDecode(source string)`**: Reverses `urlEncode` (`+` is decoded back to a space).
+    * **Returns:** `(result string, error string)`. The error is set for malformed percent escapes.
+
+!!! note "Building an `application/x-www-form-urlencoded` body"
+    There is no dedicated form helper, so assemble the body yourself and set the
+    header:
+    ```text
+    POST ${env.BASE_URL}/login
+    Content-Type: application/x-www-form-urlencoded
+
+    ${ "grant_type=password&username=" .. sinq.encoding.urlEncode(env.USER) .. "&password=" .. sinq.encoding.urlEncode(secrets.PASS) }
+    ```
 
 ### Hashing
+
+`sinq.crypto.*`
+
 * **`sinq.crypto.md5(source string, encoding string?)`**, **`sinq.crypto.sha1(source string, encoding string?)`**, **`sinq.crypto.sha256(source string, encoding string?)`**, **`sinq.crypto.sha512(source string, encoding string?)`**: Computes the cryptographic hash of the input string.
     * **Returns:** `(result string, error string)`
     * **Parameters:** `encoding` string defaults to `"hex"`. Supported values are `"hex"`, `"base64"`, `"base64url"`, and `"raw"`.
@@ -375,7 +448,10 @@ The `sinq.fake` table exposes deterministic fake data generators. All generators
 
 ## 12. Libraries
 
-`sinq` does not load two of common core Lua libraries - `io` and `os` by default. This is done in order to prevent `.sinq` scripts from becoming a safety concern when run without due diligence. To enable these libraries in Lua scripts use `--unrestricted` flag, and only run trusted scripts with this flag.
+`sinq` does not load two common core Lua libraries - `io` and `os` - by default, so that a `.sinq` script cannot touch the process, spawn a shell, or reach the filesystem outside its scenario workspace.
+
+!!! danger "`--unrestricted` disables the sandbox"
+    Passing `--unrestricted` (`-u`) loads the full `os` and `io` libraries. Scripts then gain `os.execute` (run arbitrary shell commands), `os.exit` (terminate `sinq` immediately, skipping all reporting and cleanup), `os.remove` / `os.rename` / `os.setenv`, and `io.open` (read and write any path the `sinq` process can, not just files under the scenario directory). Only pass `-u` for scenario files you fully trust - treat it the way you would treat piping a script straight into your shell.
 
 `sinq` allows you to import external Lua packages. To make them accessible via `require("package")`, you must provide the directory paths containing those packages.
 

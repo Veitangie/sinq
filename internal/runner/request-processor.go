@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ type RequestProcessor struct {
 	materialized      []byte
 	httpRequest       *http.Request
 	requestBody       []byte
+	multipart         multipartData
 	retryIn           int64
 	retries           int
 	client            *http.Client
@@ -64,7 +66,7 @@ func (p *RequestProcessor) runPre() error {
 
 	p.w.env.logger.Debug("[Runner] Worker running pre script for request", p.w.loggingContext(p.ctx)...)
 	p.requestTimer.Start()
-	filenameFrom, filenameTo, cache, skip, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
+	res, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.result.Pre = p.requestTimer.Time()
 	p.totalRequestTimer = p.requestTimer
 
@@ -72,10 +74,11 @@ func (p *RequestProcessor) runPre() error {
 		p.w.env.logger.Debug("[Runner] Pre script failed", p.w.loggingContextWithErr(p.ctx, err)...)
 	}
 
-	p.filenameFrom = filenameFrom
-	p.filenameTo = filenameTo
-	p.cache = cache
-	p.skip = skip
+	p.filenameFrom = res.filenameIn
+	p.filenameTo = res.filenameOut
+	p.cache = res.cache
+	p.skip = res.skip
+	p.multipart = res.multipart
 	return p.handleError(err)
 }
 
@@ -205,6 +208,24 @@ func (p *RequestProcessor) getHash() string {
 				p.w.env.hasher.WriteString(cookie.Value)
 			}
 		}
+
+		for _, entry := range p.multipart.entries {
+			p.w.env.hasher.WriteString(entry.data)
+			p.w.env.hasher.WriteString(entry.source)
+			p.w.env.hasher.WriteString(entry.contentDisposition)
+			p.w.env.hasher.WriteString(entry.contentType)
+			keys := make([]string, 0, len(entry.headers))
+			for key := range entry.headers {
+				keys = append(keys, key)
+			}
+			slices.Sort(keys)
+			for _, key := range keys {
+				p.w.env.hasher.WriteString(key)
+				for _, value := range entry.headers[key] {
+					p.w.env.hasher.WriteString(value)
+				}
+			}
+		}
 		p.hash = strconv.FormatUint(p.w.env.hasher.Sum64(), 16)
 		p.w.env.hasher.Reset()
 	}
@@ -212,12 +233,56 @@ func (p *RequestProcessor) getHash() string {
 	return p.hash
 }
 
+func (p *RequestProcessor) validateBody() error {
+	hasFile := p.filenameFrom != ""
+	hasLiteral := len(p.requestBody) > 0
+	hasMultipart := len(p.multipart.entries) != 0
+	noBody := !hasFile && !hasLiteral && !hasMultipart
+	if !noBody && !xorAll(hasFile, hasLiteral, hasMultipart) {
+		bodyTypes := make([]string, 0, 3)
+		if hasFile {
+			bodyTypes = append(bodyTypes, "file")
+		}
+		if hasLiteral {
+			bodyTypes = append(bodyTypes, "literal")
+		}
+		if hasMultipart {
+			bodyTypes = append(bodyTypes, "multipart")
+		}
+
+		return fmt.Errorf("Request has more than one body type (found body types: %s)", strings.Join(bodyTypes, ", "))
+	}
+	return nil
+}
+
+func (p *RequestProcessor) materializeMultipart() error {
+	if len(p.multipart.materialized) != 0 {
+		return nil
+	}
+	if len(p.multipart.entries) != 0 {
+		body, contentType, err := makeMultipartBody(p.multipart, p.w.env.workspace)
+		if err != nil {
+			return err
+		}
+		p.multipart.materialized = body
+		if contentTypes := p.httpRequest.Header.Values(contentTypeHeader); len(contentTypes) == 0 {
+			p.httpRequest.Header.Set(contentTypeHeader, contentType)
+		}
+		p.httpRequest.ContentLength = int64(len(body))
+	}
+	return nil
+}
+
 func (p *RequestProcessor) send() (intermediate, error) {
 	var result intermediate
 	p.w.env.logger.Debug("[Runner] Worker sending request", append(p.w.loggingContext(p.ctx), "attempt", p.retries)...)
 
-	if p.filenameFrom != "" && p.httpRequest.ContentLength > 0 {
-		return result, p.handleError(errors.New("Request has both attached body and body content in its .sinq file"))
+	if err := p.validateBody(); err != nil {
+		return result, p.handleError(err)
+	}
+
+	if err := p.materializeMultipart(); err != nil {
+		return result, p.handleError(err)
 	}
 
 	if p.filenameFrom != "" {
@@ -232,13 +297,12 @@ func (p *RequestProcessor) send() (intermediate, error) {
 		p.httpRequest.Body = file
 		p.httpRequest.GetBody = func() (io.ReadCloser, error) { return p.w.env.workspace.Open(p.filenameFrom) }
 
-	} else if len(p.requestBody) != 0 && p.httpRequest.ContentLength != 0 {
-
+	} else if len(p.multipart.materialized) != 0 {
+		p.httpRequest.Body = io.NopCloser(bytes.NewReader(p.multipart.materialized))
+		p.httpRequest.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(p.multipart.materialized)), nil }
+	} else {
 		p.httpRequest.Body = io.NopCloser(bytes.NewReader(p.requestBody))
 		p.httpRequest.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(p.requestBody)), nil }
-
-	} else {
-		p.httpRequest.Body = nil
 	}
 
 	p.requestTimer.Start()
@@ -247,10 +311,7 @@ func (p *RequestProcessor) send() (intermediate, error) {
 
 	if err != nil {
 		p.w.env.logger.Debug("[Runner] Request execution failed", p.w.loggingContextWithErr(p.ctx, err)...)
-		if urlError, ok := errors.AsType[*url.Error](err); ok {
-			urlError.URL = strings.Split(urlError.URL, "?")[0]
-		}
-		return result, p.handleError(err)
+		return result, p.handleError(fixClientErr(err))
 	}
 
 	return makeIntermediate(p.w.env.workspace, p.filenameTo, int64(p.scenarioBp.Config.MaxBodySize.ByteAmount), resp)
@@ -259,14 +320,22 @@ func (p *RequestProcessor) send() (intermediate, error) {
 func (p *RequestProcessor) sendCached() (intermediate, error) {
 	var result intermediate
 	var getBody func(Workspace) func() (io.ReadCloser, error)
-	if p.filenameFrom != "" && p.httpRequest.ContentLength > 0 {
-		return result, p.handleError(errors.New("Request has both attached body and body content in its .sinq file"))
+	if err := p.validateBody(); err != nil {
+		return result, err
+	}
+
+	if err := p.materializeMultipart(); err != nil {
+		return result, err
 	}
 
 	if p.filenameFrom != "" {
 		p.httpRequest.ContentLength = -1
 		getBody = func(w Workspace) func() (io.ReadCloser, error) {
 			return func() (io.ReadCloser, error) { return w.Open(p.filenameFrom) }
+		}
+	} else if len(p.multipart.materialized) != 0 {
+		getBody = func(w Workspace) func() (io.ReadCloser, error) {
+			return func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(p.multipart.materialized)), nil }
 		}
 	} else {
 		getBody = func(w Workspace) func() (io.ReadCloser, error) {
@@ -374,4 +443,29 @@ func (p *RequestProcessor) finalize() {
 		p.result.Status = Success
 	}
 	p.result.Total = p.totalRequestTimer.Time()
+}
+
+func fixClientErr(err error) error {
+	if urlError, ok := errors.AsType[*url.Error](err); ok {
+		if u, perr := url.Parse(urlError.URL); perr == nil {
+			u.RawQuery = ""
+			u.User = nil
+			urlError.URL = u.String()
+		}
+		urlError.URL = strings.Split(urlError.URL, "?")[0]
+	}
+	return err
+}
+
+func xorAll(bs ...bool) bool {
+	found := false
+	for _, b := range bs {
+		if found && b {
+			return false
+		}
+		if b {
+			found = true
+		}
+	}
+	return found
 }

@@ -1,12 +1,12 @@
 # Getting Started
 
-Welcome to `sinq`! This guide will walk you through installing the tool, writing your first scenario, and running it.
+Install `sinq`, write one scenario, run it.
 
 ## Installation
 
-You can download the latest pre-compiled binary for your operating system from the [Releases page](https://github.com/Veitangie/sinq/releases) (Windows `.zip`, Debian `.deb`, Fedora `.rpm`). We also maintain official Docker images and Nix flakes.
+Pre-compiled binaries for each platform are on the [Releases page](https://github.com/Veitangie/sinq/releases) (Windows `.zip`, Debian `.deb`, Fedora `.rpm`), along with Docker images and Nix flakes.
 
-For quick command-line installation, choose your preferred package manager:
+Or via a package manager:
 
 === "macOS & Linux (Brew)"
     ```bash
@@ -67,19 +67,19 @@ To get syntax highlighting and better editor support, check out the community ex
 
 ## Your First Test
 
-`sinq` uses your filesystem to structure workflows. Let's create a very simple health check scenario.
+`sinq` builds scenarios from your directory layout. Here is a one-request health check.
 
-1. Create a directory for your tests:
+1. Make a directory for it:
    ```bash
    mkdir -p my-tests/health
    cd my-tests/health
    ```
 
-2. Create a file named `01_healthcheck.sinq`:
+2. Create `01_healthcheck.sinq`:
    ```http
    ### Check API Health
    GET https://httpbin.org/get
-   
+
    $ASSERT{
        sinq.assert.code(200, "Healthcheck failed")
    }
@@ -87,17 +87,16 @@ To get syntax highlighting and better editor support, check out the community ex
 
 ## Running `sinq`
 
-Now that you have your first test, let's run it. Point `sinq` to the root directory of your tests:
+Point `sinq` at the directory:
 
 ```bash
 sinq ./my-tests
 ```
 
-You should see output indicating that the scenario was discovered and the `01_healthcheck.sinq` request passed successfully. 
+`sinq` finds one scenario (`health`), sends its single request, and prints a pass line for it. The process exits `0`. If the assertion fails, the line is red and the exit code is `1`.
 
-## Next Steps
+## Next
 
-Now that you've written a basic test, here is where you should go next:
-
-- **[Lua API](lua-api.md)**: Learn how to script complex assertions, handle JSON parsing, and manipulate request lifecycles.
-- **[Scenarios & Config](scenario.md)**: Discover how to chain multiple requests together, pass variables between them, and use `config.scenario` files.
+- **[CLI Reference](cli.md)**: flags, scenario filters, environment variables.
+- **[Scenarios & Config](scenario.md)**: chaining requests, passing values between them, `.scenario` files.
+- **[Lua API](lua-api.md)**: assertions, JSON, request lifecycle control.

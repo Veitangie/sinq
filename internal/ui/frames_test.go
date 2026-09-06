@@ -283,7 +283,7 @@ func TestGetBarFrame_NarrowWidth_OmitsBarKeepsFraction(t *testing.T) {
 
 func TestGetBarFrame_WidthAtBoundary_NoBar(t *testing.T) {
 	progress := func() (int, int) { return 3, 5 }
-	getWidth := func() int { return 21 }
+	getWidth := func() int { return 20 }
 	frame := GetBarFrame(false, 5, progress, getWidth)
 
 	got, err := frame()
@@ -293,13 +293,13 @@ func TestGetBarFrame_WidthAtBoundary_NoBar(t *testing.T) {
 	gotStr := string(got)
 
 	if strings.Contains(gotStr, "Running") {
-		t.Errorf("expected the bar to be dropped at width 21 (no room), got %q", gotStr)
+		t.Errorf("expected the bar to be dropped at width 20 (no room), got %q", gotStr)
 	}
 }
 
 func TestGetBarFrame_WidthJustOverBoundary_ShowsBar(t *testing.T) {
 	progress := func() (int, int) { return 3, 5 }
-	getWidth := func() int { return 22 }
+	getWidth := func() int { return 21 }
 	frame := GetBarFrame(false, 5, progress, getWidth)
 
 	got, err := frame()
@@ -309,7 +309,7 @@ func TestGetBarFrame_WidthJustOverBoundary_ShowsBar(t *testing.T) {
 	gotStr := string(got)
 
 	if !strings.Contains(gotStr, "Running") {
-		t.Errorf("expected the bar to appear at width 22 (one cell of room), got %q", gotStr)
+		t.Errorf("expected the bar to appear at width 21 (one cell of room), got %q", gotStr)
 	}
 }
 
@@ -323,7 +323,7 @@ func TestGetBarFrame_NoColor_EmptyCellsAreSpaces(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	wantBar := " Running | " + "━" + strings.Repeat(" ", 10)
+	wantBar := " Running | " + strings.Repeat(" ", 11)
 	want := " " + spinq.DotsStates[0] + wantBar + " | " + " 0/10" + "\r"
 	if string(got) != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -340,7 +340,7 @@ func TestGetBarFrame_Color_EmptyCellsMatchFullGlyphInBlack(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	wantBar := " Running | " + spinq.Green + "━" + spinq.Black + strings.Repeat("━", 10) + spinq.ResetStyle
+	wantBar := " Running | " + spinq.Green + spinq.Black + strings.Repeat("━", 11) + spinq.ResetStyle
 	want := " " + ColorStates[0] + spinq.DotsStates[0] + spinq.ResetStyle + wantBar + " | " + " 0/10" + "\r"
 	if string(got) != want {
 		t.Errorf("got %q, want %q", got, want)

@@ -32,28 +32,20 @@ func TestLuaContext_PreScript_Lifecycle(t *testing.T) {
 		t.Error("Expected req.cache to be nil before setup")
 	}
 
-	lc.SetupPreScript(dummyFunc, dummyFunc, dummyFunc, dummyFunc)
+	lc.SetupPreScript(dummyFunc, dummyFunc, dummyFunc, dummyFunc, dummyFunc, dummyFunc)
 
-	if lc.RequestTable.RawGetString("attach").Type() != lua.LTFunction {
-		t.Error("Expected req.attach to be a function after setup")
-	}
-	if lc.RequestTable.RawGetString("saveResponseTo").Type() != lua.LTFunction {
-		t.Error("Expected req.saveResponseTo to be a function after setup")
-	}
-	if lc.RequestTable.RawGetString("cache").Type() != lua.LTFunction {
-		t.Error("Expected req.cache to be a function after setup")
+	for _, name := range []string{"attach", "saveResponseTo", "cache", "skip", "multipart", "multipartBoundary"} {
+		if lc.RequestTable.RawGetString(name).Type() != lua.LTFunction {
+			t.Errorf("Expected req.%s to be a function after setup", name)
+		}
 	}
 
 	lc.TearDownPreScript()
 
-	if lc.RequestTable.RawGetString("attach") != lua.LNil {
-		t.Error("Expected req.attach to be nil after teardown")
-	}
-	if lc.RequestTable.RawGetString("saveResponseTo") != lua.LNil {
-		t.Error("Expected req.saveResponseTo to be nil after teardown")
-	}
-	if lc.RequestTable.RawGetString("cache") != lua.LNil {
-		t.Error("Expected req.cache to be nil after teardown")
+	for _, name := range []string{"attach", "saveResponseTo", "cache", "skip", "multipart", "multipartBoundary"} {
+		if lc.RequestTable.RawGetString(name) != lua.LNil {
+			t.Errorf("Expected req.%s to be nil after teardown", name)
+		}
 	}
 }
 
@@ -62,12 +54,13 @@ func TestBug_SaveToLeak(t *testing.T) {
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
 	lc.SetupRequestEnvironment(0)
 
-	lc.SetupPreScript(dummyFunc, dummyFunc, dummyFunc, dummyFunc)
+	lc.SetupPreScript(dummyFunc, dummyFunc, dummyFunc, dummyFunc, dummyFunc, dummyFunc)
 	lc.TearDownPreScript()
 
-	saveToVal := lc.RequestTable.RawGetString("saveResponseTo")
-	if saveToVal.Type().String() != "nil" {
-		t.Errorf("BUG EXPOSED: 'saveResponseTo' leaked! Expected LNil in requestTable, got %s", saveToVal.Type().String())
+	for _, name := range []string{"saveResponseTo", "multipart", "multipartBoundary"} {
+		if leaked := lc.RequestTable.RawGetString(name); leaked.Type().String() != "nil" {
+			t.Errorf("BUG EXPOSED: 'req.%s' leaked past teardown! Expected LNil in requestTable, got %s", name, leaked.Type().String())
+		}
 	}
 }
 

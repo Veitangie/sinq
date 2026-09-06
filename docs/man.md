@@ -72,7 +72,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Parse and list scenarios at specified directories.
 
 **-u**, **--unrestricted**
-: Load lua "os" and "io" modules for scripts.
+: Load the full Lua **os** and **io** libraries for scripts. This disables the sandbox: scripts can run shell commands (`os.execute`), access files outside the scenario directory (`io.open`), and terminate sinq (`os.exit`). Only use with fully trusted scenario files.
 
 **-p**, **--print**
 : Capture lua output and show it in the report.
@@ -193,16 +193,24 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **sinq.time.toString(ms, format?)**
 : Formats a UNIX timestamp (milliseconds) into a time string.
 
-### Crypto API
+**sinq.time.sleep(ms)**
+: Blocks the current script for `ms` milliseconds (an unconditional delay before the request fires). Interrupted by `Ctrl+C` / the scenario `timeout`, counts against `script_timeout`, and keeps the worker busy like a `$RETRY` backoff. Non-numeric argument is an error; a negative or zero `ms` returns immediately. Prefer a `$RETRY` policy when the endpoint signals readiness.
 
-**sinq.crypto.base64Encode**, **sinq.crypto.base64Decode**, **sinq.crypto.base64UrlEncode**, **sinq.crypto.base64UrlDecode**
+### Encoding API
+
+**sinq.encoding.base64Encode**, **sinq.encoding.base64Decode**, **sinq.encoding.base64UrlEncode**, **sinq.encoding.base64UrlDecode**
 : Base64 encoding/decoding functions.
 
-**sinq.crypto.hexEncode**, **sinq.crypto.hexDecode**
+**sinq.encoding.hexEncode**, **sinq.encoding.hexDecode**
 : Hexadecimal encoding/decoding functions.
 
+**sinq.encoding.urlEncode(string)**, **sinq.encoding.urlDecode(string)**
+: Percent-encode / decode for query strings and `application/x-www-form-urlencoded` bodies. Spaces map to `+`. `urlDecode` returns an error string as the second value for malformed input.
+
+### Crypto API
+
 **sinq.crypto.md5(string, encoding?)**, **sinq.crypto.sha1(string, encoding?)**, **sinq.crypto.sha256(string, encoding?)**, **sinq.crypto.sha512(string, encoding?)**, **sinq.crypto.hmac(source, algo?, key?, encoding?)**
-: Hashing functions supporting hex, base64, base64url, and raw string encodings. Default is hex. If an unknown encoding or algorithm is provided, returns an error string as the second value.
+: Hashing functions supporting hex, base64, base64url, and raw string encodings. Default is hex. If an unknown encoding or algorithm is provided, returns an error string as the second value. (Base64/hex/URL encoding helpers live under `sinq.encoding`, not `sinq.crypto`.)
 
 ### JWT API
 
@@ -263,6 +271,12 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 
 **req.skip(bool?)**
 : If `true` (default), marks the request to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
+
+**req.multipart(entry, ...)**
+: Builds a `multipart/form-data` body from one or more part tables, passed positionally or as one array table; repeated calls accumulate. Entry keys: `name` (required unless `contentDisposition` is set), `data` or `source` (mutually exclusive; `source` is a file path relative to the current `.sinq` file, absolute paths rejected), `filename` (string, or `true` for `basename(source)`), `contentType` (sniffed from the filename/source extension when omitted for file parts), `contentDisposition` (raw override), `headers` (per-part header table). Sets the request `Content-Type` only if one is not already set. Mutually exclusive with `req.attach` and a literal body.
+
+**req.multipartBoundary(string)**
+: Fixes the multipart boundary instead of using a random one. Validated (RFC 2046) at assembly; no-op without `req.multipart`.
 
 ### $RETRY Scope API
 

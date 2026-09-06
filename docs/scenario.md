@@ -1,10 +1,10 @@
 # Scenarios & Configuration
 
-In `sinq`, a **Scenario** is simply a sequence of HTTP requests that are executed in order. You define these requests in `.sinq` files.
+A **scenario** is a sequence of HTTP requests run in order, defined across one or more `.sinq` files.
 
 ## Writing Requests
 
-A `.sinq` file is essentially a standard HTTP request. You can define multiple requests in a single file by separating them with the `###` delimiter. The text after `###` on the same line names the request that *follows* it — this name shows up in `--list` output and in the standard/JUnit reports.
+A `.sinq` file is a standard HTTP request. You can define multiple requests in a single file by separating them with the `###` delimiter. The text after `###` on the same line names the request that *follows* it. This name shows up in `--list` output and in the standard/JUnit reports.
 
 ```http
 ### Login Request
@@ -29,11 +29,11 @@ To make your requests dynamic, you can use Lua scripts. `sinq` provides two ways
 
 ## Configuration
 
-You can configure timeouts, environment variables, and limits using JSON files ending in `.scenario` — the filename itself is arbitrary, only the extension matters (e.g. `config.scenario`, `00_base.scenario`).
+You can configure timeouts, environment variables, and limits using JSON files ending in `.scenario`. The filename itself is arbitrary, only the extension matters (e.g. `config.scenario`, `00_base.scenario`).
 
 When you place a `.scenario` file in a directory, those settings apply to all tests in that directory and its subdirectories.
 
-Here are the available settings you can configure:
+Available settings:
 
 ```json
 {
@@ -48,10 +48,14 @@ Here are the available settings you can configure:
   "fail_fast": true,
   "max_retries": 10,
   "max_redirects": 5,
-  "max_body": "1MiB"
+  "max_body": "1MiB",
+  "env_matrix": [],
+  "tags": []
 }
 ```
 
+* **`name`**: Scenario name, shown in reports and used by the `-n` / `--no-name` filters. Defaults to the leaf directory path. If the same `.scenario` file is inherited by several leaf directories, they all take this name.
+* **`description`**: Free-text description of the scenario.
 * **`env`**: Variables defined here become accessible in your `.sinq` files as `${env.VARIABLE_NAME}` or in Lua scripts via the `env` table.
 * **`req_timeout`**: Maximum time to wait for a single HTTP network request.
 * **`script_timeout`**: Maximum time a single Lua script block is allowed to run.
@@ -60,14 +64,16 @@ Here are the available settings you can configure:
 * **`max_retries`**: The maximum amount of times any request in the scenario can be retried upon retry script returning a valid non-negative number.
 * **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
 * **`max_body`**: The maximum response body size stored in memory. Responses exceeding this are safely truncated.
+* **`env_matrix`**: Data sets for running the scenario once per combination (parameterized / matrix testing). Aggregated along the path. See [Environment Matrix](env-matrix.md).
+* **`tags`**: Labels attached to every scenario that inherits this file. Collected into one list along the path and matched by the `-t` / `--tag` and `--no-tag` filters.
 
 ---
 
 ## The Request Lifecycle State Machine
 
-When a worker executes a `.sinq` request, it strictly enforces the following state machine:
+Each request goes through these stages in order:
 
-1. **`$PRE` Execution:** Executes first. This is where you configure dynamic variables or file I/O. *Current HTTP request body and headers are not yet accessible.*
+1. **`$PRE` Execution:** Executes first. This is where you configure dynamic variables or file I/O (`req.attach`, `req.multipart`, `req.saveResponseTo`, `req.cache`, `req.skip`). *Current HTTP request body and headers are not yet accessible.*
 2. **Materialization:** The engine scans the raw HTTP text and evaluates inline scripts (e.g., `${env.HOST}`). The output is injected directly into the byte stream.
 3. **HTTP Parsing:** The materialized byte stream is parsed into a standard Go `http.Request`.
 4. **Execution (Send):** The HTTP request is sent over the network.
@@ -83,6 +89,6 @@ If a parent sets `"req_timeout": "5s"` and a child sets `"env": {"NEW": "true"}`
 
 ## AST Caching & Request Collapsing
 
-To maintain high performance, `sinq` compiles all Lua scripts into bytecode (AST) and caches them in memory. The cache key is tied to the physical byte-offset of the script in the file. 
+`sinq` compiles every Lua block to bytecode (AST) and caches it in memory. The cache key is tied to the physical byte-offset of the script in the file. 
 
-Furthermore, if multiple workers attempt to process identical requests simultaneously, `sinq` can use a `singleflight` mechanism to collapse the execution. This is strictly **opt-in per request** by calling `req.cache(true)` in the `$PRE` block. When enabled, the first worker performs the network call, while all other waiting workers receive the cached result instantly when the first finishes.
+If multiple workers process an identical request at the same time, `sinq` can collapse them with a `singleflight` mechanism. This is strictly **opt-in per request** by calling `req.cache(true)` in the `$PRE` block. When enabled, the first worker performs the network call, while all other waiting workers receive the cached result instantly when the first finishes.

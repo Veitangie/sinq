@@ -2,6 +2,9 @@ site_name: sinq
 site_description: Concurrent integration and end-to-end HTTP testing tool for stateful workflows.
 site_url: https://sinq.veitangie.dev
 
+exclude_docs: |
+  requirements.txt
+
 theme:
   name: material
   icon:
@@ -30,17 +33,50 @@ repo_url: https://github.com/Veitangie/sinq
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Lua API: lua-api.md
-  - Scenarios & Config: scenario.md
-  - Environment Matrix: env-matrix.md
-  - Architecture & Components:
+  - Guides:
+    - Writing & Debugging Scenarios: authoring.md
+    - Scenarios & Config: scenario.md
+    - Environment Matrix: env-matrix.md
+  - Reference:
+    - CLI Reference: cli.md
+    - Lua API: lua-api.md
+  - Architecture:
     - Overview: overview.md
     - Treewalker: treewalker.md
     - Execution Runner: runner.md
   - CI/CD Integration: ci-cd-integration.md
-  - Additional Information:
+  - More:
     - Alternatives & Comparisons: alternatives.md
+    - Versioning & Compatibility: versioning.md
     - FAQ: faq.md
+
+plugins:
+  - search
+  - llmstxt:
+      markdown_description: >-
+        sinq runs sequences of HTTP requests as stateful workflows. Tests are
+        plain-text .sinq files (raw HTTP plus Lua) organised into directories;
+        every leaf directory is one scenario, and scenarios run in parallel.
+      full_output: llms-full.txt
+      sections:
+        Start here:
+          - index.md: What sinq is and the workflow model.
+          - getting-started.md: Install and run a first scenario.
+          - authoring.md: Writing scenarios, common patterns, a Lua API cheat-sheet, and how to debug failures.
+        Reference:
+          - cli.md: Every flag, the scenario filters, environment variables, and exit codes.
+          - scenario.md: The .sinq format, the .scenario config schema, and the request lifecycle.
+          - lua-api.md: Full Lua API - globals, hooks, encoding, crypto, jwt, json, fake data, retry and assert helpers.
+          - env-matrix.md: Running a scenario once per combination of environment values.
+          - ci-cd-integration.md: Exit codes and the JUnit XML mapping.
+          - versioning.md: What the SemVer compatibility promise covers.
+        Architecture:
+          - overview.md: The three stages - discovery, execution, reporting.
+          - treewalker.md: How directories become scenarios and how config is inherited.
+          - runner.md: The worker pool, isolation, caching, and cancellation.
+        Background:
+          - alternatives.md: How sinq compares to Hurl, Venom, Postman, Bruno, k6, and editor HTTP clients.
+          - faq.md: Common questions.
 
 markdown_extensions:
   - pymdownx.highlight:

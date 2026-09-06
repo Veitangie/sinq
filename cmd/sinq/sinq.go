@@ -41,7 +41,7 @@ import (
 const sinqLuaPath = "SINQ_LUA_PATH"
 
 var stdout io.Writer = os.Stdout
-var stderr spinq.SpinqWriter = spinq.SpinqWriterPassthrough{Writer: os.Stderr}
+var stderr spinq.Writer = spinq.WriterPassthrough{Writer: os.Stderr}
 var isInCi = os.Getenv("NO_COLOR") != "" || os.Getenv("SINQ_NO_COLOR") != "" || os.Getenv("CI") != ""
 
 func populateConfigInRuntime(cfg *config.Config) error {
@@ -94,24 +94,28 @@ func setupSpinner(color bool, ctx context.Context) (context.CancelFunc, func(*sl
 			return func() {}, func(*slog.Logger) {}
 		}
 
-		fmt.Fprint(stderr, spinq.HideCursor)
-		if err = pair.Spinny.Start(ctx); err != nil {
+		if pair.Spinner.IsLive() {
+			fmt.Fprint(stderr, spinq.HideCursor)
+		}
+		if err = pair.Spinner.Start(ctx); err != nil {
 			fmt.Fprintf(stderr, "%sFailed to start spinner: %s", spinq.ShowCursor, err.Error())
 			return func() {}, func(*slog.Logger) {}
 		}
-		stderr = pair.Spinny
+		stderr = pair.Spinner
 		stdout = pair.Standard
 		return func() {
-				pair.Close()
-				fmt.Fprint(stderr, spinq.ShowCursor)
+				stderr.Close()
+				if stderr.IsLive() {
+					fmt.Fprint(pair.Spinner, spinq.ShowCursor)
+				}
 			}, func(l *slog.Logger) {
 				if l == nil {
 					return
 				}
 				l.Debug("[sinq] Attached spinner logger")
-				for err := range pair.Err() {
+				for err := range pair.Spinner.Err() {
 					l.Debug("[sinq] Spinner encountered error, restarting", "error", err.Error())
-					err = pair.Spinny.Start(ctx)
+					err = pair.Spinner.Start(ctx)
 					if errors.Is(err, spinq.ErrClosed) {
 						l.Debug("[sinq] Got ErrClosed from spinner, detaching")
 						return

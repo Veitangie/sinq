@@ -11,6 +11,14 @@ Currently, only the latest major release is actively supported with security upd
 | v1.x.x  | :white_check_mark: |
 | < v1.0  | :x:                |
 
+## Operational Notes
+
+These are intended behaviors, not vulnerabilities, but they change the trust boundary and are easy to miss:
+
+* **`--unrestricted` / `-u` disables the Lua sandbox.** It loads the full `os` and `io` libraries, giving scenario scripts shell execution (`os.execute`), read/write access to any path the process can reach (`io.open`), and the ability to terminate `sinq` mid-run (`os.exit`). Only pass it for scenario files you fully control and trust.
+* **Verbose and debug output can contain secrets.** `--verbose`, `--log-level debug`, and `--dump-on-failure` include request and response data that may embed tokens or credentials. Avoid them in CI environments where logs are retained, or scrub the output before publishing it.
+* **Assertion failure messages echo the values being compared.** `sinq.assert.equals` and `sinq.assert.contains` include their arguments in the failure text, which appears in normal (non-verbose) reports and JUnit XML. Pass a custom message when asserting against sensitive values.
+
 ## Reporting a Vulnerability
 
 **Please do not report security vulnerabilities through public GitHub issues.** Publicly disclosing a vulnerability puts users' CI/CD pipelines at immediate risk before a patch can be developed. 
