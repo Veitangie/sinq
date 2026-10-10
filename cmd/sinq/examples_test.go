@@ -240,6 +240,51 @@ func Test_ExamplesDirectory(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusOK)
 
+		case r.URL.Path == "/advanced/json/loadout" && r.Method == "GET":
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"class": "Spellsword", "items": [{"id": 1, "rarity": "common"}, {"id": 2, "rarity": "rare"}], "stats": {}}`)
+
+		case r.URL.Path == "/advanced/json/loadout" && r.Method == "PUT":
+			var body struct {
+				Loadout struct {
+					Class string          `json:"class"`
+					Items json.RawMessage `json:"items"`
+					Stats json.RawMessage `json:"stats"`
+				} `json:"loadout"`
+				Legendary json.RawMessage `json:"legendary"`
+				Skills    json.RawMessage `json:"skills"`
+				Pet       json.RawMessage `json:"pet"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Logf("loadout body is not valid JSON: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			got := map[string]string{
+				"loadout.class": body.Loadout.Class,
+				"loadout.items": string(body.Loadout.Items),
+				"loadout.stats": string(body.Loadout.Stats),
+				"legendary":     string(body.Legendary),
+				"skills":        string(body.Skills),
+				"pet":           string(body.Pet),
+			}
+			want := map[string]string{
+				"loadout.class": "Spellsword",
+				"loadout.items": `[]`,
+				"loadout.stats": `{}`,
+				"legendary":     `[]`,
+				"skills":        `["parry","riposte"]`,
+				"pet":           `null`,
+			}
+			for field, w2 := range want {
+				if got[field] != w2 {
+					t.Logf("loadout field %s: got %s, want %s", field, got[field], w2)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+			}
+			w.WriteHeader(http.StatusNoContent)
+
 		case r.URL.Path == "/unreachable":
 			t.Errorf("The /unreachable endpoint was hit! sinq.finishScenario() failed to abort the sequence.")
 			w.WriteHeader(http.StatusBadRequest)

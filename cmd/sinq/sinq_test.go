@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -665,5 +666,147 @@ func TestHandleCompletion_UnrecognizedParent(t *testing.T) {
 	code := sinq([]string{"--completion"})
 	if code != 0 && code != 1 {
 		t.Errorf("expected exit code 0 or 1 from --completion, got %d", code)
+	}
+}
+
+func writeRepeatedStageScenario(t *testing.T) (dir string, sent *atomic.Int32) {
+	t.Helper()
+	sent = &atomic.Int32{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	dir = t.TempDir()
+	req := fmt.Sprintf(`### Setup
+GET %[1]s/setup
+$POST{ items = { "a", "b", "c" } }
+
+### Loop
+GET %[1]s/loop?id=${ return items[1] }
+$ASSERT{ sinq.assert.isTrue(items[1] ~= "a", "iteration for a failed") }
+$POST{ table.remove(items, 1); if #items > 0 then sinq.setNextRequest(#sinq.responses) end }
+
+### After
+GET %[1]s/after
+`, srv.URL)
+	_ = os.WriteFile(filepath.Join(dir, "repeat.sinq"), []byte(req), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config.scenario"), []byte(`{"name": "repeat", "fail_fast": false}`), 0644)
+	return dir, sent
+}
+
+func TestSinq_EndToEnd_RepeatedStage_StdReportTallies(t *testing.T) {
+	dir, sent := writeRepeatedStageScenario(t)
+
+	out := &bytes.Buffer{}
+	withCapturedIO(t, out, io.Discard)
+
+	if exitCode := sinq([]string{"--no-spinner", "--format", "std", dir}); exitCode == 0 {
+		t.Fatalf("Expected a non-zero exit code for a failed scenario\n%s", out.String())
+	}
+	if sent.Load() != 5 {
+		t.Fatalf("Expected 5 requests on the wire (Setup, Loop x3, After), got %d\n%s", sent.Load(), out.String())
+	}
+
+	report := out.String()
+	if !strings.Contains(report, "| 5 requests sent") {
+		t.Errorf("Expected the summary to count every pass of the repeated stage (5 requests sent)\n%s", report)
+	}
+	for line := range strings.Lines(report) {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "✓ Loop") {
+			t.Errorf("Expected the Loop stage to be marked failed, since one of its passes failed: %q\n%s", trimmed, report)
+		}
+		if strings.Contains(trimmed, "Scenario: repeat") && !strings.Contains(trimmed, "2✓ 1✗") {
+			t.Errorf("Expected the scenario tally to show 2✓ 1✗ (Setup and After passed, Loop failed): %q\n%s", trimmed, report)
+		}
+	}
+}
+
+func TestSinq_EndToEnd_RepeatedStage_JUnitReportsFailure(t *testing.T) {
+	dir, _ := writeRepeatedStageScenario(t)
+	outFile := filepath.Join(t.TempDir(), "report.xml")
+
+	withCapturedIO(t, io.Discard, io.Discard)
+	sinq([]string{"--no-spinner", "--format", "junit", "--out", outFile, dir})
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("Failed to read JUnit report: %v", err)
+	}
+	report := string(data)
+
+	if !strings.Contains(report, `<testsuite name="repeat" tests="3" failures="1" errors="0"`) {
+		t.Errorf("Expected the suite to count 3 stages with 1 failure\n%s", report)
+	}
+	loopStart := strings.Index(report, `<testcase name="Loop"`)
+	if loopStart < 0 {
+		t.Fatalf("Expected a Loop testcase\n%s", report)
+	}
+	loopEnd := strings.Index(report[loopStart:], "</testcase>")
+	if loopEnd < 0 || !strings.Contains(report[loopStart:loopStart+loopEnd], `<failure message="iteration for a failed"`) {
+		t.Errorf("Expected the Loop testcase to carry the failure from its first pass\n%s", report)
+	}
+}
+
+func TestSinq_EndToEnd_CountJUnitReportIsValid(t *testing.T) {
+	var sent atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "probe.sinq"), []byte(fmt.Sprintf("GET %s/probe\n$ASSERT{ sinq.assert.code(200) }\n", srv.URL)), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config.scenario"), []byte(`{"name": "count", "tags": ["smoke"]}`), 0644)
+	outFile := filepath.Join(t.TempDir(), "report.xml")
+
+	withCapturedIO(t, io.Discard, io.Discard)
+	if exitCode := sinq([]string{"--no-spinner", "--count", "3", "--format", "junit", "--out", outFile, dir}); exitCode != 0 {
+		t.Fatalf("Expected a passing run, got exit code %d", exitCode)
+	}
+	if sent.Load() != 3 {
+		t.Fatalf("Expected 3 requests for --count 3, got %d", sent.Load())
+	}
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("Failed to read JUnit report: %v", err)
+	}
+
+	var report struct {
+		XMLName xml.Name `xml:"testsuites"`
+		Tests   int      `xml:"tests,attr"`
+		Suites  []struct {
+			Name       string `xml:"name,attr"`
+			Tests      int    `xml:"tests,attr"`
+			Properties []struct {
+				Property []struct {
+					Name  string `xml:"name,attr"`
+					Value string `xml:"value,attr"`
+				} `xml:"property"`
+			} `xml:"properties"`
+			TestCases []struct {
+				Name string `xml:"name,attr"`
+			} `xml:"testcase"`
+		} `xml:"testsuite"`
+	}
+	if err := xml.Unmarshal(data, &report); err != nil {
+		t.Fatalf("Expected --count to produce valid JUnit XML: %v\n%s", err, data)
+	}
+
+	if report.Tests != 3 || len(report.Suites) != 3 {
+		t.Fatalf("Expected 3 tests in 3 suites, one per run, got %d tests in %d suites\n%s", report.Tests, len(report.Suites), data)
+	}
+	for i, suite := range report.Suites {
+		if suite.Name != "count" || suite.Tests != 1 || len(suite.TestCases) != 1 || suite.TestCases[0].Name != "probe.sinq" {
+			t.Errorf("Expected suite %d to be a full copy of the scenario, got %+v", i, suite)
+		}
+		if len(suite.Properties) != 1 || len(suite.Properties[0].Property) != 1 ||
+			suite.Properties[0].Property[0].Name != "tags" || suite.Properties[0].Property[0].Value != "smoke" {
+			t.Errorf("Expected suite %d to carry the tags property, got %+v", i, suite.Properties)
+		}
 	}
 }

@@ -1,0 +1,31 @@
+### Fetch loadout
+GET ${env.BASE_URL}/advanced/json/loadout
+
+$ASSERT{ sinq.assert.code(200) }
+
+$POST{
+    LOADOUT = res.json()
+
+    -- Unequip everything. An array parsed from JSON stays an array even once
+    -- it's empty, so it's sent back as [] rather than {}.
+    for i = #LOADOUT.items, 1, -1 do table.remove(LOADOUT.items, i) end
+
+    -- A list built in Lua that may end up empty: mark it as an array up front.
+    LEGENDARY = sinq.json.array()
+    for _, item in ipairs(res.json().items) do
+        if item.rarity == "legendary" then table.insert(LEGENDARY, item.id) end
+    end
+}
+
+### Save loadout
+PUT ${env.BASE_URL}/advanced/json/loadout
+Content-Type: application/json
+
+{
+    "loadout": ${ LOADOUT },
+    "legendary": ${ LEGENDARY },
+    "skills": ${ return sinq.json.array({ "parry", "riposte" }) },
+    "pet": ${ sinq.json.null }
+}
+
+$ASSERT{ sinq.assert.code(204, "Loadout was not saved with the expected JSON shape") }

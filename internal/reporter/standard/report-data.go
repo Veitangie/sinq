@@ -98,6 +98,7 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 	}
 
 	ranRequestsScenario := 0
+	sentRequestsScenario := 0
 	successfulRequestsScenario := 0
 	abortedRequestsScenario := 0
 	for _, request := range result.RequestResults {
@@ -110,14 +111,16 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 			fallthrough
 		case runner.Error:
 			ranRequestsScenario += 1
+			sentRequestsScenario += request.Attempts
 		case runner.Aborted:
 			abortedRequestsScenario += 1
 			ranRequestsScenario += 1
+			sentRequestsScenario += request.Attempts
 		default:
 		}
 	}
 
-	rd.ranRequests += ranRequestsScenario
+	rd.ranRequests += sentRequestsScenario
 	rd.successfulRequests += successfulRequestsScenario
 	rd.abortedRequests += abortedRequestsScenario
 	skippedRequestsScenario := len(result.RequestResults) - ranRequestsScenario

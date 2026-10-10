@@ -108,7 +108,7 @@ func TestJUnitReporter_Comprehensive(t *testing.T) {
 	}
 
 	suite := parsedReport.Suites[0]
-	if len(suite.Properties) != 1 || suite.Properties[0].Name != "tags" || suite.Properties[0].Contents != "api, fast" {
+	if len(suite.Properties.Properties) != 1 || suite.Properties.Properties[0].Name != "tags" || suite.Properties.Properties[0].Value != "api, fast" {
 		t.Errorf("Expected tags property, got %v", suite.Properties)
 	}
 
@@ -154,5 +154,122 @@ func TestJUnitReporter_WriteErrors(t *testing.T) {
 	err := rep.Report(sourceCh, timerCh, 1)
 	if err == nil {
 		t.Errorf("Expected an error from simulated write failures, got nil")
+	}
+}
+
+func TestJUnitReporter_TagsUseStandardPropertiesMarkup(t *testing.T) {
+	buf := &bytes.Buffer{}
+	rep := NewReporter(buf)
+
+	sourceCh := make(chan runner.ScenarioResult, 1)
+	timerCh := make(chan time.Duration, 1)
+
+	sourceCh <- runner.ScenarioResult{
+		Name:           "Tagged",
+		Tags:           []string{"api", "fast"},
+		StartedAt:      time.Now(),
+		TotalDuration:  1 * time.Second,
+		Status:         runner.Success,
+		RequestResults: []runner.RequestResult{{Name: "Req", Status: runner.Success}},
+	}
+	close(sourceCh)
+	timerCh <- 1 * time.Second
+	close(timerCh)
+
+	if err := rep.Report(sourceCh, timerCh, 1); err != nil {
+		t.Fatalf("Failed to execute Report(): %v", err)
+	}
+
+	var parsed struct {
+		Suites []struct {
+			Properties []struct {
+				Property []struct {
+					Name  string `xml:"name,attr"`
+					Value string `xml:"value,attr"`
+				} `xml:"property"`
+			} `xml:"properties"`
+		} `xml:"testsuite"`
+	}
+	if err := xml.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Failed to unmarshal XML: %v\n%s", err, buf.String())
+	}
+	if len(parsed.Suites) != 1 {
+		t.Fatalf("Expected 1 suite, got %d\n%s", len(parsed.Suites), buf.String())
+	}
+
+	props := parsed.Suites[0].Properties
+	if len(props) != 1 {
+		t.Fatalf("Expected exactly one <properties> element, got %d\n%s", len(props), buf.String())
+	}
+	if len(props[0].Property) != 1 || props[0].Property[0].Name != "tags" || props[0].Property[0].Value != "api, fast" {
+		t.Errorf("Expected <properties><property name=\"tags\" value=\"api, fast\"/></properties>, got %+v\n%s", props[0].Property, buf.String())
+	}
+
+	dec := xml.NewDecoder(bytes.NewReader(buf.Bytes()))
+	seenProperties := false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		start, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		switch start.Name.Local {
+		case "properties":
+			seenProperties = true
+		case "testcase":
+			if !seenProperties {
+				t.Fatalf("Expected <properties> to precede <testcase> elements\n%s", buf.String())
+			}
+		}
+	}
+}
+
+func TestJUnitReporter_NoTagsOmitsProperties(t *testing.T) {
+	tests := []struct {
+		name string
+		tags []string
+	}{
+		{name: "nil tags", tags: nil},
+		{name: "empty tags", tags: []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			rep := NewReporter(buf)
+
+			sourceCh := make(chan runner.ScenarioResult, 1)
+			timerCh := make(chan time.Duration, 1)
+
+			sourceCh <- runner.ScenarioResult{
+				Name:           "Untagged",
+				Tags:           tt.tags,
+				StartedAt:      time.Now(),
+				TotalDuration:  1 * time.Second,
+				Status:         runner.Success,
+				RequestResults: []runner.RequestResult{{Name: "Req", Status: runner.Success}},
+			}
+			close(sourceCh)
+			timerCh <- 1 * time.Second
+			close(timerCh)
+
+			if err := rep.Report(sourceCh, timerCh, 1); err != nil {
+				t.Fatalf("Failed to execute Report(): %v", err)
+			}
+
+			dec := xml.NewDecoder(bytes.NewReader(buf.Bytes()))
+			for {
+				tok, err := dec.Token()
+				if err != nil {
+					break
+				}
+				if start, ok := tok.(xml.StartElement); ok && (start.Name.Local == "properties" || start.Name.Local == "property") {
+					t.Fatalf("Expected no <%s> element for a scenario without tags\n%s", start.Name.Local, buf.String())
+				}
+			}
+		})
 	}
 }

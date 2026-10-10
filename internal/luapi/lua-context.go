@@ -123,6 +123,7 @@ func (lc *LuaContext) SetupScenarioEnvironment(setIdx lua.LGFunction, finishScen
 	lc.jsonTable = lc.NewTable()
 	lc.jsonTable.RawSetString("parse", lc.NewFunction(lc.ParseJSON))
 	lc.jsonTable.RawSetString("serialize", lc.NewFunction(lc.SerializeToJSON))
+	lc.jsonTable.RawSetString("array", lc.NewFunction(JSONArray))
 	lc.jsonTable.RawSetString("null", lc.parser.LNull)
 	lc.sinqTable.RawSetString("json", lc.jsonTable)
 

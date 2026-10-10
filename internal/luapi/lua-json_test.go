@@ -567,3 +567,277 @@ func TestJSONParser_ParseLiteral_JSONNumber(t *testing.T) {
 		}
 	})
 }
+
+func TestJSON_EmptyArrayRoundTrip(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{name: "top-level empty array", script: `return (serialize((parse('[]'))))`, want: `[]`},
+		{name: "empty array field", script: `return (serialize((parse('{"a":[]}'))))`, want: `{"a":[]}`},
+		{name: "nested empty array", script: `return (serialize((parse('[[]]'))))`, want: `[[]]`},
+		{name: "empty object stays object", script: `return (serialize((parse('{"a":{}}'))))`, want: `{"a":{}}`},
+		{name: "empty Lua table stays object", script: `return (serialize({}))`, want: `{}`},
+		{name: "array emptied after parse", script: `local t = parse('[1]'); table.remove(t, 1); return (serialize(t))`, want: `[]`},
+		{name: "parsed empty array is still a plain table", script: `local t = parse('[]'); table.insert(t, 1); return tostring(type(t) == "table" and #t == 1)`, want: `true`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+			defer lc.Close()
+			lc.SetGlobal("parse", lc.NewFunction(lc.ParseJSON))
+			lc.SetGlobal("serialize", lc.NewFunction(lc.SerializeToJSON))
+
+			if err := lc.DoString(tt.script); err != nil {
+				t.Fatalf("unexpected lua error: %v", err)
+			}
+			got := lc.Get(-1).String()
+			if got != tt.want {
+				t.Errorf("expected %s, got %s", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestJSONArray(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		// --- Without an argument ---
+		{
+			name:   "no argument returns a new empty array",
+			script: `local t, err = sinq.json.array(); assert(err == nil, tostring(err)); return (sinq.json.serialize(t))`,
+			want:   `[]`,
+		},
+		{
+			name:   "nil argument behaves like no argument",
+			script: `local t, err = sinq.json.array(nil); assert(err == nil, tostring(err)); return (sinq.json.serialize(t))`,
+			want:   `[]`,
+		},
+		{
+			name: "each call returns a separate table and metatable",
+			script: `
+				local a = sinq.json.array()
+				local b = sinq.json.array()
+				assert(a ~= nil and b ~= nil, "expected tables")
+				return tostring(a ~= b and getmetatable(a) ~= getmetatable(b))`,
+			want: `true`,
+		},
+		{
+			name: "returned empty array can be filled like a plain table",
+			script: `
+				local t = sinq.json.array()
+				table.insert(t, 1); table.insert(t, "two")
+				return (sinq.json.serialize(t))`,
+			want: `[1,"two"]`,
+		},
+		// --- With an array-shaped table ---
+		{
+			name:   "returns the same table it was given",
+			script: `local t = {}; local r, err = sinq.json.array(t); assert(err == nil, tostring(err)); return tostring(rawequal(r, t))`,
+			want:   `true`,
+		},
+		{
+			name:   "marks a given empty table in place",
+			script: `local t = {}; sinq.json.array(t); return (sinq.json.serialize(t))`,
+			want:   `[]`,
+		},
+		{
+			name: "marked array that is emptied later serializes as an array",
+			script: `
+				local t = { 1, 2 }
+				local _, err = sinq.json.array(t); assert(err == nil, tostring(err))
+				table.remove(t); table.remove(t)
+				return (sinq.json.serialize(t))`,
+			want: `[]`,
+		},
+		{
+			name:   "non-empty array stays the same",
+			script: `local t, err = sinq.json.array({ 1, "two" }); assert(err == nil, tostring(err)); return (sinq.json.serialize(t))`,
+			want:   `[1,"two"]`,
+		},
+		{
+			name: "keeps an existing metatable and its fields",
+			script: `
+				local mt = { __index = function() return "dflt" end }
+				local t = setmetatable({}, mt)
+				local r, err = sinq.json.array(t); assert(err == nil, tostring(err))
+				return tostring(getmetatable(r) == mt) .. " " .. r.missing .. " " .. (sinq.json.serialize(r))`,
+			want: `true dflt []`,
+		},
+		{
+			name: "marks an empty table parsed from a JSON object",
+			script: `
+				local t = sinq.json.parse('{}')
+				local r, err = sinq.json.array(t); assert(err == nil, tostring(err))
+				return (sinq.json.serialize(r))`,
+			want: `[]`,
+		},
+		// --- With a table that isn't array-shaped ---
+		{
+			name:   "string keys are rejected",
+			script: `local r, err = sinq.json.array({ a = 1 }); return tostring(r == nil and err ~= nil)`,
+			want:   `true`,
+		},
+		{
+			name:   "mixed array and string keys are rejected",
+			script: `local r, err = sinq.json.array({ 1, a = 2 }); return tostring(r == nil and err ~= nil)`,
+			want:   `true`,
+		},
+		{
+			name:   "gaps in the integer keys are rejected",
+			script: `local r, err = sinq.json.array({ [1] = 1, [3] = 3 }); return tostring(r == nil and err ~= nil)`,
+			want:   `true`,
+		},
+		{
+			name:   "array not starting at 1 is rejected",
+			script: `local r, err = sinq.json.array({ [2] = 2 }); return tostring(r == nil and err ~= nil)`,
+			want:   `true`,
+		},
+		{
+			name:   "non-integer number keys are rejected",
+			script: `local r, err = sinq.json.array({ [1.5] = 1 }); return tostring(r == nil and err ~= nil)`,
+			want:   `true`,
+		},
+		{
+			name:   "non-integer number keys with sparse arrays are rejected",
+			script: `local r, err = sinq.json.array({ [1] = 1, [3] = 3, [1.5] = 1 }); return tostring(r == nil and err ~= nil)`,
+			want:   `true`,
+		},
+		{
+			name:   "out-of-range integer key filling a gap is rejected",
+			script: `local r, err = sinq.json.array({ [1] = 1, [3] = 3, [0] = 0 }); return tostring(r == nil and err ~= nil)`,
+			want:   `true`,
+		},
+		{
+			name:   "boolean keys are rejected",
+			script: `local r, err = sinq.json.array({ [true] = 1 }); return tostring(r == nil and err ~= nil)`,
+			want:   `true`,
+		},
+		{
+			name:   "more than one argument is rejected",
+			script: `local r, err = sinq.json.array({}, {}); return tostring(r == nil and err ~= nil)`,
+			want:   `true`,
+		},
+		{
+			name: "rejected table is not marked",
+			script: `
+				local t = { a = 1 }
+				sinq.json.array(t)
+				t.a = nil
+				return (sinq.json.serialize(t))`,
+			want: `{}`,
+		},
+		{
+			name: "non-table argument fails",
+			script: `
+				local ok, r, err = pcall(sinq.json.array, "not a table")
+				return tostring(not ok or (r == nil and err ~= nil))`,
+			want: `true`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+			defer lc.Close()
+			lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+			if err := lc.DoString(tt.script); err != nil {
+				t.Fatalf("unexpected lua error: %v", err)
+			}
+			got := lc.Get(-1).String()
+			if got != tt.want {
+				t.Errorf("expected %s, got %s", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestJSONSerialize_RejectsGapFilledByOutOfRangeKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{name: "zero key", key: `0`},
+		{name: "negative key", key: `-1`},
+		{name: "key past the array part", key: `2^40`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+			defer lc.Close()
+			lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+			script := `local r, err = sinq.json.serialize({ [1] = "a", [3] = "c", [` + tt.key + `] = "z" }); return tostring(r) .. " | " .. tostring(err)`
+			if err := lc.DoString(script); err != nil {
+				t.Fatalf("unexpected lua error: %v", err)
+			}
+			got := lc.Get(-1).String()
+			if !strings.HasPrefix(got, "nil | ") || strings.HasSuffix(got, "| nil") {
+				t.Errorf("expected a serialization error for a sparse array, got %s", got)
+			}
+		})
+	}
+}
+
+func TestSerializeToJSON_IndentArgument(t *testing.T) {
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
+	defer lc.Close()
+	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+	steps := []struct {
+		name string
+		run  func() (string, error)
+		want string
+	}{
+		{
+			name: "serialize with indent is pretty-printed",
+			run: func() (string, error) {
+				err := lc.DoString(`return (sinq.json.serialize({ a = 1 }, "  "))`)
+				return lc.Get(-1).String(), err
+			},
+			want: "{\n  \"a\": 1\n}",
+		},
+		{
+			name: "Go-side SerializeLValue after an indented call is compact",
+			run: func() (string, error) {
+				tbl := lc.NewTable()
+				tbl.RawSetString("b", lua.LNumber(2))
+				return lc.SerializeLValue(tbl)
+			},
+			want: `{"b":2}`,
+		},
+		{
+			name: "serialize with indent still pretty-prints after SerializeLValue",
+			run: func() (string, error) {
+				err := lc.DoString(`return (sinq.json.serialize({ c = 3 }, "\t"))`)
+				return lc.Get(-1).String(), err
+			},
+			want: "{\n\t\"c\": 3\n}",
+		},
+		{
+			name: "serialize without indent is compact after an indented call",
+			run: func() (string, error) {
+				err := lc.DoString(`return (sinq.json.serialize({ d = 4 }))`)
+				return lc.Get(-1).String(), err
+			},
+			want: `{"d":4}`,
+		},
+	}
+
+	for _, step := range steps {
+		got, err := step.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", step.name, err)
+		}
+		if got != step.want {
+			t.Errorf("%s: expected %q, got %q", step.name, step.want, got)
+		}
+	}
+}

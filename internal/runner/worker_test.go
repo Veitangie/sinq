@@ -10,7 +10,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -271,6 +273,515 @@ func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("Worker did not return a result")
+	}
+}
+
+type countingRoundTripper struct{ sent atomic.Int32 }
+
+func (r *countingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.sent.Add(1)
+	return &http.Response{StatusCode: 200, Body: http.NoBody}, nil
+}
+
+func runRepeatedStageScenario(t *testing.T, items, failOn []string, setup ...func(*worker)) (ScenarioResult, int) {
+	t.Helper()
+	return runScenarioSource(t, repeatedStageSource(items, failOn), setup...)
+}
+
+func repeatedStageSource(items, failOn []string) string {
+	quote := func(list []string) string {
+		quoted := make([]string, len(list))
+		for i, item := range list {
+			quoted[i] = `"` + item + `"`
+		}
+		return strings.Join(quoted, ", ")
+	}
+
+	raw := `### Setup
+GET http://localhost/setup HTTP/1.1
+
+$POST{ items = { ` + quote(items) + ` }; failOn = {}; for _, v in ipairs({ ` + quote(failOn) + ` }) do failOn[v] = true end }
+
+### Loop
+GET http://localhost/loop?id=${ return items[1] } HTTP/1.1
+
+$ASSERT{ sinq.assert.isTrue(not failOn[items[1]], "iteration for " .. items[1] .. " failed") }
+$POST{ table.remove(items, 1); if #items > 0 then sinq.setNextRequest(#sinq.responses) end }
+
+### After
+GET http://localhost/after HTTP/1.1
+`
+	return raw
+}
+
+func luaSet(list []string) string {
+	entries := make([]string, len(list))
+	for i, item := range list {
+		entries[i] = `["` + item + `"] = true`
+	}
+	return "{ " + strings.Join(entries, ", ") + " }"
+}
+
+func runScenarioSource(t *testing.T, raw string, setup ...func(*worker)) (ScenarioResult, int) {
+	t.Helper()
+	res, sent := runScenarioSourceAllowingErrors(t, raw, setup...)
+	for _, rr := range res.RequestResults {
+		if rr.Status == Error {
+			t.Fatalf("Stage %q errored, the scenario itself is broken: %s", rr.Name, rr.ErrorMessage)
+		}
+	}
+	return res, sent
+}
+
+func runScenarioSourceAllowingErrors(t *testing.T, raw string, setup ...func(*worker)) (ScenarioResult, int) {
+	t.Helper()
+	w := setupTestWorker(t, nil)
+	transport := &countingRoundTripper{}
+	w.env.transport = transport
+	for _, fn := range setup {
+		fn(w)
+	}
+
+	bps, err := scenario.ParseRequestBlueprints(strings.NewReader(raw), "repeat.sinq")
+	if err != nil {
+		t.Fatalf("Failed to parse requests: %v", err)
+	}
+
+	bundle := taskBundle{
+		ScenarioBlueprint: scenario.ScenarioBlueprint{
+			Config: &scenario.ScenarioConfig{
+				Name:          "RepeatedStage",
+				ReqTimeout:    scenario.Duration{Duration: 1 * time.Second},
+				ScriptTimeout: scenario.Duration{Duration: 1 * time.Second},
+				MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
+				MaxRetries:    3,
+				FailFast:      false,
+			},
+			Requests: bps,
+		},
+		workspace: &mockWorkspace{},
+		labels:    []string{},
+		run:       true,
+	}
+
+	resCh := make(chan ScenarioResult, 1)
+	w.resCh = resCh
+	w.errorCh = make(chan error, 1)
+
+	w.processScenario(context.Background(), bundle)
+
+	select {
+	case res := <-resCh:
+		if len(res.RequestResults) != 3 {
+			t.Fatalf("Expected 3 stage results, got %d: %+v", len(res.RequestResults), res.RequestResults)
+		}
+		return res, int(transport.sent.Load())
+	case <-time.After(2 * time.Second):
+		t.Fatal("Worker did not return a result")
+	}
+	return ScenarioResult{}, 0
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_SendsEveryPass(t *testing.T) {
+	_, sent := runRepeatedStageScenario(t, []string{"a", "b", "c"}, nil)
+	if sent != 5 {
+		t.Errorf("Expected 5 requests on the wire (Setup, Loop x3, After), got %d", sent)
+	}
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_EarlierFailedPassFailsStage(t *testing.T) {
+	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"a"})
+
+	if res.Status != Failure {
+		t.Errorf("Expected scenario status Failure, got %v", res.Status)
+	}
+	loop := res.RequestResults[1]
+	if loop.Status != Failure {
+		t.Errorf("Expected Loop to be marked Failure because one of its passes failed, got %v", loop.Status)
+	}
+	if !slices.Contains(loop.FailedAssertions, "iteration for a failed") {
+		t.Errorf("Expected Loop to keep the failure from its first pass, got %v", loop.FailedAssertions)
+	}
+	if res.RequestResults[0].Status != Success || res.RequestResults[2].Status != Success {
+		t.Errorf("Expected Setup and After to succeed, got %v and %v", res.RequestResults[0].Status, res.RequestResults[2].Status)
+	}
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_LastFailedPassFailsStage(t *testing.T) {
+	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"c"})
+
+	loop := res.RequestResults[1]
+	if loop.Status != Failure {
+		t.Errorf("Expected Loop to be marked Failure, got %v", loop.Status)
+	}
+	if !slices.Contains(loop.FailedAssertions, "iteration for c failed") {
+		t.Errorf("Expected Loop to keep the failure from its last pass, got %v", loop.FailedAssertions)
+	}
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_KeepsFailuresFromEveryPass(t *testing.T) {
+	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"a", "c"})
+
+	loop := res.RequestResults[1]
+	if loop.Status != Failure {
+		t.Errorf("Expected Loop to be marked Failure, got %v", loop.Status)
+	}
+	want := []string{"iteration for a failed", "iteration for c failed"}
+	if !slices.Equal(loop.FailedAssertions, want) {
+		t.Errorf("Expected Loop to keep the failures of all its failed passes in order %v, got %v", want, loop.FailedAssertions)
+	}
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_AllPassesSucceed(t *testing.T) {
+	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, nil)
+
+	if res.Status != Success {
+		t.Errorf("Expected scenario status Success, got %v", res.Status)
+	}
+	for _, rr := range res.RequestResults {
+		if rr.Status != Success || len(rr.FailedAssertions) != 0 {
+			t.Errorf("Expected stage %q to succeed with no failures, got %v %v", rr.Name, rr.Status, rr.FailedAssertions)
+		}
+	}
+}
+
+type loopPlan struct {
+	items, failOn, skipOn, retryOn []string
+}
+
+func runPreDrivenLoopScenario(t *testing.T, plan loopPlan) (ScenarioResult, int) {
+	t.Helper()
+	items := make([]string, len(plan.items))
+	for i, item := range plan.items {
+		items[i] = `"` + item + `"`
+	}
+
+	raw := `### Setup
+GET http://localhost/setup HTTP/1.1
+
+$POST{ items = { ` + strings.Join(items, ", ") + ` }; failOn = ` + luaSet(plan.failOn) + `; skipOn = ` + luaSet(plan.skipOn) + `; retryOn = ` + luaSet(plan.retryOn) + ` }
+
+### Loop
+GET http://localhost/loop?id=${ return current } HTTP/1.1
+
+$PRE{ current = table.remove(items, 1); if #items > 0 then sinq.setNextRequest(2) end; if skipOn[current] then req.skip() end }
+$RETRY{ if retryOn[current] and res.attempt < 2 then return 0 end; return -1 }
+$ASSERT{ sinq.assert.isTrue(not failOn[current], "iteration for " .. current .. " failed") }
+
+### After
+GET http://localhost/after HTTP/1.1
+`
+	return runScenarioSource(t, raw)
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_SkippedThenRanPassIsSuccess(t *testing.T) {
+	res, sent := runPreDrivenLoopScenario(t, loopPlan{items: []string{"a", "b", "c"}, skipOn: []string{"a"}})
+
+	if sent != 4 {
+		t.Fatalf("Expected 4 requests on the wire (Setup, Loop for b and c, After), got %d", sent)
+	}
+	if loop := res.RequestResults[1]; loop.Status != Success {
+		t.Errorf("Expected Loop to be Success since two of its passes ran and passed, got %v", loop.Status)
+	}
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_RanThenSkippedPassIsSuccess(t *testing.T) {
+	res, _ := runPreDrivenLoopScenario(t, loopPlan{items: []string{"a", "b", "c"}, skipOn: []string{"c"}})
+
+	if loop := res.RequestResults[1]; loop.Status != Success {
+		t.Errorf("Expected Loop to be Success since two of its passes ran and passed, got %v", loop.Status)
+	}
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_FailedThenSkippedPassIsFailure(t *testing.T) {
+	res, _ := runPreDrivenLoopScenario(t, loopPlan{items: []string{"a", "b", "c"}, failOn: []string{"a"}, skipOn: []string{"b"}})
+
+	loop := res.RequestResults[1]
+	if loop.Status != Failure {
+		t.Errorf("Expected Loop to stay Failure after a later pass was skipped, got %v", loop.Status)
+	}
+	if !slices.Equal(loop.FailedAssertions, []string{"iteration for a failed"}) {
+		t.Errorf("Expected Loop to keep the failure from its first pass, got %v", loop.FailedAssertions)
+	}
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_AttemptsMatchRequestsSent(t *testing.T) {
+	tests := []struct {
+		name string
+		plan loopPlan
+		sent int
+	}{
+		{name: "repeats only", plan: loopPlan{items: []string{"a", "b", "c"}}, sent: 5},
+		{name: "repeats with a retry", plan: loopPlan{items: []string{"a", "b", "c"}, retryOn: []string{"a"}}, sent: 6},
+		{name: "repeats with a skipped pass", plan: loopPlan{items: []string{"a", "b", "c"}, skipOn: []string{"b"}}, sent: 4},
+		{name: "retry and skipped pass", plan: loopPlan{items: []string{"a", "b", "c"}, retryOn: []string{"a"}, skipOn: []string{"b"}}, sent: 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, sent := runPreDrivenLoopScenario(t, tt.plan)
+			if sent != tt.sent {
+				t.Fatalf("Expected %d requests on the wire, got %d", tt.sent, sent)
+			}
+
+			attempts := 0
+			for _, rr := range res.RequestResults {
+				attempts += rr.Attempts
+			}
+			if attempts != sent {
+				t.Errorf("Expected Attempts across all stages to add up to the %d requests sent, got %d: %+v", sent, attempts, res.RequestResults)
+			}
+		})
+	}
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_DumpIsFromFailingPass(t *testing.T) {
+	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"a"}, func(w *worker) { w.env.cfg.DumpOnFailure = true })
+
+	loop := res.RequestResults[1]
+	if loop.Request == "" || loop.Response == "" {
+		t.Fatalf("Expected a dump for the failed Loop stage, got request %q and response %q", loop.Request, loop.Response)
+	}
+	if !strings.Contains(loop.Request, "id=a") {
+		t.Errorf("Expected the Loop dump to show the request of its failing pass (id=a), got %q", loop.Request)
+	}
+}
+
+type failingRoundTripper struct {
+	countingRoundTripper
+	failQuery string
+	failErr   error
+}
+
+func (r *failingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, _ := r.countingRoundTripper.RoundTrip(req)
+	if req.URL.RawQuery == r.failQuery {
+		return nil, r.failErr
+	}
+	return resp, nil
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_LaterPassInterruptedIsAborted(t *testing.T) {
+	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, nil, func(w *worker) {
+		w.env.transport = &failingRoundTripper{failQuery: "id=c", failErr: context.Canceled}
+	})
+
+	if res.Status != Aborted {
+		t.Errorf("Expected scenario status Aborted, got %v", res.Status)
+	}
+	if loop := res.RequestResults[1]; loop.Status != Aborted {
+		t.Errorf("Expected Loop to be Aborted since its last pass was interrupted, got %v", loop.Status)
+	}
+}
+
+func TestWorker_ProcessScenario_RepeatedStage_ErrorAfterFailedPassIsError(t *testing.T) {
+	res, _ := runScenarioSourceAllowingErrors(t, repeatedStageSource([]string{"a", "b", "c"}, []string{"a"}), func(w *worker) {
+		w.env.transport = &failingRoundTripper{failQuery: "id=c", failErr: errors.New("connection refused")}
+	})
+
+	loop := res.RequestResults[1]
+	if loop.Status != Error {
+		t.Errorf("Expected Loop to be Error since its last pass errored, got %v", loop.Status)
+	}
+	if !slices.Equal(loop.FailedAssertions, []string{"iteration for a failed"}) {
+		t.Errorf("Expected Loop to keep the failure from its first pass, got %v", loop.FailedAssertions)
+	}
+	if !strings.Contains(loop.ErrorMessage, "connection refused") {
+		t.Errorf("Expected Loop to carry the error of its last pass, got %q", loop.ErrorMessage)
+	}
+}
+
+func cachedVia(w *worker) { w.env.cachedProcessor.transport = w.env.transport }
+
+func TestWorker_ProcessScenario_CacheKey_RetriesSendAgain(t *testing.T) {
+	tests := []struct {
+		name  string
+		cache string
+	}{
+		{name: "default key", cache: `req.cache()`},
+		{name: "custom key", cache: `req.cache("poll")`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := `### Setup
+GET http://localhost/setup HTTP/1.1
+
+### Poll
+GET http://localhost/poll HTTP/1.1
+
+$PRE{ ` + tt.cache + ` }
+$RETRY{ if res.attempt < 3 then return 0 end; return -1 }
+
+### After
+GET http://localhost/after HTTP/1.1
+`
+			res, sent := runScenarioSource(t, raw, cachedVia)
+
+			if sent != 5 {
+				t.Errorf("Expected each of the 3 poll attempts to reach the server (5 requests in total), got %d", sent)
+			}
+			if poll := res.RequestResults[1]; poll.Attempts != 3 {
+				t.Errorf("Expected 3 attempts for the polled stage, got %d", poll.Attempts)
+			}
+		})
+	}
+}
+
+func TestWorker_ProcessScenario_CacheKey_SharedAcrossRequests(t *testing.T) {
+	raw := `### Auth
+POST http://localhost/auth HTTP/1.1
+
+$PRE{ req.cache("login") }
+
+### AuthToken
+POST http://localhost/auth-token HTTP/1.1
+
+$PRE{ req.cache("login") }
+
+### Uncached
+POST http://localhost/auth-token HTTP/1.1
+`
+	_, sent := runScenarioSource(t, raw, cachedVia)
+
+	if sent != 2 {
+		t.Errorf("Expected the two requests sharing a cache key to send once, plus the uncached one (2 in total), got %d", sent)
+	}
+}
+
+func TestWorker_ProcessScenario_CacheKey_RejectsOtherArgumentTypes(t *testing.T) {
+	tests := []struct {
+		name    string
+		call    string
+		wantErr string
+	}{
+		{name: "number", call: `req.cache(42)`, wantErr: "Unexpected argument type number"},
+		{name: "explicit nil", call: `req.cache(nil)`, wantErr: "Unexpected argument type nil"},
+		{name: "missing env value", call: `req.cache(env.missing)`, wantErr: "Unexpected argument type nil"},
+		{name: "table", call: `req.cache({})`, wantErr: "Unexpected argument type table"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := `### Setup
+GET http://localhost/setup HTTP/1.1
+
+### Cached
+GET http://localhost/cached HTTP/1.1
+
+$PRE{ ` + tt.call + ` }
+
+### After
+GET http://localhost/after HTTP/1.1
+`
+			res, sent := runScenarioSourceAllowingErrors(t, raw, cachedVia)
+
+			cached := res.RequestResults[1]
+			if cached.Status != Error || !strings.Contains(cached.ErrorMessage, tt.wantErr) {
+				t.Errorf("Expected the stage to error with %q, got %v %q", tt.wantErr, cached.Status, cached.ErrorMessage)
+			}
+			if sent != 1 {
+				t.Errorf("Expected only Setup to be sent, got %d requests", sent)
+			}
+		})
+	}
+}
+
+func TestWorker_MaterializeRequest_UnsupportedInlineTypesFail(t *testing.T) {
+	tests := []struct {
+		name     string
+		script   string
+		typeName string
+	}{
+		{name: "function", script: `return function() end`, typeName: "function"},
+		{name: "channel", script: `return channel.make()`, typeName: "channel"},
+		{name: "coroutine", script: `return coroutine.create(function() end)`, typeName: "thread"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := setupTestWorker(t, context.Background())
+
+			source := []byte(tt.script)
+			req := &scenario.RequestBlueprint{
+				Source:   source,
+				Filename: "inline_types.sinq",
+				Content: []scenario.Token{
+					{Type: scenario.Script, Name: "INLINE_TYPE", Line: 1, PayloadStart: 0, PayloadEnd: len(source)},
+				},
+			}
+
+			materialized, err := w.materializeRequest(context.Background(), req, time.Second)
+			if err == nil {
+				t.Fatalf("expected an inline %s to fail materialization, got %q", tt.name, materialized)
+			}
+			if !strings.Contains(err.Error(), "unexpected type "+tt.typeName) {
+				t.Errorf("expected the error to name the %s type, got %v", tt.typeName, err)
+			}
+		})
+	}
+}
+
+func TestWorker_MaterializeRequest_UnserializableInlineTableFails(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	rawSinq := `POST http://localhost/ HTTP/1.1
+
+{ "ids": ${ return { 1, nil, 3 } } }
+`
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "sparse_inline.sinq")
+	if err != nil {
+		t.Fatalf("failed to parse request: %v", err)
+	}
+
+	materialized, err := w.materializeRequest(context.Background(), reqBp[0], time.Second)
+	if err == nil {
+		t.Fatalf("expected materialization to fail on a sparse inline table, got %q", materialized)
+	}
+	if !strings.Contains(err.Error(), "sparse_inline.sinq#3:") || !strings.Contains(err.Error(), "Failed to materialize request") || !strings.Contains(err.Error(), "sparse array") {
+		t.Errorf("expected a located materialization error naming the sparse array, got %v", err)
+	}
+}
+
+func TestWorker_ProcessScenario_CacheKey_FalseDisablesEarlierCache(t *testing.T) {
+	raw := `### First
+GET http://localhost/same HTTP/1.1
+
+$PRE{ req.cache("shared"); req.cache(false) }
+
+### Second
+GET http://localhost/same HTTP/1.1
+
+$PRE{ req.cache("shared"); req.cache(false) }
+
+### After
+GET http://localhost/after HTTP/1.1
+`
+	_, sent := runScenarioSource(t, raw, cachedVia)
+
+	if sent != 3 {
+		t.Errorf("Expected req.cache(false) to override the earlier key so every request is sent (3), got %d", sent)
+	}
+}
+
+func TestWorker_ProcessScenario_CacheKey_NoArgumentEnablesDefaultCache(t *testing.T) {
+	raw := `### First
+GET http://localhost/same HTTP/1.1
+
+$PRE{ req.cache() }
+
+### Second
+GET http://localhost/same HTTP/1.1
+
+$PRE{ req.cache() }
+
+### After
+GET http://localhost/after HTTP/1.1
+`
+	_, sent := runScenarioSource(t, raw, cachedVia)
+
+	if sent != 2 {
+		t.Errorf("Expected the identical cached requests to send once, plus After (2 in total), got %d", sent)
 	}
 }
 
@@ -824,6 +1335,110 @@ func TestWorker_MaterializeRequest_ScriptTokenSuccess(t *testing.T) {
 	}
 	if string(materialized) != "computed" {
 		t.Errorf("expected materialized content 'computed', got %q", materialized)
+	}
+}
+
+func TestWorker_MaterializeRequest_MultipleReturnValues(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+	if err := w.lc.DoString(`flat = { name = "x" }`); err != nil {
+		t.Fatalf("failed to seed Lua state: %v", err)
+	}
+
+	rawSinq := `POST http://localhost/ HTTP/1.1
+
+{ "two": ${ return "first", nil }, "twoStr": "${ return "first", "second" }", "plain": ${ return sinq.json.serialize(flat) } }
+`
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "multi_return.sinq")
+	if err != nil {
+		t.Fatalf("failed to parse request: %v", err)
+	}
+
+	materialized, err := w.materializeRequest(context.Background(), reqBp[0], time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := `{ "two": first, "twoStr": "first", "plain": {"name":"x"} }`
+	if !strings.Contains(string(materialized), want) {
+		t.Errorf("expected materialized body to contain %q, got %q", want, materialized)
+	}
+}
+
+func TestWorker_MaterializeRequest_NilScriptValueFails(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	rawSinq := `GET http://localhost/ HTTP/1.1
+X-Value: ${ return nil }
+`
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "nil_return.sinq")
+	if err != nil {
+		t.Fatalf("failed to parse request: %v", err)
+	}
+
+	materialized, err := w.materializeRequest(context.Background(), reqBp[0], time.Second)
+	if err == nil {
+		t.Fatalf("expected materialization to fail on a nil inline value, got %q", materialized)
+	}
+}
+
+func TestWorker_MaterializeRequest_InlineValueTypes(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{name: "string is inserted raw", script: `return "plain"`, want: `plain`},
+		{name: "number is inserted as text", script: `return 42`, want: `42`},
+		{name: "true is inserted as text", script: `return true`, want: `true`},
+		{name: "false is inserted as text", script: `return false`, want: `false`},
+		{name: "table is serialized as JSON", script: `return { name = "x" }`, want: `{"name":"x"}`},
+		{name: "json.null is inserted as null", script: `return sinq.json.null`, want: `null`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := setupTestWorker(t, context.Background())
+
+			source := []byte(tt.script)
+			req := &scenario.RequestBlueprint{
+				Source:   source,
+				Filename: "inline_types.sinq",
+				Content: []scenario.Token{
+					{Type: scenario.Script, Name: "INLINE_TYPE", Line: 1, PayloadStart: 0, PayloadEnd: len(source)},
+				},
+			}
+
+			materialized, err := w.materializeRequest(context.Background(), req, time.Second)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(materialized) != tt.want {
+				t.Errorf("expected %q, got %q", tt.want, materialized)
+			}
+		})
+	}
+}
+
+func TestWorker_MaterializeRequest_InlineTableIgnoresEarlierIndent(t *testing.T) {
+	w := setupTestWorker(t, context.Background())
+
+	rawSinq := `POST http://localhost/ HTTP/1.1
+X-Pretty: ${ return (sinq.json.serialize({ a = 1 }, "  ")) }
+X-Table: ${ return { b = 1 } }
+`
+	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "stale_indent.sinq")
+	if err != nil {
+		t.Fatalf("failed to parse request: %v", err)
+	}
+
+	materialized, err := w.materializeRequest(context.Background(), reqBp[0], time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "X-Table: {\"b\":1}\n"
+	if !strings.Contains(string(materialized), want) {
+		t.Errorf("expected the inline table to be serialized compactly as %q, got %q", want, materialized)
 	}
 }
 

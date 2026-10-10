@@ -33,9 +33,9 @@ Every worker has its own Lua VM. If Leaf A and Leaf B both inherit `01_login.sin
 
 A worker does not run a Lua block as raw text. It compiles the block to bytecode (an AST) first.
 
-So that 100 workers do not all compile the same `01_login.sinq` script at once, the Runner keeps one shared, thread-safe AST cache, keyed by the script's byte offset in the file.
+So that 100 workers do not all compile the same `01_login.sinq` script at once, the Runner keeps one shared, thread-safe AST cache, keyed by a hash of the script's file, name, byte offset, and contents.
 
-`sinq` can also cache the HTTP responses themselves, opt-in per request via `req.cache(true)` in `$PRE`. With it enabled, the cache doubles as a singleflight coalescer: if several workers fire the identical request at the same time, the first one runs it and the rest wait and take its result. The response is kept for `--cache-timeout` (default 10s), up to `--max-cache-size` of body. The cache has no eviction: every distinct cached request stays until the run ends.
+`sinq` can also cache the HTTP responses themselves, opt-in per request via `req.cache(true)` in `$PRE`, or `req.cache(key)` to share one response between requests that call it with the same key. With it enabled, the cache doubles as a singleflight coalescer: if several workers fire the identical request (or requests with the same key) at the same time, the first one runs it and the rest wait and take its result. Because that one request is shared across scenarios rather than belonging to any single one, it can't reuse a scenario's `req_timeout`; it's bounded by `--cache-timeout` instead (default 10s), reading up to `--max-cache-size` (default 5 MiB) of body. The cache has no eviction: every distinct cached request stays until the run ends.
 
 ### Context Cancellation
 

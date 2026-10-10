@@ -36,7 +36,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					Name:   "Test Scenario",
 					Status: runner.Success,
 					RequestResults: []runner.RequestResult{
-						{Name: "Req1", Status: runner.Success},
+						{Name: "Req1", Status: runner.Success, Attempts: 1},
 					},
 				},
 			},
@@ -50,7 +50,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					Name:   "Color Scenario",
 					Status: runner.Failure,
 					RequestResults: []runner.RequestResult{
-						{Name: "ReqColor", Status: runner.Failure, ErrorMessage: "boom"},
+						{Name: "ReqColor", Status: runner.Failure, ErrorMessage: "boom", Attempts: 1},
 					},
 				},
 			},

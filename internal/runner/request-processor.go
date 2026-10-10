@@ -40,7 +40,7 @@ type RequestProcessor struct {
 	client            *http.Client
 	filenameFrom      string
 	filenameTo        string
-	hash              string
+	cacheKey          string
 	cache             bool
 	skip              bool
 }
@@ -76,6 +76,7 @@ func (p *RequestProcessor) runPre() error {
 
 	p.filenameFrom = res.filenameIn
 	p.filenameTo = res.filenameOut
+	p.cacheKey = res.cacheKey
 	p.cache = res.cache
 	p.skip = res.skip
 	p.multipart = res.multipart
@@ -143,6 +144,7 @@ func (p *RequestProcessor) run() error {
 			p.w.env.logger.Debug("[Runner] Too many retries", p.w.loggingContext(p.ctx)...)
 			return p.handleError(err)
 		}
+		p.result.Attempts++
 		p.retries++
 
 		if p.cache {
@@ -196,8 +198,8 @@ func (p *RequestProcessor) run() error {
 	return nil
 }
 
-func (p *RequestProcessor) getHash() string {
-	if p.hash == "" {
+func (p *RequestProcessor) getCacheKey() string {
+	if p.cacheKey == "" {
 		p.w.env.hasher.Write(p.materialized)
 		p.w.env.hasher.WriteString(p.filenameFrom)
 		p.w.env.hasher.WriteString(p.filenameTo)
@@ -226,11 +228,11 @@ func (p *RequestProcessor) getHash() string {
 				}
 			}
 		}
-		p.hash = strconv.FormatUint(p.w.env.hasher.Sum64(), 16)
+		p.cacheKey = strconv.FormatUint(p.w.env.hasher.Sum64(), 16)
 		p.w.env.hasher.Reset()
 	}
 
-	return p.hash
+	return p.cacheKey
 }
 
 func (p *RequestProcessor) validateBody() error {
@@ -343,7 +345,8 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 		}
 	}
 
-	actualKey := p.getHash() + strconv.Itoa(p.retries)
+	actualKey := p.getCacheKey() + strconv.Itoa(p.retries)
+
 	if fromCache, err, ok := p.w.env.cachedProcessor.lookup(actualKey); ok {
 		if err != nil {
 			return result, err
@@ -439,9 +442,15 @@ func (p *RequestProcessor) runPost() error {
 }
 
 func (p *RequestProcessor) finalize() {
+	if panicked := recover(); panicked != nil {
+		p.result.Status = Error
+		p.result.ErrorMessage = fmt.Sprintf("Caught a panic: %v", panicked)
+	}
+
 	if p.result.Status == Unset {
 		p.result.Status = Success
 	}
+
 	p.result.Total = p.totalRequestTimer.Time()
 }
 

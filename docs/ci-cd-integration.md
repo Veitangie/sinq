@@ -21,6 +21,7 @@ sinq -f junit -o report.xml ./tests/integration
 ### How `sinq` maps to JUnit Elements
 
 * **`<testsuite>`:** Maps directly to a single `sinq` Scenario (a leaf directory).
+* **`<properties>`:** Holds the scenario's tags as a single `<property name="tags" value="smoke, api"></property>`, joined with `, `. It comes before the `<testcase>` elements, as the JUnit schema expects, and is left out entirely for a scenario without tags.
 * **`<testcase>`:** Maps directly to a single `.sinq` file request within that scenario.
 * **`<failure>`:** Triggered exclusively by Lua `$ASSERT` block failures (e.g., `sinq.assert.fail("Data missing")`). This indicates the system is up, but the business logic is wrong.
 * **`<error>`:** Triggered by Go-level runtime panics, context timeouts, dial connection refusals, or malformed HTTP parsing errors. This indicates the system or the test architecture is fundamentally broken.
@@ -30,6 +31,9 @@ sinq -f junit -o report.xml ./tests/integration
 <?xml version="1.0" encoding="UTF-8"?>
 <testsuites tests="2" failures="1" errors="0" time="1.503">
   <testsuite name="auth/trade" tests="2" failures="0" errors="0" time="0.800" timestamp="2026-06-08T10:00:00Z">
+    <properties>
+      <property name="tags" value="smoke, trade"></property>
+    </properties>
     <testcase name="01_login.sinq" classname="auth/trade" time="0.200"></testcase>
     <testcase name="02_buy_item.sinq" classname="auth/trade" time="0.600"></testcase>
   </testsuite>

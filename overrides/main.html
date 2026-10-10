@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  <link rel="alternate" type="text/plain" title="LLM-friendly docs" href="{{ 'llms.txt' | url }}">
+  <link rel="alternate" type="text/plain" title="LLM-friendly docs (full text)" href="{{ 'llms-full.txt' | url }}">
+{% endblock %}

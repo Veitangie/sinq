@@ -100,7 +100,17 @@ GET ${env.BASE_URL}/expensive-lookup
 
 $PRE{ req.cache(true) }
 ```
-*Note: Caching is based on the request method, URL, headers, and body.*
+*Note: Caching is based on the request method, URL, headers and body, plus the cookies sent with it, attached files and the scenario directory. Each retry attempt is cached separately. Responses served from the cache still count toward "requests sent" in the summary.*
+
+To share one response between requests that differ in ways that don't matter, such as an `Accept-Language` from an environment matrix or a trace header, pass a key instead:
+
+```http
+POST ${env.BASE_URL}/auth
+
+$PRE{ req.cache("auth:" .. env.phoneNumber) }
+```
+
+Every request that uses the same key gets the same cached response, even with a different method, URL or body, so include whatever must keep requests apart (here the phone number) in the key. The first request to fill a key decides what is stored. If it streamed its body to disk with `req.saveResponseTo`, later requests with the same key get an empty body.
 
 ## Can I skip a request conditionally?
 

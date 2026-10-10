@@ -16,6 +16,8 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
+const asEmptyArrayMeta string = "asEmptyArray"
+
 var jsonNullId = &struct{}{}
 
 func newJSONNull(L *lua.LState) lua.LValue {
@@ -126,6 +128,9 @@ func (p JSONParser) parseObject(source *json.Decoder) (lua.LValue, error) {
 
 func (p JSONParser) parseArray(source *json.Decoder) (lua.LValue, error) {
 	result := p.L.NewTable()
+	meta := p.L.NewTable()
+	meta.RawSetString(asEmptyArrayMeta, lua.LTrue)
+	result.Metatable = meta
 	resIdx := 1
 	for {
 		token, err := source.Token()
@@ -255,7 +260,8 @@ func (s *JSONSerializer) serializeArray(array []lua.LValue, indent string) error
 	s.sb.WriteByte('[')
 	if s.newline {
 		s.sb.WriteByte('\n')
-		s.sb.WriteString(indent + s.indent)
+		s.sb.WriteString(indent)
+		s.sb.WriteString(s.indent)
 	}
 
 	for idx, arrEntry := range array {
@@ -286,7 +292,8 @@ func (s *JSONSerializer) serializeObject(tableEntries []keyval, indent string) e
 	s.sb.WriteByte('{')
 	if s.newline {
 		s.sb.WriteByte('\n')
-		s.sb.WriteString(indent + s.indent)
+		s.sb.WriteString(indent)
+		s.sb.WriteString(s.indent)
 	}
 
 	for idx, keyval := range tableEntries {
@@ -320,16 +327,27 @@ func (s *JSONSerializer) serializeObject(tableEntries []keyval, indent string) e
 	return nil
 }
 
-func (s *JSONSerializer) serializeTable(tbl *lua.LTable, indent string) error {
+func disassembleTable(tbl *lua.LTable) (arrayEntries []lua.LValue, tableEntries []keyval, err error) {
 	arrLen := tbl.Len()
-	arrayEntries := make([]lua.LValue, 0, arrLen)
-	tableEntries := make([]keyval, 0)
+	arrayEntries = make([]lua.LValue, 0, arrLen)
+	tableEntries = make([]keyval, 0)
 	errorsAcc := make([]string, 0)
+
 	tbl.ForEach(func(key, val lua.LValue) {
 		switch typedKey := key.(type) {
 		case lua.LNumber:
 			if len(arrayEntries) == arrLen {
 				errorsAcc = append(errorsAcc, fmt.Sprintf("Unexpected number key %v", typedKey))
+				return
+			}
+
+			if lua.LNumber(int(typedKey)) != typedKey {
+				errorsAcc = append(errorsAcc, "Non-whole number key in array. Make sure to use continuous arrays or string-only keys in serialized tables")
+				return
+			}
+
+			if typedKey <= 0 || typedKey > lua.LNumber(arrLen) {
+				errorsAcc = append(errorsAcc, "Found sparse array, expected continuous")
 				return
 			}
 
@@ -341,12 +359,28 @@ func (s *JSONSerializer) serializeTable(tbl *lua.LTable, indent string) error {
 		}
 	})
 
+	if len(arrayEntries) != arrLen {
+		errorsAcc = append(errorsAcc, "Found sparse array, expected continuous")
+	}
+
 	if len(arrayEntries) != 0 && len(tableEntries) != 0 {
 		errorsAcc = append(errorsAcc, "Found both list and table entries")
 	}
 
 	if len(errorsAcc) != 0 {
-		return errors.New(strings.Join(errorsAcc, ",\n"))
+		arrayEntries = []lua.LValue{}
+		tableEntries = []keyval{}
+		err = errors.New(strings.Join(errorsAcc, ",\n"))
+	}
+
+	return
+}
+
+func (s *JSONSerializer) serializeTable(tbl *lua.LTable, indent string) error {
+	arrayEntries, tableEntries, err := disassembleTable(tbl)
+
+	if err != nil {
+		return err
 	}
 
 	if len(arrayEntries) != 0 {
@@ -358,7 +392,7 @@ func (s *JSONSerializer) serializeTable(tbl *lua.LTable, indent string) error {
 	}
 
 	if meta, ok := tbl.Metatable.(*lua.LTable); ok {
-		asEmptyArray, ok := meta.RawGetString("asEmptyArray").(lua.LBool)
+		asEmptyArray, ok := meta.RawGetString(asEmptyArrayMeta).(lua.LBool)
 		if ok && bool(asEmptyArray) {
 			s.sb.WriteByte('[')
 			s.sb.WriteByte(']')
@@ -384,6 +418,12 @@ func (lc *LuaContext) ParseJSON(l *lua.LState) int {
 	return 2
 }
 
+func (lc *LuaContext) SerializeLValue(value lua.LValue) (string, error) {
+	lc.serializer.indent = ""
+	lc.serializer.newline = false
+	return lc.serializer.SerializeLValue(value)
+}
+
 func (lc *LuaContext) SerializeToJSON(l *lua.LState) int {
 	source := l.CheckAny(1)
 	indent := l.OptString(2, "")
@@ -400,5 +440,56 @@ func (lc *LuaContext) SerializeToJSON(l *lua.LState) int {
 		l.Push(lua.LNil)
 	}
 
+	return 2
+}
+
+func JSONArray(l *lua.LState) int {
+	count := l.GetTop()
+	if count > 1 {
+		l.Push(lua.LNil)
+		l.Push(lua.LString("sinq.json.array: Too many arguments, expecting 0 or 1"))
+		return 2
+	}
+
+	var table *lua.LTable
+	switch typed := l.Get(1).(type) {
+	case *lua.LNilType:
+		table = l.NewTable()
+	case *lua.LTable:
+		table = typed
+	default:
+		l.Push(lua.LNil)
+		l.Push(lua.LString(fmt.Sprintf("sinq.json.array: Expected table or nil, got %v", typed.Type())))
+		return 2
+	}
+
+	_, tableEntries, err := disassembleTable(table)
+
+	if err != nil {
+		l.Push(lua.LNil)
+		l.Push(lua.LString(fmt.Sprintf("sinq.json.array: %s", err.Error())))
+		return 2
+	}
+
+	if lenTable := len(tableEntries); lenTable != 0 {
+		l.Push(lua.LNil)
+		l.Push(lua.LString(fmt.Sprintf("sinq.json.array: Found %d key-value entries, cannot mark as array", lenTable)))
+		return 2
+	}
+
+	meta, ok := table.Metatable.(*lua.LTable)
+	if !ok {
+		if _, ok := table.Metatable.(*lua.LNilType); !ok {
+			l.Push(lua.LNil)
+			l.Push(lua.LString(fmt.Sprintf("sinq.json.array: Expecting metatable to be nil or a table, got %s", table.Metatable.Type())))
+			return 2
+		}
+		meta = l.NewTable()
+		table.Metatable = meta
+	}
+
+	meta.RawSetString(asEmptyArrayMeta, lua.LTrue)
+	l.Push(table)
+	l.Push(lua.LNil)
 	return 2
 }

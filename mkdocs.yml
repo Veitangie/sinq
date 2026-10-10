@@ -4,9 +4,17 @@ site_url: https://sinq.veitangie.dev
 
 exclude_docs: |
   requirements.txt
+  man.md
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
 
 theme:
   name: material
+  custom_dir: overrides
   icon:
     logo: material/api
   palette:
@@ -34,21 +42,21 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Guides:
-    - Writing & Debugging Scenarios: authoring.md
-    - Scenarios & Config: scenario.md
-    - Environment Matrix: env-matrix.md
+      - Writing & Debugging Scenarios: authoring.md
+      - Scenarios & Config: scenario.md
+      - Environment Matrix: env-matrix.md
   - Reference:
-    - CLI Reference: cli.md
-    - Lua API: lua-api.md
+      - CLI Reference: cli.md
+      - Lua API: lua-api.md
   - Architecture:
-    - Overview: overview.md
-    - Treewalker: treewalker.md
-    - Execution Runner: runner.md
+      - Overview: overview.md
+      - Treewalker: treewalker.md
+      - Execution Runner: runner.md
   - CI/CD Integration: ci-cd-integration.md
   - More:
-    - Alternatives & Comparisons: alternatives.md
-    - Versioning & Compatibility: versioning.md
-    - FAQ: faq.md
+      - Alternatives & Comparisons: alternatives.md
+      - Versioning & Compatibility: versioning.md
+      - FAQ: faq.md
 
 plugins:
   - search
@@ -89,4 +97,4 @@ markdown_extensions:
   - admonition
   - pymdownx.details
   - pymdownx.tabbed:
-      alternate_style: true 
+      alternate_style: true

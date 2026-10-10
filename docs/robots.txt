@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://sinq.veitangie.dev/sitemap.xml
+
+# LLM-friendly docs: https://sinq.veitangie.dev/llms.txt
+# Full text:         https://sinq.veitangie.dev/llms-full.txt

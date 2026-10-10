@@ -25,7 +25,7 @@ Shorthands for the *current* request and response being processed.
 * `res`: A direct reference to `sinq.responses[%current%]`.
 
 ### Flow Control
-* **`sinq.setNextRequest(index)`**: Alters execution flow. The next request executed will be the one at the specified `index` (1-based). Useful for building loops or conditional skips within a scenario.
+* **`sinq.setNextRequest(index)`**: Alters execution flow. The next request executed will be the one at the specified `index` (1-based). Useful for building loops or conditional skips within a scenario. It can be called from any hook of the current request, including `$PRE`, which is the place to drive a loop whose runs may call `req.skip()`, since `$POST` doesn't run for a skipped request. A request that runs more than once is reported once. Its status is the most severe across its runs (error, then failure, then aborted, then success, then skipped). It keeps the assertion failures of every run, its timings and attempt counts add up, and `--dump-on-failure` shows the first failing run.
 * **`sinq.finishScenario()`**: Alters execution flow. Tells `sinq` to finish the scenario once the current request completes its life cycle. Useful for gracefully finishing loops or conditional scenario shutdowns.
 
 ### Standard Output (`print` & `io.write`)
@@ -52,7 +52,7 @@ Control variable scoping carefully to avoid leaking state between requests.
 
 ## 3. Inline Scripts (Request Templating)
 
-Aside from lifecycle hooks, you can use General/Inline scripts to dynamically build your HTTP requests. These are evaluated *after* `$PRE` but *before* the request is sent. The return value of these scripts is injected directly into the raw HTTP text.
+Aside from lifecycle hooks, you can use General/Inline scripts to dynamically build your HTTP requests. These are evaluated *after* `$PRE` but *before* the request is sent. The return value of these scripts is injected directly into the raw HTTP text, converted as described in [Returned Values](#returned-values).
 
 You can name them (e.g., `$MY_SCRIPT{...}`) or leave them anonymous (`${...}`).
 
@@ -81,8 +81,25 @@ Content-Type: application/json
 }
 ```
 
-!!! note
-    Inline scripts must return a value. Returning nothing will fail the request materialization.
+### Returned Values
+
+Inline scripts must return a value. Only the **first** returned value is used, so helpers that return `(result, error)` can be used directly: `${ return sinq.json.serialize(t) }` inserts the JSON, not the error. Returning nothing, or `nil` as the first value, fails the request materialization.
+
+The value is inserted according to its type:
+
+| Returned value | Inserted as | Example |
+|---|---|---|
+| string | the string itself, as is | `return 'abc'` → `abc` |
+| number | its Lua text | `return 3.5` → `3.5` |
+| boolean | `true` or `false` | `return true` → `true` |
+| table | compact JSON, using the same rules as [`sinq.json.serialize`](#10-json-utilities-sinqjson) | `return { id = 7 }` → `{"id":7}` |
+| `sinq.json.null` | `null` | `return sinq.json.null` → `null` |
+| `nil` or nothing | an error, the request fails | |
+
+Tables let you pass a JSON sub-document straight through, for example `"address": ${ env.pointA }`. If the table can't be serialized (a mixed or sparse table, a cycle), the request fails with the serialization error. An empty table becomes `{}`; use [`sinq.json.array()`](#10-json-utilities-sinqjson) for `[]`.
+
+!!! warning
+    Strings are inserted raw, with no quoting or escaping, because the template supplies the quotes (`"${ name }"`). Don't wrap a table in quotes: `"${ { a = 1 } }"` produces `"{"a":1}"`, which is invalid JSON.
 
 ---
 
@@ -95,8 +112,14 @@ Executes before the HTTP request is materialized. Used for file I/O operations.
 
 * **`req.attach(filepath string)`**: Replaces the request body with the contents of the specified file. *Note: Fails if a textual body is already defined in the `.sinq` file.*
 * **`req.saveResponseTo(filepath string)`**: Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Ideal for downloading large files. Automatically creates missing directories in the filepath. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks.
-* **`req.cache(enable bool?)`**: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames (attach, saveResponseTo). The parameter defaults to `true` if omitted.
-* **`req.skip(enable bool?)`**: Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
+* **`req.cache(enable bool?)`** / **`req.cache(key string)`**: Turns on client-side response caching for this request, or off with `false`. With no argument, the cache key is derived from the request: the bytes sent over the wire, the cookies sent with it, attached file names (`attach`, `saveResponseTo`), multipart parts and the scenario directory. With a string, that string is the key, used as is: every request that calls `req.cache` with the same key shares one cached response, whatever its method, URL or body. Any other argument (a number, `nil`, a table) raises an error. Calling it again replaces the earlier setting.
+    * Each retry attempt is cached separately, so `$RETRY` polling still sends a new request on every attempt.
+    * A response served from the cache still counts toward "requests sent" in the summary, even though nothing reached the server.
+    * A custom key is not scoped for you. To keep two requests apart, put a prefix in the key yourself: `req.cache("auth:" .. env.phoneNumber)`.
+
+    !!! warning
+        The first request to fill a key decides what is stored, including where its body went. If that request used `req.saveResponseTo`, later requests sharing the key get an empty body and their own `saveResponseTo` file isn't written. An error is cached the same way, and nothing is evicted until the run ends. Share a key only between requests that expect the same response.
+* **`req.skip(enable bool?)`**: Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is reported as skipped, without a test failure.
 * **`req.multipart(entry table, ...)`**: Builds a `multipart/form-data` request body from one or more part definitions. See [Multipart Bodies](#multipart-bodies) below.
 * **`req.multipartBoundary(boundary string)`**: Overrides the randomly generated multipart boundary. See [Multipart Bodies](#multipart-bodies).
 
@@ -155,7 +178,7 @@ Executes after receiving a response. The script **must** return a number indicat
 * **`sinq.retry.withJitter(condition boolean, range number?, delegate function?, delegate_args any...)`**
     * Adds randomized jitter to a retry calculation to prevent thundering herd problems.
     * `range` defaults to `50` (±50ms jitter). `delegate` defaults to `sinq.retry.when`, delegate will be passed condition and delegate_args when called.
-    * Usage is: `sinq.retry.withJitter(res.code ~= 200, 100, sinq.retry.when, 2 * sinq.second)` - jitter conditional retry with range of [-100:100]
+    * Usage is: `sinq.retry.withJitter(res.code ~= 200, 100, sinq.retry.when, 2 * sinq.time.second)` - jitter conditional retry with range of [-100:100]
 
 ### `$ASSERT` (Validation Phase)
 Executes after the retry loop finishes. Used to validate the final state of the response.
@@ -174,8 +197,8 @@ Executes after the retry loop finishes. Used to validate the final state of the 
     }
     ```
 * **`sinq.assert.code(expectedHttpCode number, message string?)`**: Fails if the actual status code does not match.
-* **`sinq.assert.equals(actual any, expected any, message string?)`**: Fails if `actual` does not equal `expected`. When comparing tables, checks that every key-value pair in `expected` recursively matches those in `actual`, but ignores pairs from `actual` not present in `expected`. Without `message`, the failure text includes both values (and, for tables, the mismatching field). Pass `message` to suppress that when comparing secrets.
-* **`sinq.assert.contains(source string, substring string, message string?)`**: Fails if the string does not contain the specified substring. Without `message`, the failure text includes `source` and `substring`. Pass `message` to suppress that when either may be sensitive.
+* **`sinq.assert.equals(actual any, expected any, message string?)`**: Fails if `actual` does not equal `expected`. When comparing tables, checks that every key-value pair in `expected` recursively matches those in `actual`, but ignores pairs from `actual` not present in `expected`. Without `message`, the failure text never includes the compared values. It reports a type mismatch (`Expected type string, got type nil`) or an incorrect value, and for tables the path of the mismatching field (`Incorrect value in field auth.token`). A `message` replaces that text.
+* **`sinq.assert.contains(source string, substring string, message string?)`**: Fails if the string does not contain the specified substring. Without `message`, the failure text includes neither `source` nor `substring`. A `message` replaces the default text.
 * **`sinq.assert.isTrue(condition boolean, message string?)`**: Fails if the condition resolves to `false` or `nil`.
 * **`sinq.assert.fileMatches(filepath string)`**: Fails if the response previously saved using `req.saveResponseTo()` does not exactly match the contents of `filepath`. Fails immediately if `req.saveResponseTo()` was not called.
 
@@ -272,6 +295,7 @@ HTTP headers are complex because a single key can have multiple values. `sinq` h
 * [`sinq.jwt.sign(claimsTable table, key string, method string?)`](#9-jwt-api-sinqjwt)
 * [`sinq.json.parse(source string)`](#10-json-utilities-sinqjson)
 * [`sinq.json.serialize(tbl table, indent string?)`](#10-json-utilities-sinqjson)
+* [`sinq.json.array(tbl table?)`](#10-json-utilities-sinqjson)
 
 ---
 
@@ -395,12 +419,30 @@ The `sinq.json` table provides explicit methods to parse and serialize JSON data
 
 * **`sinq.json.parse(source string)`**: Parses a JSON string into a Lua table.
     * **Returns:** `(result table, error string)`
+    * Every JSON array is returned as a table marked as an array (the mark is kept in its metatable), so an array that is empty, or becomes empty later, still serializes as `[]`. The table is otherwise an ordinary Lua table: `#`, `ipairs` and `table.insert` work as usual. Replacing its metatable with `setmetatable` removes the mark.
 * **`sinq.json.serialize(tbl table, indent string?)`**: Serializes a Lua table into a JSON string.
     * **Returns:** `(result string, error string)`
     * `indent` string?: Optional string used for formatting (e.g., `"  "`). If omitted, produces compact JSON. If present, also introduces newlines between object and array entries.
+    * How a table is serialized:
+        * Keys `1..n` with no gaps and no other keys: a JSON array.
+        * Only string keys: a JSON object.
+        * Empty: `[]` if it's marked as an array (parsed from a JSON array, or passed through `sinq.json.array`), `{}` otherwise.
+        * Anything else is an error: integer and string keys mixed together, gaps in the integer keys (`{ 1, nil, 3 }`), number keys that aren't whole or fall outside `1..n`, or keys of other types.
     
     !!! note
         Passing a cyclic table will immediately return an error (`"Cycle detected, unable to serialize"`).
+
+    !!! note
+        Lua can't store `nil` in a table, so a hole in an array is a gap and fails serialization. To send `[1, null, 3]`, use `{ 1, sinq.json.null, 3 }`.
+
+* **`sinq.json.array(tbl table?)`**: Marks a table as a JSON array, so it serializes as `[]` when empty instead of `{}`.
+    * **Returns:** `(result table, error string)`
+    * Without an argument (or with `nil`), returns a new empty array: `"tags": ${ sinq.json.array() }` sends `"tags": []`.
+    * With a table, marks that table in place and returns it. The table must be array-shaped: empty, or keys `1..n` with no gaps and nothing else. A non-empty array already serializes as an array; marking it matters when it may end up empty, such as a list that is filtered down later.
+    * Returns `nil` and an error for a table that isn't array-shaped (in which case the table isn't marked), for an argument that isn't a table, or for more than one argument.
+    
+    !!! note
+        If the table already has a metatable, the mark is added to that metatable and nothing else changes. If several tables share that metatable, they are all marked.
 
 * **`sinq.json.null`**: A special constant representing a JSON `null` value, allowing Lua tables to explicitly serialize `null` properties (since standard Lua drops `nil` table keys). Tables, parsed from JSON will also include this constant to represent explicit `null`. Can be compared with standard `==` operator (`sinq.assert.isTrue(res.json().myNull == sinq.json.null)`)
 

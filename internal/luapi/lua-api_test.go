@@ -112,7 +112,7 @@ func TestLuaAssertions(t *testing.T) {
 			protoFunc:     AssertContains,
 			args:          []any{"The quick brown fox", "lazy dog"},
 			wantFailures:  1,
-			failureSubstr: "did not contain lazy dog",
+			failureSubstr: "sinq.assert.contains: Source did not contain the expected string",
 		},
 
 		// --- Assert Equals ---
@@ -126,7 +126,7 @@ func TestLuaAssertions(t *testing.T) {
 			protoFunc:     AssertEquals,
 			args:          []any{"admin", "user"},
 			wantFailures:  1,
-			failureSubstr: "Expected user, got admin instead",
+			failureSubstr: "sinq.assert.equals: Incorrect value",
 		},
 		{
 			name:          "AssertEquals: Type Mismatch",
@@ -156,7 +156,7 @@ func TestLuaAssertions(t *testing.T) {
 			protoFunc:     AssertEquals,
 			args:          []any{map[string]any{"status": "pending"}, map[string]any{"status": "active"}},
 			wantFailures:  1,
-			failureSubstr: "Expected value active, got pending in field status",
+			failureSubstr: "sinq.assert.equals: Incorrect value in field status",
 		},
 		{
 			name:          "AssertEquals: Table Missing Key (Nil check)",
@@ -184,7 +184,7 @@ func TestLuaAssertions(t *testing.T) {
 			protoFunc:     AssertEquals,
 			args:          []any{"admin", "user", 42},
 			wantFailures:  1,
-			failureSubstr: "Expected user, got admin instead",
+			failureSubstr: "sinq.assert.equals: Incorrect value",
 		},
 	}
 
@@ -373,5 +373,76 @@ func TestLuaRetryJitterConditionFails(t *testing.T) {
 	resVal := h.ls.Get(-1)
 	if resVal.Type() != lua.LTNumber || float64(resVal.(lua.LNumber)) != -1 {
 		t.Fatalf("Expected false condition to bypass jitter and return -1, got %v", resVal)
+	}
+}
+
+func TestLuaAssertions_DefaultMessagesOmitValues(t *testing.T) {
+	const actualSecret, expectedSecret = "s3cr3t-actual", "s3cr3t-expected"
+
+	tests := []struct {
+		name      string
+		protoFunc func() *lua.FunctionProto
+		args      []any
+		want      string
+	}{
+		{
+			name:      "equals scalar",
+			protoFunc: AssertEquals,
+			args:      []any{actualSecret, expectedSecret},
+			want:      "sinq.assert.equals: Incorrect value",
+		},
+		{
+			name:      "equals table field",
+			protoFunc: AssertEquals,
+			args:      []any{map[string]any{"token": actualSecret}, map[string]any{"token": expectedSecret}},
+			want:      "sinq.assert.equals: Incorrect value in field token",
+		},
+		{
+			name:      "equals nested table field",
+			protoFunc: AssertEquals,
+			args: []any{
+				map[string]any{"auth": map[string]any{"token": actualSecret}},
+				map[string]any{"auth": map[string]any{"token": expectedSecret}},
+			},
+			want: "sinq.assert.equals: Incorrect value in field auth.token",
+		},
+		{
+			name:      "equals type mismatch",
+			protoFunc: AssertEquals,
+			args:      []any{42, expectedSecret},
+			want:      "sinq.assert.equals: Expected type string, got type number instead.",
+		},
+		{
+			name:      "contains",
+			protoFunc: AssertContains,
+			args:      []any{actualSecret, expectedSecret},
+			want:      "sinq.assert.contains: Source did not contain the expected string",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := setupHarness()
+			defer h.ls.Close()
+
+			h.ls.Push(h.ls.NewFunctionFromProto(tt.protoFunc()))
+			for _, arg := range tt.args {
+				h.ls.Push(ToLuaValue(arg, h.ls))
+			}
+			if err := h.ls.PCall(len(tt.args), 0, nil); err != nil {
+				t.Fatalf("Unexpected Lua error: %v", err)
+			}
+
+			if len(h.failures) != 1 {
+				t.Fatalf("Expected exactly 1 failure, got %v", h.failures)
+			}
+			msg := h.failures[0]
+			if strings.Contains(msg, actualSecret) || strings.Contains(msg, expectedSecret) {
+				t.Errorf("Expected the default message to leave out the compared values, got %q", msg)
+			}
+			if msg != tt.want {
+				t.Errorf("Expected %q, got %q", tt.want, msg)
+			}
+		})
 	}
 }

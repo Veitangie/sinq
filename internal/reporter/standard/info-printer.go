@@ -151,14 +151,14 @@ Flags:
   -u, --unrestricted      Load Lua os/io modules - disables the script sandbox
   -p, --print             Capture lua output and show it in the report
   -w, --workers int       Number of concurrent workers (default 10)
-  -c, --count int         Number of launches for every scenario
+  -c, --count uint        Number of launches for every scenario (default 1)
   -s, --secret string     Key=value pair overrides for scenario secrets
   -e, --env string        Key=value pair overrides for all scenario environments
   -o, --out path          Path to write the output file (prints to stdout if omitted)
   -L, --log-level string  Log level to use: debug, info, warn or error (default "warn")
   -f, --format string     Output format: std or junit (default "std")
   -C, --color string      Terminal colors: always, never, auto (default "auto")
-  -S, --show string       Which results to show in the output: all, no-skip, failed, none (default "no-skip")
+  -S, --show string       Which results to show in the output: all, no-skip, failed, none (default "no-skip"); std format only, junit always shows everything
   -t, --tag string        Execute only scenarios that have at least one of passed tags
   -n, --name string       Execute only scenarios which names match at least one of passed regular expressions
   --no-spinner            Disable spinner animation
@@ -167,7 +167,7 @@ Flags:
   --no-tag string         Do not execute scenarios that have the tag
   --no-name string        Do not execute scenarios which names match the regular expression
   --plugins string        Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows
-  --max-cache-size string Global maximum response size for cached requests, default 5MB
+  --max-cache-size string Global maximum response size for cached requests, default 5MiB
   --cache-timeout string  Global timeout for the cached requests, default 10s
 
 For full documentation, visit https://github.com/Veitangie/sinq/docs or https://sinq.veitangie.dev

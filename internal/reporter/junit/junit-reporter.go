@@ -24,24 +24,28 @@ type JUnitReport struct {
 }
 
 type JUnitTestSuite struct {
-	Name       string          `xml:"name,attr"`
-	Tests      int             `xml:"tests,attr"`
-	Failures   int             `xml:"failures,attr"`
-	Errors     int             `xml:"errors,attr"`
-	Time       string          `xml:"time,attr"`
-	Timestamp  string          `xml:"timestamp,attr"`
-	TestCases  []JUnitTestCase `xml:"testcase"`
-	Properties []JUnitProperty `xml:"properties,omitempty"`
-	SystemOut  *JUnitSystemOut `xml:"system-out,omitempty"`
+	Name       string           `xml:"name,attr"`
+	Tests      int              `xml:"tests,attr"`
+	Failures   int              `xml:"failures,attr"`
+	Errors     int              `xml:"errors,attr"`
+	Time       string           `xml:"time,attr"`
+	Timestamp  string           `xml:"timestamp,attr"`
+	Properties *JUnitProperties `xml:"properties,omitempty"`
+	TestCases  []JUnitTestCase  `xml:"testcase"`
+	SystemOut  *JUnitSystemOut  `xml:"system-out,omitempty"`
 }
 
 type JUnitSystemOut struct {
 	Contents string `xml:",chardata"`
 }
 
+type JUnitProperties struct {
+	Properties []JUnitProperty `xml:"property,omitempty"`
+}
+
 type JUnitProperty struct {
-	Name     string `xml:"name,attr"`
-	Contents string `xml:",chardata"`
+	Name  string `xml:"name,attr"`
+	Value string `xml:"value,attr"`
 }
 
 type JUnitTestCase struct {
@@ -87,9 +91,9 @@ func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 		suite.Time = fmt.Sprintf("%.3f", scenarioResult.TotalDuration.Seconds())
 		suite.TestCases = make([]JUnitTestCase, 0, len(scenarioResult.RequestResults))
 
-		suite.Properties = make([]JUnitProperty, 0)
 		if len(scenarioResult.Tags) != 0 {
-			suite.Properties = append(suite.Properties, JUnitProperty{Name: "tags", Contents: strings.Join(scenarioResult.Tags, ", ")})
+			suite.Properties = &JUnitProperties{make([]JUnitProperty, 0, 1)}
+			suite.Properties.Properties = append(suite.Properties.Properties, JUnitProperty{Name: "tags", Value: strings.Join(scenarioResult.Tags, ", ")})
 		}
 		if scenarioResult.Output != nil && scenarioResult.Output.Len() != 0 {
 			suite.SystemOut = &JUnitSystemOut{Contents: scenarioResult.Output.String()}

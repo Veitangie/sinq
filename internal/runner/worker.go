@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	lua "github.com/yuin/gopher-lua"
 	"veitangie.dev/sinq/internal/config"
 	"veitangie.dev/sinq/internal/luapi"
 	"veitangie.dev/sinq/internal/scenario"
@@ -285,8 +286,9 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	status := Success
 	shouldContinue := w.requestIdx >= 0 && w.requestIdx < len(bundle.Requests)
 	for shouldContinue {
+		currentResult := &RequestResult{}
 		oldRequestIdx := w.requestIdx
-		currentResult := &requestResults[oldRequestIdx]
+
 		w.requestIdx++
 
 		shouldContinue, err = w.processRequest(
@@ -297,6 +299,8 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 			&status,
 			currentResult,
 		)
+
+		requestResults[oldRequestIdx].merge(*currentResult)
 		if err != nil {
 			w.env.logger.Debug("[Runner] Request failed", w.loggingContextWithErr(ctx, err)...)
 		}
@@ -305,6 +309,22 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 
 	result.Status = status
 	w.reportResult(ctx, scenarioTimer, result)
+}
+
+func (w *worker) materializeLValue(value lua.LValue) (string, error) {
+	switch typed := value.(type) {
+	case *lua.LUserData:
+		return w.lc.SerializeLValue(typed)
+	case *lua.LTable:
+		return w.lc.SerializeLValue(typed)
+	case lua.LBool:
+		return typed.String(), nil
+	case lua.LNumber:
+		return typed.String(), nil
+	case lua.LString:
+		return string(typed), nil
+	}
+	return "", fmt.Errorf("unexpected type %s returned from inline script", value.Type().String())
 }
 
 func (w *worker) materializeRequest(ctx context.Context, req *scenario.RequestBlueprint, executionTimeout time.Duration) ([]byte, error) {
@@ -326,7 +346,11 @@ func (w *worker) materializeRequest(ctx context.Context, req *scenario.RequestBl
 			if err != nil {
 				return []byte{}, err
 			}
-			materialized.WriteString(value.String())
+			result, err := w.materializeLValue(value)
+			if err != nil {
+				return []byte{}, fmt.Errorf("%s#%d:%d: Failed to materialize request: %w", req.Filename, token.Line, token.Offset, err)
+			}
+			materialized.WriteString(result)
 		case scenario.IncompleteToken:
 			return []byte{}, fmt.Errorf("%s#%d:%d: Failed to materialize request: incomplete token", req.Filename, token.Line, token.Offset)
 		case scenario.Delimiter:

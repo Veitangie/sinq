@@ -127,8 +127,9 @@ func TestReportData_ShowNone(t *testing.T) {
 		TotalDuration: 1 * time.Millisecond,
 		RequestResults: []runner.RequestResult{
 			{
-				Name:   "PassReq",
-				Status: runner.Success,
+				Name:     "PassReq",
+				Status:   runner.Success,
+				Attempts: 1,
 			},
 		},
 	}
@@ -141,6 +142,7 @@ func TestReportData_ShowNone(t *testing.T) {
 				Name:         "FailReq",
 				Status:       runner.Failure,
 				ErrorMessage: "failed",
+				Attempts:     1,
 			},
 		},
 	}
@@ -356,5 +358,36 @@ func TestReportData_ReportRequest_ResponseWriteErrorPropagates(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected reportRequest to propagate the response write error, got nil")
+	}
+}
+
+func TestReportData_RequestsSentSumsAttempts(t *testing.T) {
+	buf := &bytes.Buffer{}
+	rep := NewReporter(config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.None}, buf)
+
+	sourceCh := make(chan runner.ScenarioResult, 1)
+	timerCh := make(chan time.Duration, 1)
+
+	sourceCh <- runner.ScenarioResult{
+		Name:          "Mixed Scenario",
+		Status:        runner.Aborted,
+		TotalDuration: 1 * time.Millisecond,
+		RequestResults: []runner.RequestResult{
+			{Name: "Repeated", Status: runner.Success, Attempts: 3},
+			{Name: "Failed", Status: runner.Failure, Attempts: 2},
+			{Name: "Errored", Status: runner.Error, Attempts: 1},
+			{Name: "Interrupted", Status: runner.Aborted, Attempts: 2},
+			{Name: "NeverRan", Status: runner.Unset},
+		},
+	}
+	close(sourceCh)
+	timerCh <- 1 * time.Millisecond
+	close(timerCh)
+
+	_ = rep.Report(sourceCh, timerCh, 1)
+
+	expected := "| 8 requests sent\n"
+	if !strings.Contains(buf.String(), expected) {
+		t.Errorf("Expected every stage's attempts to be counted, including the interrupted one (%q). Got:\n%s", expected, buf.String())
 	}
 }

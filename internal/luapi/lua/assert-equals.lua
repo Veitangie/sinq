@@ -40,19 +40,7 @@ if type(expected) == "table" then
         goto continue
       end
 
-      if v ~= haveV then
-        sinq.assert.fail(
-          messageOr(
-            "sinq.assert.equals: Expected value "
-              .. tostring(v)
-              .. ", got "
-              .. tostring(haveV)
-              .. " in field "
-              .. prefix
-              .. k
-          )
-        )
-      end
+      if v ~= haveV then sinq.assert.fail(messageOr("sinq.assert.equals: Incorrect value in field " .. prefix .. k)) end
       ::continue::
     end
   end
@@ -61,8 +49,4 @@ if type(expected) == "table" then
   return
 end
 
-if actual ~= expected then
-  sinq.assert.fail(
-    messageOr("sinq.assert.equals: Expected " .. tostring(expected) .. ", got " .. tostring(actual) .. " instead")
-  )
-end
+if actual ~= expected then sinq.assert.fail(messageOr("sinq.assert.equals: Incorrect value")) end

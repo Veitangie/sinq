@@ -203,6 +203,8 @@ $POST{
 }
 ```
 
+A request that runs several times shows up once in the report. It is marked failed if any of its runs failed, lists the failures of all runs, and adds up its attempts and timings. The summary's "requests sent" counts every run and retry, including ones answered from the response cache (`req.cache`) without reaching the server.
+
 ## Lua API cheat-sheet
 
 Available in every script block:
@@ -236,7 +238,7 @@ res.size                     bytes written (only set after req.saveResponseTo)
 ```
 req.attach(path)             use a file's contents as the whole request body
 req.saveResponseTo(path)     stream the response to disk instead of buffering it
-req.cache(enable?)           opt in to the response cache (enable defaults to true)
+req.cache(enable? | key)     opt in to the response cache; a string key is shared by every request using it
 req.skip(enable?)            do not send this request (enable defaults to true)
 req.multipart(entry, ...)    build a multipart/form-data body
 req.multipartBoundary(str)   pin the multipart boundary instead of a random one
@@ -273,7 +275,7 @@ sinq.encoding.base64Encode/Decode, base64UrlEncode/Decode, hexEncode/Decode
 sinq.encoding.urlEncode/urlDecode               query-string and form-body escaping
 sinq.crypto.md5/sha1/sha256/sha512(s, enc?) | hmac(s, algo?, key?, enc?)
 sinq.jwt.decode(t) | verify(t, key, algo?) | sign(claims, key, method?)
-sinq.json.parse(s) | serialize(t, indent?) | sinq.json.null
+sinq.json.parse(s) | serialize(t, indent?) | array(t?) | sinq.json.null
 sinq.fake.uuid/email/name/int/oneOf/...          see the Lua API page for the full set
 ```
 
@@ -282,6 +284,9 @@ Full signatures and behaviour: [Lua API](lua-api.md).
 ## Common mistakes
 
 - **Missing `return` in an inline script.** `${PLAYER_ID}` works because `sinq` retries a bare expression with `return ` prepended. A call like `${tostring(x)}` is ambiguous; write `${return tostring(x)}`.
+- **Multiple return values in an inline script.** Only the first one is inserted, so `${return sinq.json.serialize(t)}` works as is. A `nil` first value fails the request instead of inserting the text `nil`.
+- **Quoting a table.** An inline script that returns a table inserts JSON, so write `"address": ${env.pointA}`, not `"address": "${env.pointA}"`. Strings are the opposite: they're inserted raw, so they need the quotes (`"${env.NAME}"`).
+- **Empty arrays become `{}`.** Lua has no empty-array value, so an empty table serializes as an object. Arrays parsed from JSON keep their shape; for one built in Lua, use `sinq.json.array()` (or `sinq.json.array(t)` on a list that might end up empty).
 - **`local` on a value you need later.** State passed between files must be a global: `AUTH_TOKEN = ...`, not `local AUTH_TOKEN = ...`.
 - **Lua tables are 1-indexed.** The first element of a top-level JSON array is `res.json()[1]`.
 - **`res.json()` fails the request on non-JSON.** Use `res.extractBodyJson()` when the body might not be JSON.

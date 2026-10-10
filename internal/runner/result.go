@@ -14,10 +14,10 @@ type ResultStatus int
 const (
 	Unset ResultStatus = iota
 	Skipped
-	Aborted
 	Success
-	Error
+	Aborted
 	Failure
+	Error
 )
 
 type RequestResult struct {
@@ -36,6 +36,33 @@ type RequestResult struct {
 	Assert           time.Duration
 	Post             time.Duration
 	Total            time.Duration
+	Attempts         int
+}
+
+func (rr *RequestResult) merge(other RequestResult) {
+	rr.Status = max(rr.Status, other.Status)
+	rr.FailedAssertions = append(rr.FailedAssertions, other.FailedAssertions...)
+	if rr.ErrorMessage == "" {
+		rr.ErrorMessage = other.ErrorMessage
+	}
+	if rr.Request == "" {
+		rr.Request = other.Request
+	}
+	if rr.Response == "" {
+		rr.Response = other.Response
+	}
+	if rr.StartedAt.IsZero() {
+		rr.StartedAt = other.StartedAt
+	}
+	rr.Pre += other.Pre
+	rr.Materialization += other.Materialization
+	rr.Parsing += other.Parsing
+	rr.Execution += other.Execution
+	rr.Retry += other.Retry
+	rr.Assert += other.Assert
+	rr.Post += other.Post
+	rr.Total += other.Total
+	rr.Attempts += other.Attempts
 }
 
 type ScenarioResult struct {

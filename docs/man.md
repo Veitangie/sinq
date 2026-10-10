@@ -24,17 +24,17 @@ In `sinq`, the absolute unit of concurrency is the Scenario, not the Request. Re
 A `.sinq` file is a standard HTTP request with optional embedded Lua scripts:
 ```
 GET ${env.baseUrl}/ping HTTP/1.1
-My-Header: ${ math.random(5, 10) }
+My-Header: ${ return math.random(5, 10) }
 
 {
-  "myCustomBodyField": "${ return 'hello world' }"
+  "myCustomBodyField": "${ 'hello world' }"
 }
 
 $ASSERT{
   sinq.assert.code(200)
 }
 ```
-Every `$NAME?{ ... }` block is treated as Lua script. Scripts with non-reserved names are executed before sending the request. Their return values get substituted into the final request.
+Every `$NAME?{ ... }` block is treated as Lua script. Scripts with non-reserved names are executed before sending the request. Their return values get substituted into the final request. Only the first returned value is used, and `nil` fails the request. Strings are inserted as is (no quoting or escaping), numbers and booleans as text, tables as compact JSON (same rules as **sinq.json.serialize**), and **sinq.json.null** as `null`.
 
 Multiple requests can be defined in a single file by separating them with a `###` delimiter on its own line. Text after `###` on the same line names the request that follows it (shown in `--list` output and in reports); a leading `###` before any request content names the file's first request the same way.
 
@@ -81,7 +81,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Number of concurrent workers (default 10).
 
 **-c**, **--count** *uint*
-: Number of launches for every scenario.
+: Number of launches for every scenario (default 1).
 
 **-s**, **--secret** *string*
 : Key=value pair overrides for scenario secrets.
@@ -102,7 +102,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Terminal colors: always, never, auto (default "auto").
 
 **-S**, **--show** *string*
-: Which results to show in the output: all, no-skip, failed, none (default "no-skip").
+: Which results to show in the output: all, no-skip, failed, none (default "no-skip"). Only affects the "std" format; "junit" output always includes every result.
 
 **-t**, **--tag** *string*
 : Execute only scenarios that have at least one of passed tags.
@@ -174,7 +174,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 ### Flow Control
 
 **sinq.setNextRequest(index)**
-: Execute request with the 1-indexed number in the scenario next (doesn't stop current request's lifecycle).
+: Execute request with the 1-indexed number in the scenario next (doesn't stop current request's lifecycle). Can be called from any hook, including `$PRE`. A request that runs more than once is reported once. Its status is the most severe across its runs (error, then failure, then aborted, then success, then skipped). It keeps the assertion failures of every run, its timings and attempt counts add up, and `--dump-on-failure` shows the first failing run.
 
 **sinq.finishScenario()**
 : Finish the scenario after the current request (doesn't stop current request's lifecycle).
@@ -229,7 +229,10 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Parses a JSON string into a Lua table.
 
 **sinq.json.serialize(table, indent?)**
-: Serializes a Lua table into a JSON string. Passing a cyclic table returns an error.
+: Serializes a Lua table into a JSON string. Keys `1..n` with no gaps become an array, string keys an object. An empty table becomes `{}`, or `[]` if it is marked as an array. Mixed tables, gaps (`{ 1, nil, 3 }`), number keys that aren't whole or fall outside `1..n`, and cyclic tables return an error. Use **sinq.json.null** for holes in an array.
+
+**sinq.json.array(table?)**
+: Marks a table as a JSON array so it serializes as `[]` when empty, and returns it. Without an argument, returns a new empty array. Returns `nil` and an error if the table isn't array-shaped (empty, or keys `1..n` with no gaps). Arrays returned by **sinq.json.parse** are already marked. If the table already has a metatable, the mark is added to it.
 
 **sinq.json.null**
 : A constant used to explicitly serialize a `null` value in JSON tables.
@@ -266,11 +269,11 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **req.saveResponseTo(filepath)**
 : Streams the upcoming response body directly to disk, bypassing the Lua memory buffer. Is meant for downloading large files. If used, `bodyRaw` and JSON methods will not be available in subsequent hooks. Expects path to be relative to the current file.
 
-**req.cache(bool?)**
-: Turns on/off client-side request caching. The cache is based on the data sent over the wire and any attached filenames. Parameter defaults to `true` if omitted.
+**req.cache(bool?)**, **req.cache(key)**
+: Turns on/off client-side response caching. Without a key, the cache key is derived from the data sent over the wire, the cookies sent with it, attached filenames and the scenario directory; the parameter defaults to `true`. With a string, that string is the key as is, and every request using it shares one cached response (prefix keys yourself to keep requests apart). Other argument types raise an error. Each retry attempt is cached separately. The first request to fill a key decides what is stored: if it used `req.saveResponseTo`, later requests with that key get an empty body. Cached errors stay cached for the whole run.
 
 **req.skip(bool?)**
-: If `true` (default), marks the request to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` in the reporter without throwing a test failure.
+: If `true` (default), marks the request to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is reported as skipped, without a test failure.
 
 **req.multipart(entry, ...)**
 : Builds a `multipart/form-data` body from one or more part tables, passed positionally or as one array table; repeated calls accumulate. Entry keys: `name` (required unless `contentDisposition` is set), `data` or `source` (mutually exclusive; `source` is a file path relative to the current `.sinq` file, absolute paths rejected), `filename` (string, or `true` for `basename(source)`), `contentType` (sniffed from the filename/source extension when omitted for file parts), `contentDisposition` (raw override), `headers` (per-part header table). Sets the request `Content-Type` only if one is not already set. Mutually exclusive with `req.attach` and a literal body.
@@ -300,11 +303,11 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **sinq.assert.code(expected, message?)**
 : Fail if HTTP status code does not match.
 
-**sinq.assert.equals(actual, expected)**
-: Fail if values are not strictly equal.
+**sinq.assert.equals(actual, expected, message?)**
+: Fail if values are not equal. If `expected` is a table (including an array), this is a partial match: only the keys present in `expected` are checked, extra keys/elements in `actual` are ignored, and nested tables are compared the same way. The default failure message never includes the compared values, only types and the path of the mismatching field.
 
 **sinq.assert.contains(str, substring, message?)**
-: Fail if string lacks substring.
+: Fail if string lacks substring. The default failure message includes neither string.
 
 **sinq.assert.isTrue(condition, message?)**
 : Fail if condition is false or nil.

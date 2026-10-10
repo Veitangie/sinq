@@ -15,7 +15,7 @@ Multiple paths may be listed and are scanned independently.
 | Flag | Value | Default | Notes |
 | --- | --- | --- | --- |
 | `-w, --workers` | int | `10` | Number of scenarios run concurrently. Must be positive. |
-| `-c, --count` | int | `1` | Run every scenario this many times. Multiplies with `env_matrix` variants, so a scenario with a 4-way matrix and `--count 3` runs 12 times. |
+| `-c, --count` | uint | `1` | Run every scenario this many times. Multiplies with `env_matrix` variants, so a scenario with a 4-way matrix and `--count 3` runs 12 times. |
 | `-i, --insecure` | | off | Skip TLS certificate verification. |
 | `-u, --unrestricted` | | off | Load the Lua `os` and `io` libraries. This disables the script sandbox; only use it with files you trust. See [Libraries](lua-api.md#12-libraries). |
 | `-l, --list` | | | Parse the paths and print the scenarios that would run, without executing them. |
@@ -43,7 +43,7 @@ A scenario's name comes from its `.scenario` file (`"name"`), defaulting to the 
 | --- | --- | --- | --- |
 | `-f, --format` | `std` \| `junit` | `std` | Report format. `std` is the human-readable console report; `junit` is JUnit XML (see [CI/CD Integration](ci-cd-integration.md)). |
 | `-o, --out` | path | stdout | Write the report to a file instead of stdout. Missing parent directories are created. |
-| `-S, --show` | `all` \| `no-skip` \| `failed` \| `none` | `no-skip` | Which scenario results to include in the report. |
+| `-S, --show` | `all` \| `no-skip` \| `failed` \| `none` | `no-skip` | Which scenario results to include in the report. `std` format only; `junit` output always includes every result. |
 | `-V, --verbose` | | off | Add per-stage timings to each request in the report. `std` format only. |
 | `-p, --print` | | off | Capture Lua `print` / `io.write` output and attach it to the scenario result. Without this, that output is discarded. |
 | `-C, --color` | `always` \| `never` \| `auto` | `auto` | Terminal color. `auto` disables color when the output is not a TTY or when a CI/`NO_COLOR` environment variable is set. |
@@ -62,11 +62,11 @@ A scenario's name comes from its `.scenario` file (`"name"`), defaulting to the 
 
 ### Caching
 
-These tune the opt-in per-request response cache (`req.cache(true)`); see [Execution Runner](runner.md#ast-bytecode-caching-request-collapsing).
+These tune the opt-in per-request response cache (`req.cache(true)` or `req.cache(key)`); see [Execution Runner](runner.md#ast-bytecode-caching-request-collapsing).
 
 | Flag | Value | Default | Notes |
 | --- | --- | --- | --- |
-| `--cache-timeout` | duration | `10s` | How long a cached response is reused. Accepts Go durations (`500ms`, `2m`). |
+| `--cache-timeout` | duration | `10s` | Timeout for the network call that fills the cache. That call is shared across scenarios via singleflight, so it can't use any single scenario's `req_timeout`. Accepts Go durations (`500ms`, `2m`). |
 | `--max-cache-size` | size | `5MiB` | Largest response body that will be cached. Accepts `B`, `KiB`, `MiB`, `GiB` (and `KB`/`MB`/`GB`). |
 
 ### Information

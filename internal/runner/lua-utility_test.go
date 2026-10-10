@@ -145,6 +145,59 @@ func TestWorker_ExecuteAndExtractValue_ImplicitReturn(t *testing.T) {
 	}
 }
 
+func TestWorker_ExecuteAndExtractValue_UsesFirstReturnValue(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{name: "explicit return, trailing nil", script: `return "first", nil`, want: "first"},
+		{name: "explicit return, two strings", script: `return "first", "second"`, want: "first"},
+		{name: "implicit return, two strings", script: `"first", "second"`, want: "first"},
+		{name: "sinq helper returning result and nil error", script: `return sinq.json.serialize({ name = "x" })`, want: `{"name":"x"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := setupTestWorker(t, nil)
+			token := scenario.Token{Type: scenario.Script, Name: "MULTI_RETURN"}
+			extract := func(scenario.Token) []byte { return []byte(tt.script) }
+
+			val, err := w.executeAndExtractValue(token, extract, "test.sinq", 1*time.Second)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if val.String() != tt.want {
+				t.Errorf("expected the first returned value %q, got %q", tt.want, val.String())
+			}
+		})
+	}
+}
+
+func TestWorker_ExecuteAndExtractValue_NilValueIsError(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{name: "explicit return nil", script: `return nil`},
+		{name: "implicit return nil", script: `nil`},
+		{name: "nil first value followed by another value", script: `return nil, "second"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := setupTestWorker(t, nil)
+			token := scenario.Token{Type: scenario.Script, Name: "NIL_RETURN"}
+			extract := func(scenario.Token) []byte { return []byte(tt.script) }
+
+			val, err := w.executeAndExtractValue(token, extract, "test.sinq", 1*time.Second)
+			if err == nil {
+				t.Fatalf("expected an error for a nil inline script value, got success with %q", val.String())
+			}
+		})
+	}
+}
+
 func TestWorker_LuaInfiniteLoop_AbortsOnTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()

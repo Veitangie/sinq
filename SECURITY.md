@@ -17,7 +17,7 @@ These are intended behaviors, not vulnerabilities, but they change the trust bou
 
 * **`--unrestricted` / `-u` disables the Lua sandbox.** It loads the full `os` and `io` libraries, giving scenario scripts shell execution (`os.execute`), read/write access to any path the process can reach (`io.open`), and the ability to terminate `sinq` mid-run (`os.exit`). Only pass it for scenario files you fully control and trust.
 * **Verbose and debug output can contain secrets.** `--verbose`, `--log-level debug`, and `--dump-on-failure` include request and response data that may embed tokens or credentials. Avoid them in CI environments where logs are retained, or scrub the output before publishing it.
-* **Assertion failure messages echo the values being compared.** `sinq.assert.equals` and `sinq.assert.contains` include their arguments in the failure text, which appears in normal (non-verbose) reports and JUnit XML. Pass a custom message when asserting against sensitive values.
+* **Assertion failure messages leave out the compared values by default.** The default failure text of `sinq.assert.equals` and `sinq.assert.contains` names only types and, for tables, the path of the mismatching field, so a failure doesn't put secrets into normal reports or JUnit XML. A custom `message` is printed as written, and so is anything passed to `sinq.assert.fail`, so don't build those from sensitive values.
 
 ## Reporting a Vulnerability
 

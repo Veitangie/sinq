@@ -339,7 +339,7 @@ More detailed explanation of the algorithm can be found in the [Treewalker docum
 A `.sinq` file is a standard HTTP request with optional embedded Lua scripts. You can also define multiple requests in a single `.sinq` file by separating them with the `###` delimiter. Text after `###` on the same line names the request that follows (shown in `--list` output and reports) — a leading `###` before any content names the file's first request the same way, even in a single-request file.
 
 There are two categories of scripts within a `.sinq` file:
-1. **General/Inline Scripts:** `$MY_VAR`, `$` (unnamed). These are evaluated to dynamically generate the outgoing HTTP request. The return value is injected directly into the request payload or headers. If a general script fails, `sinq` attempts to automatically prepend `return ` and retry, enabling simple string interpolations like `${env.HOST}`.
+1. **General/Inline Scripts:** `$MY_VAR`, `$` (unnamed). These are evaluated to dynamically generate the outgoing HTTP request. The return value is injected directly into the request payload or headers. If a general script fails, `sinq` attempts to automatically prepend `return ` and retry, enabling simple string interpolations like `${env.HOST}`. Only the first returned value is used, and `nil` fails the request. Strings are inserted as is, numbers and booleans as text, and tables as compact JSON, so `"address": ${env.pointA}` sends a JSON object.
 2. **Lifecycle Scripts:** `$PRE`, `$RETRY`, `$ASSERT`, `$POST`. These strictly control the execution flow and state of the request. To prevent side-effect leaks and ensure thread safety, **specific APIs are only available during specific lifecycle stages**.
 
 ### Lifecycle Scopes
@@ -347,7 +347,7 @@ There are two categories of scripts within a `.sinq` file:
 * **`$PRE` (Setup & File I/O):** Executes immediately when a worker picks up the request, before it is materialized. This is the **only** scope where you can modify the filesystem interactions for the request. Current request body payload is inaccessible here.
     * `req.attach("path/file.txt")` — Replaces the request body with the contents of a file. (Fails if a body is already defined in the request).
     * `req.saveResponseTo("path/download.bin")` — Streams the incoming response body directly to disk, bypassing the Lua memory buffer.
-    * `req.cache(bool?)` — Opts-in to client-side request caching. Parameter defaults to `true` if omitted. The cache is based on the data sent over the wire and any attached filenames.
+    * `req.cache(bool?)` / `req.cache(key)` — Opts-in to client-side request caching. Parameter defaults to `true` if omitted. Without a key, the cache is based on the data sent over the wire, its cookies and any attached filenames. With a string key, every request using that key shares one cached response, so prefix keys yourself when requests must stay apart (`"auth:" .. env.phone`). The first request to fill a key decides what's stored, including a `saveResponseTo` target. Retries are cached separately, so polling still works.
     * `req.skip(bool?)` — Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` without throwing a failure.
     * `req.multipart(entry, ...)` — Builds a `multipart/form-data` body from one or more part tables (`{ name, data | source, filename?, contentType?, contentDisposition?, headers? }`), passed positionally or as one array table. Repeated calls accumulate. Mutually exclusive with `req.attach` and a literal body.
     * `req.multipartBoundary(string)` — Pins the multipart boundary instead of using a random one.
@@ -369,7 +369,7 @@ There are two categories of scripts within a `.sinq` file:
 ### Globals & Control Flow
 * `env` — Table of environment variables configured for the scenario.
 * `secrets` — Table of secrets passed via the `-s, --secrets, --secrets-file` arguments.
-* `sinq.setNextRequest(index)` — Change execution flow to the n-th request (1-indexed). Allows loops or skipping requests.
+* `sinq.setNextRequest(index)` — Change execution flow to the n-th request (1-indexed). Allows loops or skipping requests. A request that runs several times is reported once, with the most severe status of its runs, the failures of all runs, and its attempts and timings added up.
 * `sinq.finishScenario()` — Change execution flow to end after the current request.
 * `res` — Shorthand for current request's response table
 * `req` — Shorthand for current request table
@@ -396,8 +396,10 @@ There are two categories of scripts within a `.sinq` file:
 * Functions: `decode(token)`, `verify(token, key, algo?)`, `sign(claimsTable, key, method?)`
 
 **JSON API (`sinq.json`)**
-* Functions: `parse(source)`, `serialize(tbl, indent?)`
+* Functions: `parse(source)`, `serialize(tbl, indent?)`, `array(tbl?)`
 * `sinq.json.null` — a constant representing an explicit JSON `null`, since Lua tables drop `nil` keys.
+* Empty arrays: Lua can't tell an empty array from an empty object, so an empty table serializes as `{}`. Arrays parsed from JSON stay arrays, and `sinq.json.array(tbl?)` marks a table (or returns a new one) so it serializes as `[]` when empty.
+* Arrays must be gapless: `serialize` returns an error for `{ 1, nil, 3 }`. Use `sinq.json.null` for holes.
 
 **Fake Data API (`sinq.fake`)**
 * Functions: See the [Lua API documentation](https://sinq.veitangie.dev/lua-api) for a comprehensive suite of fake data generators (`sinq.fake.uuid()` / `sinq.fake.uuidv4()`, `sinq.fake.email()`, `sinq.fake.company()`, etc.) to generate random, realistic payloads for endpoints.
@@ -455,7 +457,7 @@ Default configuration that can be overridden in `.scenario` files:
 * **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
 * **`max_body`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
 * **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](https://sinq.veitangie.dev/env-matrix).
-* **`tags`**: Tags or labels assigned to scenarios containing this `.scenario` file. They get collected into one list for the resulting scenario.
+* **`tags`**: Tags or labels assigned to scenarios containing this `.scenario` file. They get collected into one list for the resulting scenario. In JUnit reports they're written as a `tags` property of the scenario's `<testsuite>`.
 
 ---
 
@@ -463,7 +465,7 @@ Default configuration that can be overridden in `.scenario` files:
 
 Secrets are loaded from a JSON file provided through `--secrets-file` and overrides passed with `--secret|-s` flag (for multiple overrides use the flag multiple times).
 
-To reduce the risk of accidental exposure, some error messages intentionally omit possibly sensitive data. Verbose mode (`--verbose`) as well as `--log-level debug` and `--dump-on-failure` may include additional debugging information and **should be used carefully in CI environments where logs are retained**. Note that `sinq.assert.equals` and `sinq.assert.contains` include the values they compare in the failure message (shown in normal reports and JUnit XML) — pass a custom message when asserting against a secret.
+To reduce the risk of accidental exposure, some error messages intentionally omit possibly sensitive data. Verbose mode (`--verbose`) as well as `--log-level debug` and `--dump-on-failure` may include additional debugging information and **should be used carefully in CI environments where logs are retained**. Assertion failure messages from `sinq.assert.equals` and `sinq.assert.contains` leave out the values they compare and report only types and field paths. Custom messages are shown as written, so don't put secrets in them.
 
 `--unrestricted` (`-u`) loads the full Lua `os` and `io` libraries, which lets scenario scripts run shell commands, access the filesystem outside the scenario directory, and terminate `sinq`. Only use it with scenario files you fully trust. See [Libraries](https://sinq.veitangie.dev/lua-api/#12-libraries) for details.
 
@@ -501,14 +503,14 @@ sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
   -u, --unrestricted      Load Lua os/io modules - disables the script sandbox
   -p, --print             Capture lua output and show it in the report
   -w, --workers int       Number of concurrent workers (default 10)
-  -c, --count int         Number of launches for every scenario
+  -c, --count uint        Number of launches for every scenario (default 1)
   -s, --secret string     Key=value pair overrides for scenario secrets
   -e, --env string        Key=value pair overrides for all scenario environments
   -o, --out path          Path to write the output file (prints to stdout if omitted)
   -L, --log-level string  Log level to use: debug, info, warn or error (default "warn")
   -f, --format string     Output format: std or junit (default "std")
   -C, --color string      Terminal colors: always, never, auto (default "auto")
-  -S, --show string       Which results to show in the output: all, no-skip, failed, none (default "no-skip")
+  -S, --show string       Which results to show in the output: all, no-skip, failed, none (default "no-skip"); std format only, junit always shows everything
   -t, --tag string        Execute only scenarios that have at least one of passed tags
   -n, --name string       Execute only scenarios which names match at least one of passed regular expressions
   --no-spinner            Disable spinner animation
@@ -517,7 +519,7 @@ sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
   --no-tag string         Do not execute scenarios that have the tag
   --no-name string        Do not execute scenarios which names match the regular expression
   --plugins string        Paths to lua plugin directory entries, joined with ':' on Linux and MacOS, ';' on Windows
-  --max-cache-size string Global maximum response size for cached requests, default 5MB
+  --max-cache-size string Global maximum response size for cached requests, default 5MiB
   --cache-timeout string  Global timeout for the cached requests, default 10s
 ```
 

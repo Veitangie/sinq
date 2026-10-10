@@ -1222,13 +1222,13 @@ func TestRequestProcessor_GetHash_CachesResult(t *testing.T) {
 		client:       &http.Client{},
 	}
 
-	first := p.getHash()
+	first := p.getCacheKey()
 	if first == "" {
 		t.Fatal("expected a non-empty computed hash")
 	}
 
-	p.hash = "preset-value"
-	second := p.getHash()
+	p.cacheKey = "preset-value"
+	second := p.getCacheKey()
 	if second != "preset-value" {
 		t.Errorf("expected the already-set hash to be returned unchanged, got %q", second)
 	}
@@ -1249,7 +1249,7 @@ func TestRequestProcessor_GetHash_IncludesMultipartHeaders(t *testing.T) {
 				headers:            map[string][]string{"X-Sig": {headerVal}},
 			}}},
 		}
-		return p.getHash()
+		return p.getCacheKey()
 	}
 
 	if mk("AAA") == mk("BBB") {

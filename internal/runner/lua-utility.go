@@ -32,6 +32,7 @@ type preScriptResult struct {
 	multipart   multipartData
 	filenameIn  string
 	filenameOut string
+	cacheKey    string
 	cache       bool
 	skip        bool
 }
@@ -88,7 +89,20 @@ func (b *preScriptResultBuilder) saveTo() lua.LGFunction {
 
 func (b *preScriptResultBuilder) cache() lua.LGFunction {
 	return func(ls *lua.LState) int {
-		flag := ls.OptBool(1, true)
+		flag := true
+		key := ""
+		switch typed := ls.Get(1).(type) {
+		case lua.LBool:
+			flag = bool(typed)
+		case lua.LString:
+			key = string(typed)
+		default:
+			if ls.GetTop() != 0 {
+				ls.RaiseError("req.cache: Unexpected argument type %s, expected string or bool", ls.Get(1).Type().String())
+				return 0
+			}
+		}
+		b.res.cacheKey = key
 		b.res.cache = flag
 		return 0
 	}
@@ -474,6 +488,7 @@ func fixError(err error) error {
 func (w *worker) executeAndExtractValue(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (lua.LValue, error) {
 
 	oldTop := w.lc.GetTop()
+	valueIdx := oldTop + 1
 	defer w.lc.SetTop(oldTop)
 
 	err := w.safeExecute(token, extract, filename, executionTimeout)
@@ -483,7 +498,10 @@ func (w *worker) executeAndExtractValue(token scenario.Token, extract extractPay
 		if diff < 1 {
 			return nil, fmt.Errorf("%s#%s:%d:%d: Lua script didn't fail in execution but produced no value", filename, token.Name, token.Line, token.Offset)
 		}
-		value := w.lc.Get(-1)
+		value := w.lc.Get(valueIdx)
+		if value == lua.LNil {
+			return nil, fmt.Errorf("%s#%s:%d:%d: Lua script didn't fail in execution but produced nil value", filename, token.Name, token.Line, token.Offset)
+		}
 		return value, nil
 	}
 
@@ -506,7 +524,10 @@ func (w *worker) executeAndExtractValue(token scenario.Token, extract extractPay
 	if diff < 1 {
 		return nil, fmt.Errorf("%s#%s:%d:%d: Lua script didn't fail in execution but produced no value", filename, token.Name, token.Line, token.Offset)
 	}
-	value := w.lc.Get(-1)
+	value := w.lc.Get(valueIdx)
+	if value == lua.LNil {
+		return nil, fmt.Errorf("%s#%s:%d:%d: Lua script didn't fail in execution but produced nil value", filename, token.Name, token.Line, token.Offset)
+	}
 	return value, nil
 }
 
