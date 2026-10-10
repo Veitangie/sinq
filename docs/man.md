@@ -34,7 +34,7 @@ $ASSERT{
   sinq.assert.code(200)
 }
 ```
-Every `$NAME?{ ... }` block is treated as Lua script. Scripts with non-reserved names are executed before sending the request. Their return values get substituted into the final request. Only the first returned value is used, and `nil` fails the request. Strings are inserted as is (no quoting or escaping), numbers and booleans as text, tables as compact JSON (same rules as **sinq.json.serialize**), and **sinq.json.null** as `null`.
+Every `$NAME?{ ... }` block is treated as Lua script. Scripts with non-reserved names are executed before sending the request. Their return values get substituted into the final request. Only the first returned value is used; `nil`, functions, channels and coroutines fail the request. Strings are inserted as is (no quoting or escaping), numbers and booleans as text, tables as compact JSON (same rules as **sinq.json.serialize**), and **sinq.json.null** as `null`.
 
 Multiple requests can be defined in a single file by separating them with a `###` delimiter on its own line. Text after `###` on the same line names the request that follows it (shown in `--list` output and in reports); a leading `###` before any request content names the file's first request the same way.
 

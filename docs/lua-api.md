@@ -95,6 +95,7 @@ The value is inserted according to its type:
 | table | compact JSON, using the same rules as [`sinq.json.serialize`](#10-json-utilities-sinqjson) | `return { id = 7 }` → `{"id":7}` |
 | `sinq.json.null` | `null` | `return sinq.json.null` → `null` |
 | `nil` or nothing | an error, the request fails | |
+| function, channel or coroutine | an error (`unexpected type …`), the request fails | `return print` |
 
 Tables let you pass a JSON sub-document straight through, for example `"address": ${ env.pointA }`. If the table can't be serialized (a mixed or sparse table, a cycle), the request fails with the serialization error. An empty table becomes `{}`; use [`sinq.json.array()`](#10-json-utilities-sinqjson) for `[]`.
 
@@ -437,7 +438,7 @@ The `sinq.json` table provides explicit methods to parse and serialize JSON data
 
 * **`sinq.json.array(tbl table?)`**: Marks a table as a JSON array, so it serializes as `[]` when empty instead of `{}`.
     * **Returns:** `(result table, error string)`
-    * Without an argument (or with `nil`), returns a new empty array: `"tags": ${ sinq.json.array() }` sends `"tags": []`.
+    * Without an argument (or with `nil`), returns a new empty array: `"tags": ${ return sinq.json.array() }` sends `"tags": []`.
     * With a table, marks that table in place and returns it. The table must be array-shaped: empty, or keys `1..n` with no gaps and nothing else. A non-empty array already serializes as an array; marking it matters when it may end up empty, such as a list that is filtered down later.
     * Returns `nil` and an error for a table that isn't array-shaped (in which case the table isn't marked), for an argument that isn't a table, or for more than one argument.
     
