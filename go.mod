@@ -1,3 +1,5 @@
+// Deprecated: sinq moved to veitangie.dev/sinq.
+// Install it with: go install veitangie.dev/sinq/cmd/sinq@latest
 module github.com/Veitangie/sinq
 
 go 1.26.5
