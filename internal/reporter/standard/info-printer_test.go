@@ -73,32 +73,28 @@ func TestInfoPrinter_PrintScenarios(t *testing.T) {
 
 	scenarios := []runner.ScenarioBundle{
 		{
-			ScenarioBlueprint: scenario.ScenarioBlueprint{
-				Config: &scenario.ScenarioConfig{
-					Name:        "Scenario1",
-					Description: "Desc1",
-					Tags:        map[string]struct{}{"tag1": {}},
-				},
-				Requests: []*scenario.RequestBlueprint{
-					{Filename: "req1.txt"},
-					{Name: "req2"},
-				},
+			Config: &scenario.ScenarioConfig{
+				Name:        "Scenario1",
+				Description: "Desc1",
+				Tags:        map[string]struct{}{"tag1": {}},
+			},
+			Requests: []*scenario.RequestBlueprint{
+				{Filename: "req1.txt"},
+				{Name: "req2"},
 			},
 		},
 		{
-			ScenarioBlueprint: scenario.ScenarioBlueprint{
-				Config: &scenario.ScenarioConfig{
-					Name: "Scenario2",
-					EnvMatrix: []map[string]map[string]any{
-						{
-							"a": {"b": 1},
-							"c": {"d": 2},
-						},
+			Config: &scenario.ScenarioConfig{
+				Name: "Scenario2",
+				EnvMatrix: []map[string]map[string]any{
+					{
+						"a": {"b": 1},
+						"c": {"d": 2},
 					},
 				},
-				Requests: []*scenario.RequestBlueprint{
-					{Filename: "req3.txt"},
-				},
+			},
+			Requests: []*scenario.RequestBlueprint{
+				{Filename: "req3.txt"},
 			},
 		},
 	}
@@ -188,10 +184,8 @@ func TestInfoPrinter_SetWriter_RedirectsPrintScenarios(t *testing.T) {
 
 	scenarios := []runner.ScenarioBundle{
 		{
-			ScenarioBlueprint: scenario.ScenarioBlueprint{
-				Config:   &scenario.ScenarioConfig{Name: "Scenario1"},
-				Requests: []*scenario.RequestBlueprint{{Filename: "req1.txt"}},
-			},
+			Config:   &scenario.ScenarioConfig{Name: "Scenario1"},
+			Requests: []*scenario.RequestBlueprint{{Filename: "req1.txt"}},
 		},
 	}
 	cfg := config.Config{Reporter: config.ReporterConfig{Show: config.All}}
@@ -274,10 +268,9 @@ func TestInfoPrinter_PrintScenarios_NoSkipFiltersExcluded(t *testing.T) {
 	}
 
 	scenarios := []runner.ScenarioBundle{
-		{ScenarioBlueprint: scenario.ScenarioBlueprint{
+		{
 			Config:   &scenario.ScenarioConfig{Name: "ExcludedScenario", Tags: map[string]struct{}{"other": {}}},
-			Requests: []*scenario.RequestBlueprint{{Filename: "r.txt"}},
-		}},
+			Requests: []*scenario.RequestBlueprint{{Filename: "r.txt"}}},
 	}
 	cfg := config.Config{
 		Reporter:    config.ReporterConfig{Show: config.NoSkip},
@@ -301,10 +294,9 @@ func TestInfoPrinter_PrintScenarios_NonNoSkipIgnoresFiltering(t *testing.T) {
 	}
 
 	scenarios := []runner.ScenarioBundle{
-		{ScenarioBlueprint: scenario.ScenarioBlueprint{
+		{
 			Config:   &scenario.ScenarioConfig{Name: "IncludedScenario", Tags: map[string]struct{}{"other": {}}},
-			Requests: []*scenario.RequestBlueprint{{Filename: "r.txt"}},
-		}},
+			Requests: []*scenario.RequestBlueprint{{Filename: "r.txt"}}},
 	}
 	cfg := config.Config{
 		Reporter:    config.ReporterConfig{Show: config.All},
@@ -328,14 +320,14 @@ func TestInfoPrinter_PrintScenarios_MatrixBoundaryAndHighlights(t *testing.T) {
 	}
 
 	scenarios := []runner.ScenarioBundle{
-		{ScenarioBlueprint: scenario.ScenarioBlueprint{
+		{
 			Config: &scenario.ScenarioConfig{Name: "SingleCombo"},
 			Requests: []*scenario.RequestBlueprint{
 				{Filename: "r1.txt"},
 				{Filename: "r2.txt"},
 				{Filename: "r3.txt"},
 			},
-		}},
+		},
 	}
 	cfg := config.Config{Reporter: config.ReporterConfig{Show: config.All}}
 

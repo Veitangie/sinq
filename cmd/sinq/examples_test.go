@@ -359,10 +359,12 @@ func Test_ExamplesDirectory(t *testing.T) {
 		examplesDir,
 	}
 
+	out := &bytes.Buffer{}
+	withCapturedIO(t, out, out)
 	exitCode := sinq(args)
 
 	if exitCode != 0 {
-		t.Fatalf("Example test failed. Expected sinq to exit with 0, got %d", exitCode)
+		t.Fatalf("Example test failed. Expected sinq to exit with 0, got %d:\n%s", exitCode, out)
 	}
 
 	receivedFilePath := filepath.Join(assetsDir, "received_file")

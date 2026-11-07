@@ -223,10 +223,40 @@ func (lc *LuaContext) RunSandboxed(byteCode *lua.FunctionProto, timeout time.Dur
 	return err
 }
 
+func errToString(ls *lua.LState) int {
+	t := ls.CheckTable(1)
+	ls.Push(lua.LString(fmt.Sprintf("%s: %s",
+		lua.LVAsString(t.RawGetString("kind")),
+		lua.LVAsString(t.RawGetString("message")),
+	)))
+	return 1
+}
+
+func (lc *LuaContext) RecordResponseError(attempt int, err error) {
+	errTable := lc.NewTable()
+	errTable.RawSetString("message", lua.LString(err.Error()))
+	errTable.RawSetString("kind", lua.LString(getErrorKind(err)))
+	mt := lc.NewTable()
+	mt.RawSetString("__tostring", lc.NewFunction(errToString))
+	lc.SetMetatable(errTable, mt)
+	lc.ResponseTable.RawSetString("error", errTable)
+
+	lc.ResponseTable.RawSetString("attempt", lua.LNumber(attempt))
+	lc.ResponseTable.RawSetString("code", lua.LNil)
+	lc.ResponseTable.RawSetString("size", lua.LNil)
+	lc.ResponseTable.RawSetString("oversized", lua.LNil)
+	lc.ResponseTable.RawSetString("bodyRaw", lua.LNil)
+	lc.ResponseTable.RawSetString("bodyJson", lua.LNil)
+	lc.ResponseTable.RawSetString("headers", lua.LNil)
+	lc.ResponseTable.RawSetString("extractBodyJson", lua.LNil)
+	lc.ResponseTable.RawSetString("json", lua.LNil)
+}
+
 func (lc *LuaContext) RecordResponseMeta(attempt int, code int, headers http.Header) {
 	lc.ResponseTable.RawSetString("attempt", lua.LNumber(attempt))
 	lc.ResponseTable.RawSetString("code", lua.LNumber(code))
 	lc.ResponseTable.RawSetString("headers", ToLuaValue(headers, lc.LState))
+	lc.ResponseTable.RawSetString("error", lua.LNil)
 }
 
 func (lc *LuaContext) RecordResponseFile(written int64) {
@@ -297,7 +327,14 @@ func (lc *LuaContext) print(ls *lua.LState) int {
 
 	top := lc.GetTop()
 	for i := range top {
-		_, err := io.WriteString(lc.Printer, lc.Get(i+1).String())
+		lv := lc.Get(i + 1)
+		var lvString string
+		if stringValue, ok := lc.ToStringMeta(lv).(lua.LString); ok {
+			lvString = string(stringValue)
+		} else {
+			lvString = lv.String()
+		}
+		_, err := io.WriteString(lc.Printer, lvString)
 		if err != nil {
 			lc.Error(lua.LString(fmt.Sprintf("print: Failed to write: %s", err.Error())), 1)
 			return 0

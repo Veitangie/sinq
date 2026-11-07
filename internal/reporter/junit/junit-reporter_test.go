@@ -7,10 +7,13 @@ import (
 	"bytes"
 	"encoding/xml"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 )
 
 type errorWriter struct{}
@@ -23,21 +26,21 @@ func TestJUnitReporter_EscapingAndControlCharacters(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rep := NewReporter(buf)
 
-	sourceCh := make(chan runner.ScenarioResult, 1)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
 
 	nastyAssertion := "Expected 200 <script>alert(1)</script> & got 500 \x1b[31m[RED]\x1b[0m \x00"
 	nastyError := "Fatal \x0b crash"
 
-	sourceCh <- runner.ScenarioResult{
+	sourceCh <- aggregator.ScenarioResult{
 		Name:          "Nasty XML Test",
 		StartedAt:     time.Now(),
 		TotalDuration: 1 * time.Second,
-		Status:        runner.Failure,
-		RequestResults: []runner.RequestResult{
+		Status:        event.Failure,
+		RequestResults: []aggregator.RequestResult{
 			{
 				Name:             "NastyRequest",
-				Status:           runner.Failure,
+				Status:           event.Failure,
 				FailedAssertions: []string{nastyAssertion},
 				ErrorMessage:     nastyError,
 			},
@@ -68,23 +71,23 @@ func TestJUnitReporter_Comprehensive(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rep := NewReporter(buf)
 
-	sourceCh := make(chan runner.ScenarioResult, 1)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
 
 	outputBuf := bytes.NewBufferString("lua output")
-	sourceCh <- runner.ScenarioResult{
+	sourceCh <- aggregator.ScenarioResult{
 		Name:          "Comprehensive",
 		Tags:          []string{"api", "fast"},
 		StartedAt:     time.Now(),
 		TotalDuration: 1 * time.Second,
-		Status:        runner.Failure,
+		Status:        event.Failure,
 		Output:        outputBuf,
-		RequestResults: []runner.RequestResult{
-			{Name: "SuccessReq", Status: runner.Success},
-			{Name: "ErrorReq", Status: runner.Error, ErrorMessage: "runtime err"},
-			{Name: "FailReq", Status: runner.Failure, FailedAssertions: []string{"bad body"}},
-			{Name: "SkipReq", Status: runner.Unset},
-			{Name: "AbortReq", Status: runner.Aborted},
+		RequestResults: []aggregator.RequestResult{
+			{Name: "SuccessReq", Status: event.Success},
+			{Name: "ErrorReq", Status: event.Error, ErrorMessage: "runtime err"},
+			{Name: "FailReq", Status: event.Failure, FailedAssertions: []string{"bad body"}},
+			{Name: "SkipReq", Status: event.Unset},
+			{Name: "AbortReq", Status: event.Aborted},
 		},
 	}
 
@@ -143,10 +146,10 @@ func TestJUnitReporter_Comprehensive(t *testing.T) {
 func TestJUnitReporter_WriteErrors(t *testing.T) {
 	rep := NewReporter(errorWriter{})
 
-	sourceCh := make(chan runner.ScenarioResult, 1)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
 
-	sourceCh <- runner.ScenarioResult{Name: "ErrTest"}
+	sourceCh <- aggregator.ScenarioResult{Name: "ErrTest"}
 	close(sourceCh)
 	timerCh <- 1 * time.Second
 	close(timerCh)
@@ -157,20 +160,100 @@ func TestJUnitReporter_WriteErrors(t *testing.T) {
 	}
 }
 
+func TestJUnitReporter_RunsOfOneScenarioHaveDistinctNames(t *testing.T) {
+	buf := &bytes.Buffer{}
+	rep := NewReporter(buf)
+
+	runs := []aggregator.ScenarioResult{
+		{Name: "Checkout", Labels: []string{"admin", "card"}, CntId: 0, TotalRunCount: 2},
+		{Name: "Checkout", Labels: []string{"admin", "card"}, CntId: 1, TotalRunCount: 2},
+		{Name: "Checkout", Labels: []string{"guest", "card"}, CntId: 0, TotalRunCount: 2},
+	}
+	sourceCh := make(chan aggregator.ScenarioResult, len(runs))
+	for _, r := range runs {
+		r.Status = event.Success
+		r.StartedAt = time.Now()
+		r.TotalDuration = time.Millisecond
+		r.RequestResults = []aggregator.RequestResult{{Name: "Pay", Status: event.Success}}
+		sourceCh <- r
+	}
+	close(sourceCh)
+	timerCh := make(chan time.Duration, 1)
+	timerCh <- time.Millisecond
+	close(timerCh)
+
+	if err := rep.Report(sourceCh, timerCh, len(runs)); err != nil {
+		t.Fatalf("Failed to execute Report(): %v", err)
+	}
+
+	var parsed struct {
+		Suites []struct {
+			Name      string `xml:"name,attr"`
+			TestCases []struct {
+				Classname string `xml:"classname,attr"`
+			} `xml:"testcase"`
+		} `xml:"testsuite"`
+	}
+	if err := xml.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Failed to unmarshal XML: %v\n%s", err, buf.String())
+	}
+	if len(parsed.Suites) != len(runs) {
+		t.Fatalf("Expected %d suites, got %d\n%s", len(runs), len(parsed.Suites), buf.String())
+	}
+
+	seen := map[string]bool{}
+	for i, s := range parsed.Suites {
+		if seen[s.Name] {
+			t.Errorf("Expected every run to have its own suite name, %q appears twice", s.Name)
+		}
+		seen[s.Name] = true
+		for _, label := range runs[i].Labels {
+			if !strings.Contains(s.Name, label) {
+				t.Errorf("Expected suite %q to carry the label %q", s.Name, label)
+			}
+		}
+		if want := "#" + strconv.Itoa(runs[i].CntId+1); !strings.Contains(s.Name, want) {
+			t.Errorf("Expected suite %q to carry the run number %s", s.Name, want)
+		}
+		if len(s.TestCases) == 0 || s.TestCases[0].Classname != s.Name {
+			t.Errorf("Expected the test cases' classname to match the suite name %q", s.Name)
+		}
+	}
+}
+
+func TestJUnitReporter_SingleRunHasNoRunNumber(t *testing.T) {
+	buf := &bytes.Buffer{}
+	rep := NewReporter(buf)
+
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
+	sourceCh <- aggregator.ScenarioResult{Name: "Checkout", Status: event.Success, StartedAt: time.Now(), TotalRunCount: 1}
+	close(sourceCh)
+	timerCh := make(chan time.Duration, 1)
+	timerCh <- time.Millisecond
+	close(timerCh)
+
+	if err := rep.Report(sourceCh, timerCh, 1); err != nil {
+		t.Fatalf("Failed to execute Report(): %v", err)
+	}
+	if strings.Contains(buf.String(), "#1") {
+		t.Errorf("Expected a scenario that runs once to carry no run number, got\n%s", buf.String())
+	}
+}
+
 func TestJUnitReporter_TagsUseStandardPropertiesMarkup(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rep := NewReporter(buf)
 
-	sourceCh := make(chan runner.ScenarioResult, 1)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
 
-	sourceCh <- runner.ScenarioResult{
+	sourceCh <- aggregator.ScenarioResult{
 		Name:           "Tagged",
 		Tags:           []string{"api", "fast"},
 		StartedAt:      time.Now(),
 		TotalDuration:  1 * time.Second,
-		Status:         runner.Success,
-		RequestResults: []runner.RequestResult{{Name: "Req", Status: runner.Success}},
+		Status:         event.Success,
+		RequestResults: []aggregator.RequestResult{{Name: "Req", Status: event.Success}},
 	}
 	close(sourceCh)
 	timerCh <- 1 * time.Second
@@ -227,6 +310,75 @@ func TestJUnitReporter_TagsUseStandardPropertiesMarkup(t *testing.T) {
 	}
 }
 
+func TestJUnitReporter_LabelsProperty(t *testing.T) {
+	tests := []struct {
+		name   string
+		tags   []string
+		labels []string
+		want   map[string]string
+	}{
+		{"tags only", []string{"smoke"}, nil, map[string]string{"tags": "smoke"}},
+		{"labels only", nil, []string{"admin", "card"}, map[string]string{"labels": "admin, card"}},
+		{"tags and labels", []string{"smoke", "api"}, []string{"guest"}, map[string]string{"tags": "smoke, api", "labels": "guest"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			rep := NewReporter(buf)
+
+			sourceCh := make(chan aggregator.ScenarioResult, 1)
+			timerCh := make(chan time.Duration, 1)
+			sourceCh <- aggregator.ScenarioResult{
+				Name:           "Checkout",
+				Tags:           tt.tags,
+				Labels:         tt.labels,
+				StartedAt:      time.Now(),
+				TotalDuration:  time.Second,
+				Status:         event.Success,
+				RequestResults: []aggregator.RequestResult{{Name: "Req", Status: event.Success}},
+			}
+			close(sourceCh)
+			timerCh <- time.Second
+			close(timerCh)
+
+			if err := rep.Report(sourceCh, timerCh, 1); err != nil {
+				t.Fatalf("Failed to execute Report(): %v", err)
+			}
+
+			var parsed struct {
+				Suites []struct {
+					Properties []struct {
+						Property []struct {
+							Name  string `xml:"name,attr"`
+							Value string `xml:"value,attr"`
+						} `xml:"property"`
+					} `xml:"properties"`
+				} `xml:"testsuite"`
+			}
+			if err := xml.Unmarshal(buf.Bytes(), &parsed); err != nil {
+				t.Fatalf("Failed to unmarshal XML: %v\n%s", err, buf.String())
+			}
+			if len(parsed.Suites) != 1 || len(parsed.Suites[0].Properties) != 1 {
+				t.Fatalf("Expected one suite with one <properties> block\n%s", buf.String())
+			}
+
+			got := map[string]string{}
+			for _, p := range parsed.Suites[0].Properties[0].Property {
+				got[p.Name] = p.Value
+			}
+			if len(got) != len(tt.want) {
+				t.Errorf("Expected properties %v, got %v", tt.want, got)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Errorf("Expected property %s=%q, got %q", k, v, got[k])
+				}
+			}
+		})
+	}
+}
+
 func TestJUnitReporter_NoTagsOmitsProperties(t *testing.T) {
 	tests := []struct {
 		name string
@@ -241,16 +393,16 @@ func TestJUnitReporter_NoTagsOmitsProperties(t *testing.T) {
 			buf := &bytes.Buffer{}
 			rep := NewReporter(buf)
 
-			sourceCh := make(chan runner.ScenarioResult, 1)
+			sourceCh := make(chan aggregator.ScenarioResult, 1)
 			timerCh := make(chan time.Duration, 1)
 
-			sourceCh <- runner.ScenarioResult{
+			sourceCh <- aggregator.ScenarioResult{
 				Name:           "Untagged",
 				Tags:           tt.tags,
 				StartedAt:      time.Now(),
 				TotalDuration:  1 * time.Second,
-				Status:         runner.Success,
-				RequestResults: []runner.RequestResult{{Name: "Req", Status: runner.Success}},
+				Status:         event.Success,
+				RequestResults: []aggregator.RequestResult{{Name: "Req", Status: event.Success}},
 			}
 			close(sourceCh)
 			timerCh <- 1 * time.Second

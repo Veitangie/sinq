@@ -6,7 +6,8 @@ package result
 import (
 	"time"
 
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 )
 
 type ResultReporter struct {
@@ -17,21 +18,21 @@ func NewResultReporter() *ResultReporter {
 	return &ResultReporter{true}
 }
 
-func (r *ResultReporter) Report(source <-chan runner.ScenarioResult, timer <-chan time.Duration, size int) error {
+func (r *ResultReporter) Report(source <-chan aggregator.ScenarioResult, timer <-chan time.Duration, size int) error {
 	count := 0
 	for result := range source {
 		if !r.success {
 			continue
 		}
 
-		if result.Status == runner.Failure || result.Status == runner.Error || result.Status == runner.Aborted {
+		if result.Status == event.Failure || result.Status == event.Error || result.Status == event.Aborted {
 			r.success = false
 			continue
 		}
 
 		count += 1
 		for _, reqResult := range result.RequestResults {
-			if reqResult.Status == runner.Failure || reqResult.Status == runner.Error || reqResult.Status == runner.Aborted {
+			if reqResult.Status == event.Failure || reqResult.Status == event.Error || reqResult.Status == event.Aborted {
 				r.success = false
 				break
 			}

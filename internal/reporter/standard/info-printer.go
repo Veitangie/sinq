@@ -151,7 +151,7 @@ Flags:
   -u, --unrestricted      Load Lua os/io modules - disables the script sandbox
   -p, --print             Capture lua output and show it in the report
   -w, --workers int       Number of concurrent workers (default 10)
-  -c, --count uint        Number of launches for every scenario (default 1)
+  -c, --count int         Number of launches for every scenario (default 1)
   -s, --secret string     Key=value pair overrides for scenario secrets
   -e, --env string        Key=value pair overrides for all scenario environments
   -o, --out path          Path to write the output file (prints to stdout if omitted)
@@ -162,7 +162,7 @@ Flags:
   -t, --tag string        Execute only scenarios that have at least one of passed tags
   -n, --name string       Execute only scenarios which names match at least one of passed regular expressions
   --no-spinner            Disable spinner animation
-  --dump-on-failure       Print full request and response data on failed assertion
+  --dump-on-failure       Print full request and response data of failed, errored or aborted requests
   --secrets-file string   Path to JSON-formatted secrets file
   --no-tag string         Do not execute scenarios that have the tag
   --no-name string        Do not execute scenarios which names match the regular expression

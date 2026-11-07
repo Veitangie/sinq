@@ -190,6 +190,22 @@ func TestLuaContext_PrintAndWrite(t *testing.T) {
 	}
 }
 
+func TestLuaContext_PrintHonoursToString(t *testing.T) {
+	buf := &bytes.Buffer{}
+	lc := NewLuaContext(timer.DefaultClock{}, false, nil, buf)
+	defer lc.Close()
+	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
+
+	err := lc.DoString(`print(setmetatable({}, { __tostring = function() return "custom" end }), "plain")`)
+	if err != nil {
+		t.Fatalf("Lua execution failed: %v", err)
+	}
+
+	if out := buf.String(); out != "custom\tplain\n" {
+		t.Errorf("Expected print to use __tostring, got %q", out)
+	}
+}
+
 func TestLuaContext_WriteNumber(t *testing.T) {
 	buf := &bytes.Buffer{}
 	lc := NewLuaContext(timer.DefaultClock{}, true, nil, buf)

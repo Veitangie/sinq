@@ -57,20 +57,16 @@ When a child and a parent set the same key, the child's value wins. This per-key
 
 ---
 
-## DAG Engine & Blueprints
+## How Scenarios Are Built
 
-Under the hood, the Treewalker treats your physical filesystem as a Directed Acyclic Graph (DAG) to build test workflows.
+1. **Sorting:** files within a directory are sorted in natural order, so `2_request.sinq` runs before `10_finalize.sinq`.
+2. **Inheritance:** each subdirectory appends its own sorted files to the ones inherited from its parents.
+3. **Emission:** a directory with no subdirectories and at least one `.sinq` or `.scenario` file becomes one scenario, built from everything accumulated along its path.
 
-### Core Algorithm
+Sibling scenarios share nothing and are handed to the worker pool to run concurrently.
 
-1. **Discovery:** Starting at the target root, the engine finds all `.scenario` and `.sinq` files.
-2. **Sorting:** Files within the same directory are sorted in **natural alphanumeric order**. This means `2_request.sinq` will correctly execute before `10_finalize.sinq`.
-3. **Descent & Inheritance:** The engine recursively descends into subdirectories. Child directories *inherit and append* the sorted `.scenario` and `.sinq` files from their parents.
-4. **Blueprint Emission:** Once the engine reaches a directory containing **at least one** `.sinq` or `.scenario` file but **no subdirectories**, it compiles the accumulated path into a "scenario blueprint".
-5. The Treewalker then emits a slice of these generated scenario blueprints to the Runner.
-
-*Note: Sibling leaf directories are completely isolated. `sinq` will spin up separate workers to execute these emitted blueprints concurrently.*
+A single `.sinq` file passed as a path runs as its own scenario with the default configuration. It doesn't pick up `.scenario` files, not even ones in its own directory.
 
 ### Scenario Ordering
 
-**The Treewalker does not guarantee the order scenarios run in.** Blueprints go to the worker pool with no global ordering. Files *within* one scenario always run in natural-sorted order; only the order of scenarios relative to each other is unspecified.
+**The order scenarios run in is unspecified.** Files *within* one scenario always run in natural-sorted order.

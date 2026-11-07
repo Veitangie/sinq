@@ -7,14 +7,13 @@ import (
 	"context"
 	"errors"
 	"hash/maphash"
-	"log/slog"
 	"net/http"
 	"sync"
-	"time"
 
 	"golang.org/x/sync/singleflight"
 	"veitangie.dev/sinq/internal/config"
 	"veitangie.dev/sinq/internal/envs"
+	"veitangie.dev/sinq/internal/event"
 	"veitangie.dev/sinq/internal/scenario"
 	"veitangie.dev/sinq/internal/timer"
 )
@@ -23,7 +22,7 @@ type Runner struct {
 	cfg           config.Config
 	ctx           context.Context
 	transport     http.RoundTripper
-	logger        slog.Logger
+	eb            *event.Bus
 	clock         timer.Clock
 	rootWorkspace Workspace
 }
@@ -54,11 +53,16 @@ func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle
 				shouldInclude := sc.Count > 0
 
 				bundle := taskBundle{
-					sc.ScenarioBlueprint,
-					sc.Workspace,
-					totalEnv,
-					labels,
-					shouldInclude,
+					ScenarioBlueprint: sc.ScenarioBlueprint,
+					workspace:         sc.Workspace,
+					env:               totalEnv,
+					labels:            labels,
+					run:               shouldInclude,
+					runId: event.RunId{
+						SeqId: sc.SeqId,
+						MatId: path,
+						CntId: 0,
+					},
 				}
 
 				for range max(sc.Count, 1) {
@@ -67,6 +71,7 @@ func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle
 						break Loop
 					case taskCh <- bundle:
 					}
+					bundle.runId.CntId += 1
 				}
 			}
 		}
@@ -76,12 +81,9 @@ func (r *Runner) startDataSource(ctx context.Context, scenarios []ScenarioBundle
 	return taskCh
 }
 
-func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, secrets map[string]any, totalTimer *timer.Timer) (<-chan ScenarioResult, <-chan time.Duration, <-chan error) {
+func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, secrets map[string]any, totalTimer *timer.Timer) {
 
 	taskCh := r.startDataSource(ctx, scenarios)
-	errorCh := make(chan error, r.cfg.Workers)
-	resultCh := make(chan ScenarioResult, r.cfg.Workers)
-	durationCh := make(chan time.Duration, 1)
 	wg := sync.WaitGroup{}
 	singleflightProcessor := cachedRequestProcessor{
 		group:        singleflight.Group{},
@@ -89,7 +91,7 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 		transport:    r.transport,
 		maxCacheSize: r.cfg.MaxCacheSize,
 		cacheTimeout: r.cfg.CacheTimeout,
-		logger:       &r.logger,
+		eb:           r.eb,
 	}
 
 	loader := cachedLoader{
@@ -100,11 +102,17 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 
 	sharedSeed := maphash.MakeSeed()
 
+	reportContext := context.WithoutCancel(ctx)
+
 	go func() {
 		defer func() {
-			close(errorCh)
-			close(resultCh)
-			close(durationCh)
+			r.eb.Send(
+				reportContext,
+				event.Event{
+					Kind:     event.RunnerDone,
+					Duration: totalTimer.Time(),
+				},
+			)
 		}()
 
 		compiler := cachedCompiler{
@@ -118,7 +126,7 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 		env := workerEnv{
 			cfg:             r.cfg,
 			secrets:         secrets,
-			logger:          &r.logger,
+			eb:              r.eb,
 			transport:       r.transport,
 			clock:           r.clock,
 			compiler:        &compiler,
@@ -131,10 +139,8 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 			w := worker{
 				id:        idx,
 				taskCh:    taskCh,
-				errorCh:   errorCh,
-				resCh:     resultCh,
 				env:       env,
-				reportCtx: ctx,
+				reportCtx: reportContext,
 			}
 			wg.Add(1)
 
@@ -146,14 +152,12 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 				w.run(ctx)
 			}()
 		}
-		wg.Wait()
-		durationCh <- totalTimer.Time()
-	}()
 
-	return resultCh, durationCh, errorCh
+		wg.Wait()
+	}()
 }
 
-func NewRunner(cfg config.Config, ctx context.Context, transport http.RoundTripper, logger slog.Logger, clock timer.Clock, rootWorkspace Workspace) (*Runner, error) {
+func NewRunner(cfg config.Config, ctx context.Context, transport http.RoundTripper, eb *event.Bus, clock timer.Clock, rootWorkspace Workspace) (*Runner, error) {
 	if transport == nil {
 		return nil, errors.New("Cannot construct scenario runner: http transport is nil")
 	}
@@ -170,5 +174,9 @@ func NewRunner(cfg config.Config, ctx context.Context, transport http.RoundTripp
 		return nil, errors.New("Cannot construct scenario runner: root workspace is nil")
 	}
 
-	return &Runner{cfg, ctx, transport, logger, clock, rootWorkspace}, nil
+	if eb == nil {
+		return nil, errors.New("Cannot construct scenario runner: event bus is nil")
+	}
+
+	return &Runner{cfg, ctx, transport, eb, clock, rootWorkspace}, nil
 }

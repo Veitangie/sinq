@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 	"veitangie.dev/sinq/internal/reporter"
-	"veitangie.dev/sinq/internal/runner"
 )
 
 const (
@@ -32,7 +32,7 @@ func NewReporter(cfg config.ReporterConfig, writer io.Writer) StandardReporter {
 	return StandardReporter{cfg, writer}
 }
 
-func (r StandardReporter) Report(source <-chan runner.ScenarioResult, total <-chan time.Duration, size int) error {
+func (r StandardReporter) Report(source <-chan aggregator.ScenarioResult, total <-chan time.Duration, size int) error {
 	var err error
 	rd := newReportData(r.cfg, r.writer, size)
 	for result := range source {

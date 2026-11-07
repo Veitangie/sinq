@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 )
 
 type Reporter interface {
-	Report(<-chan runner.ScenarioResult, <-chan time.Duration, int) error
+	Report(<-chan aggregator.ScenarioResult, <-chan time.Duration, int) error
 }
 
 type ReporterPool struct {
@@ -39,22 +39,22 @@ func (r *ReporterPool) Register(rep Reporter) error {
 	return nil
 }
 
-func (r *ReporterPool) Report(source <-chan runner.ScenarioResult, timer <-chan time.Duration, size int) error {
+func (r *ReporterPool) Report(source <-chan aggregator.ScenarioResult, timer <-chan time.Duration, size int) error {
 	r.lock.RLock()
-	sourceChans := make([]chan runner.ScenarioResult, 0, len(r.reporters))
+	sourceChans := make([]chan aggregator.ScenarioResult, 0, len(r.reporters))
 	timerChans := make([]chan time.Duration, 0, len(r.reporters))
 	errorCh := make(chan error, len(r.reporters))
 	wg := sync.WaitGroup{}
 
 	for idx := range r.reporters {
-		sCh := make(chan runner.ScenarioResult, size)
+		sCh := make(chan aggregator.ScenarioResult, size)
 		tCh := make(chan time.Duration, 1)
 
 		sourceChans = append(sourceChans, sCh)
 		timerChans = append(timerChans, tCh)
 
 		wg.Add(1)
-		go func(rep Reporter, src <-chan runner.ScenarioResult, tmr <-chan time.Duration) {
+		go func(rep Reporter, src <-chan aggregator.ScenarioResult, tmr <-chan time.Duration) {
 			defer func() {
 				err := recover()
 				if err != nil {

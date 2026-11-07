@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	mrand "math/rand/v2"
 	"net/http"
 	"strings"
@@ -164,9 +165,7 @@ func (s *server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	user, ok := s.users[r.PathValue("id")]
 	if ok {
-		for k, v := range patch {
-			user[k] = v
-		}
+		maps.Copy(user, patch)
 	}
 	s.mu.Unlock()
 	if !ok {

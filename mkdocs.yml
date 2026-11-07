@@ -57,12 +57,13 @@ nav:
       - Alternatives & Comparisons: alternatives.md
       - Versioning & Compatibility: versioning.md
       - FAQ: faq.md
+  - Community: community.md
 
 plugins:
   - search
   - llmstxt:
       markdown_description: >-
-        sinq runs sequences of HTTP requests as stateful workflows. Tests are
+        sinq tests APIs by running sequences of HTTP requests as stateful workflows. Tests are
         plain-text .sinq files (raw HTTP plus Lua) organised into directories;
         every leaf directory is one scenario, and scenarios run in parallel.
       full_output: llms-full.txt
@@ -85,6 +86,7 @@ plugins:
         Background:
           - alternatives.md: How sinq compares to Hurl, Venom, Postman, Bruno, k6, and editor HTTP clients.
           - faq.md: Common questions.
+          - community.md: Where to report bugs and ask questions, and how to contribute.
 
 markdown_extensions:
   - pymdownx.highlight:

@@ -8,7 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 	"veitangie.dev/sinq/internal/timer"
 	"veitangie.dev/sinq/internal/ui"
 	"veitangie.dev/spinq"
@@ -37,7 +38,7 @@ func NewSpinnerReporter(spinner spinq.Writer, clock timer.Clock, willRun int, co
 	}, nil
 }
 
-func (r *SpinnerReporter) Report(source <-chan runner.ScenarioResult, duration <-chan time.Duration, _ int) error {
+func (r *SpinnerReporter) Report(source <-chan aggregator.ScenarioResult, duration <-chan time.Duration, _ int) error {
 	var err error
 	if r.willRun < 10 {
 		err = r.handleSimple(source)
@@ -56,18 +57,18 @@ func (r *SpinnerReporter) Report(source <-chan runner.ScenarioResult, duration <
 	return errors.Join(err, stopErr)
 }
 
-func (r *SpinnerReporter) handleBar(source <-chan runner.ScenarioResult) error {
+func (r *SpinnerReporter) handleBar(source <-chan aggregator.ScenarioResult) error {
 	ran := &atomic.Int64{}
 	err := r.spinner.SetFrame(ui.GetBarFrame(r.color, r.willRun, func() (int, int) { return int(ran.Load()), r.willRun }, r.spinner.GetWidth()))
 	for res := range source {
-		if res.Status != runner.Unset && res.Status != runner.Skipped {
+		if res.Status != event.Unset && res.Status != event.Skipped {
 			ran.Add(1)
 		}
 	}
 	return err
 }
 
-func (r *SpinnerReporter) handleSimple(source <-chan runner.ScenarioResult) error {
+func (r *SpinnerReporter) handleSimple(source <-chan aggregator.ScenarioResult) error {
 	err := r.spinner.SetFrame(ui.GetSimpleFrame(r.color, r.clock, "Running"))
 	for range source {
 	}

@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
 
-set -e
+failed=()
 
-go test -race -coverprofile=coverage.txt ./...
+if ! go test -race -shuffle=on -coverprofile=coverage.txt ./...; then
+  failed+=("tests")
+fi
 
 for pkg in $(go list ./...); do
-  if go test "$pkg" -list=Fuzz | grep -q "^Fuzz"; then
-    go test -fuzz=Fuzz -fuzztime=${1:-30s} "$pkg"
-  fi
+  for target in $(go test "$pkg" -list='^Fuzz' | grep '^Fuzz'); do
+    echo "=== fuzzing $pkg $target for ${1:-30s} ($(date '+%H:%M:%S'))"
+    if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=${1:-30s} "$pkg"; then
+      failed+=("$pkg $target")
+    fi
+  done
 done
+
+if [ ${#failed[@]} -ne 0 ]; then
+  echo
+  echo "FAILED:"
+  printf '  %s\n' "${failed[@]}"
+  exit 1
+fi
+echo "All tests and fuzz targets passed ($(date '+%H:%M:%S'))"

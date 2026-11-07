@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -14,13 +15,14 @@ import (
 	"sync"
 
 	"veitangie.dev/sinq/internal/envs"
+	"veitangie.dev/sinq/internal/event"
 	"veitangie.dev/sinq/internal/scenario"
 )
 
 type worker struct {
 	id                      int
 	fileSystem              fs.FS
-	taskCh                  <-chan []string
+	taskCh                  <-chan task
 	errorCh                 chan<- error
 	resultCh                chan<- scenario.ScenarioBlueprint
 	requestCache            map[string][]*scenario.RequestBlueprint
@@ -29,6 +31,24 @@ type worker struct {
 	scenarioConfigCacheLock *sync.RWMutex
 	wg                      *sync.WaitGroup
 	t                       *Treewalker
+	seqId                   int
+	seq                     int
+}
+
+func (w *worker) log(level slog.Level, msg string, attrs ...slog.Attr) event.Event {
+	e := newEvent(event.Log, w.id)
+	e.Level = level
+	e.Message = msg
+	e.Attrs = append([]slog.Attr{slog.Int("workerId", w.id), slog.Int("seqId", w.seqId)}, attrs...)
+	return e
+}
+
+func (w *worker) send(es ...event.Event) {
+	for i := range es {
+		w.seq++
+		es[i].WorkerSeq = w.seq
+	}
+	w.t.eb.Send(context.Background(), es...)
 }
 
 func (w *worker) run(ctx context.Context) {
@@ -42,12 +62,13 @@ func (w *worker) run(ctx context.Context) {
 	}
 }
 
-func (w *worker) runTask(task []string) {
-	w.t.logger.Debug("[Treewalker] Worker got task", "workerId", w.id, "taskPaths", task)
+func (w *worker) runTask(t task) {
+	w.seqId = t.seqId
+	w.send(w.log(slog.LevelDebug, "[Treewalker] Worker got task", slog.Any("taskPaths", t.paths)))
 
 	scenarioConfig := scenario.SaneDefaultConfig()
-	requestBlueprints := make([]*scenario.RequestBlueprint, 0, len(task))
-	for _, filePath := range task {
+	requestBlueprints := make([]*scenario.RequestBlueprint, 0, len(t.paths))
+	for _, filePath := range t.paths {
 		switch {
 		case strings.HasSuffix(filePath, requestFiletype):
 			w.handleRequestFile(&requestBlueprints, filePath)
@@ -61,7 +82,7 @@ func (w *worker) runTask(task []string) {
 	}
 
 	if scenarioConfig.Name == "" {
-		scenarioConfig.Name = getDefaultScenarioNameFromPath(task[len(task)-1])
+		scenarioConfig.Name = getDefaultScenarioNameFromPath(t.paths[len(t.paths)-1], t.rootName)
 	}
 
 	if len(scenarioConfig.Tags) > 0 {
@@ -73,19 +94,19 @@ func (w *worker) runTask(task []string) {
 
 	envs.DeepMerge(scenarioConfig.Env, w.t.cfg.Treewalker.Env)
 
-	res := scenario.ScenarioBlueprint{Requests: requestBlueprints, Config: &scenarioConfig}
+	res := scenario.ScenarioBlueprint{SeqId: t.seqId, Requests: requestBlueprints, Config: &scenarioConfig}
 	w.resultCh <- res
 }
 
-func getDefaultScenarioNameFromPath(lastFilePath string) string {
+func getDefaultScenarioNameFromPath(lastFilePath, rootPath string) string {
 	name := filepath.Dir(lastFilePath)
 	if name == "." {
-		return lastFilePath
+		return rootPath
 	}
 	return name
 }
 
-func (t *Treewalker) runWorkers(ctx context.Context, fileSystem fs.FS, taskCh <-chan []string, errorCh chan<- error) (*sync.WaitGroup, chan scenario.ScenarioBlueprint) {
+func (t *Treewalker) runWorkers(ctx context.Context, fileSystem fs.FS, taskCh <-chan task, errorCh chan<- error) (*sync.WaitGroup, chan scenario.ScenarioBlueprint) {
 	wg := sync.WaitGroup{}
 	wg.Add(t.cfg.Workers)
 	requestCache := make(map[string][]*scenario.RequestBlueprint)
@@ -96,7 +117,7 @@ func (t *Treewalker) runWorkers(ctx context.Context, fileSystem fs.FS, taskCh <-
 
 	for wIdx := range t.cfg.Workers {
 		w := worker{
-			id:                      wIdx,
+			id:                      wIdx + 1,
 			fileSystem:              fileSystem,
 			taskCh:                  taskCh,
 			errorCh:                 errorCh,
@@ -131,7 +152,7 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 
 	file, err := w.fileSystem.Open(filePath)
 	if err != nil {
-		w.t.logger.Error("[Treewalker] Error occurred while opening file", "error", err, "filePath", filePath)
+		w.send(w.log(slog.LevelError, "[Treewalker] Error occurred while opening file", errAttr(err), slog.String("filePath", filePath)))
 		w.errorCh <- fmt.Errorf("Error occurred while opening file %s: %w", filePath, err)
 		return
 	}
@@ -139,7 +160,7 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 
 	err = w.t.parseScenarioConfig(scenarioConfig, file)
 	if err != nil {
-		w.t.logger.Error("[Treewalker] Error occurred while parsing file", "error", err, "filePath", filePath)
+		w.send(w.log(slog.LevelError, "[Treewalker] Error occurred while parsing file", errAttr(err), slog.String("filePath", filePath)))
 		w.errorCh <- fmt.Errorf("Error occurred while parsing file %s: %w", filePath, err)
 		return
 	}
@@ -155,14 +176,14 @@ func (w *worker) handleScenarioConfigFile(scenarioConfig *scenario.ScenarioConfi
 func (w *worker) handleRequestFile(requestBlueprints *[]*scenario.RequestBlueprint, filePath string) {
 
 	if cachedRequests, isFound := readCache(filePath, w.requestCache, w.requestCacheLock); isFound {
-		w.t.logger.Debug("[Treewalker] There was a cache hit", "filePath", filePath)
+		w.send(w.log(slog.LevelDebug, "[Treewalker] There was a cache hit", slog.String("filePath", filePath)))
 		*requestBlueprints = append(*requestBlueprints, cachedRequests...)
 		return
 	}
 
 	file, err := w.fileSystem.Open(filePath)
 	if err != nil {
-		w.t.logger.Error("[Treewalker] Error occurred while opening file", "error", err, "filePath", filePath)
+		w.send(w.log(slog.LevelError, "[Treewalker] Error occurred while opening file", errAttr(err), slog.String("filePath", filePath)))
 		w.errorCh <- fmt.Errorf("Error occurred while opening file %s: %w", filePath, err)
 		return
 	}
@@ -170,7 +191,7 @@ func (w *worker) handleRequestFile(requestBlueprints *[]*scenario.RequestBluepri
 
 	newRequestBlueprints, err := w.t.parseRequest(file, filePath)
 	if err != nil {
-		w.t.logger.Error("[Treewalker] Error occurred while parsing file", "error", err, "filePath", filePath)
+		w.send(w.log(slog.LevelError, "[Treewalker] Error occurred while parsing file", errAttr(err), slog.String("filePath", filePath)))
 		w.errorCh <- fmt.Errorf("Error occurred while parsing file %s: %w", filePath, err)
 		return
 	}

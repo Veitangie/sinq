@@ -191,7 +191,7 @@ func (v LuaPathsValue) String() string {
 		return "unset"
 	}
 
-	return strings.Join(*v.target, string(filepath.Separator))
+	return strings.Join(*v.target, string(filepath.ListSeparator))
 }
 
 func (v LuaPathsValue) Set(value string) error {

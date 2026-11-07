@@ -5,12 +5,14 @@ package runner
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"testing"
+	"time"
 
 	"go.uber.org/goleak"
 	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 	"veitangie.dev/sinq/internal/scenario"
 	"veitangie.dev/sinq/internal/timer"
 )
@@ -24,21 +26,26 @@ func (r noopRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 func TestNewRunner_Validation(t *testing.T) {
 	cfg := config.SaneDefaults()
 
-	_, err := NewRunner(cfg, context.Background(), nil, *slog.Default(), nil, nil)
+	_, err := NewRunner(cfg, context.Background(), nil, newTestBus(t), nil, &mockWorkspace{})
 	if err == nil {
 		t.Error("Expected error when creating Runner with nil transport")
 	}
 
-	_, err = NewRunner(cfg, nil, noopRoundTripper{}, *slog.Default(), nil, nil)
+	_, err = NewRunner(cfg, nil, noopRoundTripper{}, newTestBus(t), nil, &mockWorkspace{})
 	if err == nil {
 		t.Error("Expected error when creating Runner with nil context")
+	}
+
+	_, err = NewRunner(cfg, context.Background(), noopRoundTripper{}, nil, nil, &mockWorkspace{})
+	if err == nil {
+		t.Error("Expected error when creating Runner with nil event bus")
 	}
 }
 
 func TestNewRunner_DefaultsNilClock(t *testing.T) {
 	cfg := config.SaneDefaults()
 
-	r, err := NewRunner(cfg, context.Background(), noopRoundTripper{}, *slog.Default(), nil, &mockWorkspace{})
+	r, err := NewRunner(cfg, context.Background(), noopRoundTripper{}, newTestBus(t), nil, &mockWorkspace{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,8 +58,8 @@ func TestRunner_StartDataSource_CountControlsRun(t *testing.T) {
 	runner := &Runner{cfg: config.SaneDefaults()}
 
 	scenarios := []ScenarioBundle{
-		{ScenarioBlueprint: scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{Name: "ZeroCount"}}, Count: 0},
-		{ScenarioBlueprint: scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{Name: "OneCount"}}, Count: 1},
+		{Config: &scenario.ScenarioConfig{Name: "ZeroCount"}, Count: 0},
+		{Config: &scenario.ScenarioConfig{Name: "OneCount"}, Count: 1},
 	}
 
 	taskCh := runner.startDataSource(context.Background(), scenarios)
@@ -85,8 +92,15 @@ func TestRunner_GoroutineLeakage(t *testing.T) {
 	cfg := config.SaneDefaults()
 	cfg.Workers = 50
 
+	bus, err := event.NewBus(64, discardLogger())
+	if err != nil {
+		t.Fatalf("Failed to construct event bus: %v", err)
+	}
+	bus.Start()
+	resultCh, durationCh := aggregator.NewAggregator().AggregateOver(bus.RegisterMC(cfg.Workers * 2))
+
 	ctx, cancel := context.WithCancel(context.Background())
-	runner, _ := NewRunner(cfg, ctx, noopRoundTripper{}, *slog.Default(), nil, &mockWorkspace{})
+	runner, _ := NewRunner(cfg, ctx, noopRoundTripper{}, bus, nil, &mockWorkspace{})
 
 	scenarios := make([]ScenarioBundle, 1000)
 	for i := range scenarios {
@@ -95,7 +109,7 @@ func TestRunner_GoroutineLeakage(t *testing.T) {
 
 	totalTimer := timer.NewTimer(timer.DefaultClock{})
 	totalTimer.Start()
-	resultCh, durationCh, errorCh := runner.RunScenarios(ctx, scenarios, nil, &totalTimer)
+	runner.RunScenarios(ctx, scenarios, nil, &totalTimer)
 
 	for range 10 {
 		<-resultCh
@@ -107,11 +121,76 @@ func TestRunner_GoroutineLeakage(t *testing.T) {
 		for range resultCh {
 		}
 	}()
-	go func() {
-		for range errorCh {
+	select {
+	case <-durationCh:
+	case <-time.After(5 * time.Second):
+		t.Error("Timed out waiting for the runner to finish after cancel (RunnerDone never reached the aggregator)")
+	}
+	bus.Close()
+}
+
+func TestRunner_RunnerDoneIsSentAfterCancel(t *testing.T) {
+	for i := range 20 {
+		bus, err := event.NewBus(64, discardLogger())
+		if err != nil {
+			t.Fatalf("Failed to construct event bus: %v", err)
 		}
-	}()
-	<-durationCh
+		sink := bus.RegisterMC(64)
+		bus.Start()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		runner, _ := NewRunner(config.SaneDefaults(), ctx, noopRoundTripper{}, bus, nil, &mockWorkspace{})
+		totalTimer := timer.NewTimer(timer.DefaultClock{})
+		runner.RunScenarios(ctx, []ScenarioBundle{}, nil, &totalTimer)
+
+		gotDone := false
+		timeout := time.After(time.Second)
+	Wait:
+		for !gotDone {
+			select {
+			case e := <-sink:
+				gotDone = e.Kind == event.RunnerDone
+			case <-timeout:
+				break Wait
+			}
+		}
+		bus.Close()
+		if !gotDone {
+			t.Fatalf("Run %d: RunnerDone was dropped because ctx was already cancelled", i+1)
+		}
+	}
+}
+
+func TestRunner_StartDataSource_RunIdsAreUnique(t *testing.T) {
+	runner := &Runner{cfg: config.SaneDefaults()}
+	scenarios := []ScenarioBundle{
+		{
+			SeqId: 1,
+			Config: &scenario.ScenarioConfig{
+				Name:      "Matrix",
+				EnvMatrix: []map[string]map[string]any{{"a": {}, "b": {}}, {"x": {}, "y": {}}},
+			},
+			Count: 3,
+		},
+		{SeqId: 2, Config: &scenario.ScenarioConfig{Name: "Plain"}, Count: 2},
+	}
+
+	seen := map[event.RunId]bool{}
+	n := 0
+	for task := range runner.startDataSource(context.Background(), scenarios) {
+		n++
+		if seen[task.runId] {
+			t.Errorf("RunId %+v was given to more than one task", task.runId)
+		}
+		seen[task.runId] = true
+		if task.runId.SeqId != task.SeqId {
+			t.Errorf("Expected RunId.SeqId %d to match the blueprint's SeqId %d", task.runId.SeqId, task.SeqId)
+		}
+	}
+	if n != 4*3+2 {
+		t.Errorf("Expected 14 tasks (2x2 matrix x3 + 2), got %d", n)
+	}
 }
 
 func TestRunner_CartesianMath_TakePath(t *testing.T) {
@@ -152,22 +231,20 @@ func TestRunner_StartDataSource_MatrixFanOut(t *testing.T) {
 
 	scenarios := []ScenarioBundle{
 		{
-			ScenarioBlueprint: scenario.ScenarioBlueprint{
-				Config: &scenario.ScenarioConfig{
-					Name: "MatrixCheckout",
-					Env: map[string]any{
-						"base_url": "https://api.test",
-						"ttl":      30,
+			Config: &scenario.ScenarioConfig{
+				Name: "MatrixCheckout",
+				Env: map[string]any{
+					"base_url": "https://api.test",
+					"ttl":      30,
+				},
+				EnvMatrix: []map[string]map[string]any{
+					{
+						"admin": {"role": "admin", "ttl": 60},
+						"guest": {"role": "guest"},
 					},
-					EnvMatrix: []map[string]map[string]any{
-						{
-							"admin": {"role": "admin", "ttl": 60},
-							"guest": {"role": "guest"},
-						},
-						{
-							"success": {"expect": 200},
-							"decline": {"expect": 402},
-						},
+					{
+						"success": {"expect": 200},
+						"decline": {"expect": 402},
 					},
 				},
 			},
@@ -193,9 +270,8 @@ func TestRunner_StartDataSource_MatrixFanOut(t *testing.T) {
 			t.Fatalf("Expected 2 labels per task, got %v", task.labels)
 		}
 
-		expectedName := "MatrixCheckout_" + task.labels[0] + "_" + task.labels[1]
-		if task.getFullName() != expectedName {
-			t.Errorf("getFullName() = %s, expected %s", task.getFullName(), expectedName)
+		if task.Config.Name != "MatrixCheckout" {
+			t.Errorf("Expected the task to keep the base name, got %q", task.Config.Name)
 		}
 
 		if task.env["base_url"] != "https://api.test" {
@@ -241,14 +317,12 @@ func TestRunner_StartDataSource_NoMatrix(t *testing.T) {
 
 	scenarios := []ScenarioBundle{
 		{
-			ScenarioBlueprint: scenario.ScenarioBlueprint{
-				Config: &scenario.ScenarioConfig{
-					Name: "PlainScenario",
-					Env: map[string]any{
-						"key": "value",
-					},
-					EnvMatrix: nil,
+			Config: &scenario.ScenarioConfig{
+				Name: "PlainScenario",
+				Env: map[string]any{
+					"key": "value",
 				},
+				EnvMatrix: nil,
 			},
 		},
 	}
@@ -268,8 +342,8 @@ func TestRunner_StartDataSource_NoMatrix(t *testing.T) {
 	if len(task.labels) != 0 {
 		t.Errorf("Expected 0 labels, got %d", len(task.labels))
 	}
-	if task.getFullName() != "PlainScenario" {
-		t.Errorf("getFullName mutated base name unnecessarily: %s", task.getFullName())
+	if task.Config.Name != "PlainScenario" {
+		t.Errorf("Expected the base name to be unchanged, got %q", task.Config.Name)
 	}
 	if task.env["key"] != "value" {
 		t.Errorf("Env map was corrupted in standard execution")

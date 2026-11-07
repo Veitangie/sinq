@@ -4,45 +4,27 @@ The **Runner** executes the scenarios the Treewalker discovered.
 
 ## Concurrent Execution
 
-The unit of concurrency is the **scenario**, a whole workflow chain, not the individual request.
+The unit of concurrency is the **scenario**, not the individual request. `sinq` runs a fixed pool of workers (10 by default, set with `-w` / `--workers`), and each worker runs one scenario at a time. Requests inside a scenario always run in order; unrelated scenarios overlap.
 
-`sinq` runs a pool of workers (10 by default, set with `-w` / `--workers`). With 10 workers and 10 scenarios of 5 requests each, all 10 scenarios run at once.
+The Treewalker produces a list of scenario runs. The coordinator feeds them into a channel, and each worker pulls the next one when it finishes the current one.
 
-The 5 requests inside a scenario always run in order. A login-then-extract-token-then-poll chain behaves predictably, while unrelated scenarios still overlap.
+## Isolation and Shared State
 
-## Network & Session State
+Every scenario run starts with a fresh Lua state and its own `http.CookieJar`. If Leaf A and Leaf B both inherit `01_login.sinq`, each runs its own copy, and a cookie set in A is never visible to B.
 
-Workers run independently but share two things:
+Workers share:
 
-* **Connection pool.** All workers use one TCP transport pool, so keep-alive connections are reused across scenarios.
-* **Cookie isolation.** Each scenario run still gets its own `http.CookieJar`. A cookie set for Scenario A is not visible to Scenario B.
+* **The connection pool.** Keep-alive connections are reused across scenarios.
+* **The compiled script cache.** Each Lua block is compiled once and reused, keyed by a hash of its file, name, byte offset and contents.
+* **The response cache**, when a request opts in (below).
 
----
+## Response Caching & Request Collapsing
 
-## Concurrency Architecture
+A request opts into caching with `req.cache(true)` in `$PRE`, or `req.cache(key)` to share one response between all requests that use the same key. If several workers fire the same cached request at once, the first one sends it and the rest wait for its result (singleflight).
 
-The engine is a coordinator-worker pool.
+That shared call belongs to no single scenario, so it is bounded by `--cache-timeout` (default 10s) instead of `req_timeout`, and reads at most `--max-cache-size` (default 5 MiB) of body. Nothing is evicted: every cached response stays until the run ends.
 
-### The Coordinator-Worker Model
+## Cancellation
 
-The Treewalker emits a slice of scenario blueprints. The coordinator feeds them into a buffered channel, and each worker pulls the next blueprint when it finishes the current one, until the channel is empty.
-
-Every worker has its own Lua VM. If Leaf A and Leaf B both inherit `01_login.sinq`, each runs its own copy in its own VM.
-
-### AST Bytecode Caching & Request Collapsing
-
-A worker does not run a Lua block as raw text. It compiles the block to bytecode (an AST) first.
-
-So that 100 workers do not all compile the same `01_login.sinq` script at once, the Runner keeps one shared, thread-safe AST cache, keyed by a hash of the script's file, name, byte offset, and contents.
-
-`sinq` can also cache the HTTP responses themselves, opt-in per request via `req.cache(true)` in `$PRE`, or `req.cache(key)` to share one response between requests that call it with the same key. With it enabled, the cache doubles as a singleflight coalescer: if several workers fire the identical request (or requests with the same key) at the same time, the first one runs it and the rest wait and take its result. Because that one request is shared across scenarios rather than belonging to any single one, it can't reuse a scenario's `req_timeout`; it's bounded by `--cache-timeout` instead (default 10s), reading up to `--max-cache-size` (default 5 MiB) of body. The cache has no eviction: every distinct cached request stays until the run ends.
-
-### Context Cancellation
-
-The Runner drives the suite lifecycle with Go's `context`.
-
-When a scenario exceeds its `timeout`, or you send `SIGINT` / `Ctrl+C`, the context is canceled:
-
-* in-flight requests are dropped,
-* sleeping `$RETRY` loops wake and stop,
-* the worker marks the scenario `Aborted` and skips the rest of its requests.
+* **Scenario `timeout`:** in-flight requests are dropped, sleeping `$RETRY` loops wake, and the scenario ends with an **Error** (deadline exceeded).
+* **`SIGINT` / `Ctrl+C`:** the same, but running scenarios are marked **Aborted** and the remaining ones are not started.

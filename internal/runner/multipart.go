@@ -72,7 +72,8 @@ func makeMultipartBody(data multipartData, workspace Workspace) ([]byte, string,
 		}
 	}
 
-	return body.Bytes(), mw.FormDataContentType(), mw.Close()
+	err = mw.Close()
+	return body.Bytes(), mw.FormDataContentType(), err
 }
 
 const (

@@ -2,9 +2,9 @@
 
 # Zsh completion script for the sinq CLI tool.
 #
-# sinq is a command-line test runner and execution tool.
-# This script provides autocompletion for boolean flags, options with choices,
-# value options, repeatable flags, file path arguments, and directory positional arguments.
+# Place it in a directory on your $fpath, e.g.:
+#   /usr/share/zsh/site-functions/_sinq  (system-wide)
+#   ~/.zfunc/_sinq                       (user-level, with fpath+=~/.zfunc before compinit)
 
 _sinq() {
     _arguments -s -S \
@@ -27,7 +27,7 @@ _sinq() {
         '*'{-t,--tag}'[Execute only scenarios that have at least one of passed tags]:tag name' \
         '*'{-n,--name}'[Execute only scenarios which names match at least one of passed regular expressions]:test name' \
         '--no-spinner[Disable spinner animation]' \
-        '--dump-on-failure[Print full request and response data on failed assertion]' \
+        '--dump-on-failure[Print full request and response data of failed, errored or aborted requests]' \
         '--secrets-file[Path to JSON-formatted secrets file]:file:_files' \
         '*--no-tag[Do not execute scenarios that have the tag]:tag name' \
         '*--no-name[Do not execute scenarios which names match the regular expression]:test name' \

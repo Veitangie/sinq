@@ -2,8 +2,10 @@
 
 Thank you for your interest in making sinq a better tool for everyone!
 
-At this time I'm not accepting any pull requests or external code contributions for this project. However, if you still think you have a vision or an idea of how sinq could become better - you're always welcome to contribute in other ways:
-- join discussions, 
+At this time I'm not accepting pull requests or external contributions to the code. Documentation is the exception: pull requests that improve the `docs/` folder are welcome. Like the rest of the repository, the documentation is licensed under the GPLv3, and your changes to it are licensed under the GPLv3 as well.
+
+If you think you have a vision or an idea of how sinq could become better, you're always welcome to contribute in other ways:
+- join [discussions](https://github.com/Veitangie/sinq/discussions),
 - report bugs and vulnerabilities (make sure you read the [policy](SECURITY.md) first),
 - open issues for feature requests.
 

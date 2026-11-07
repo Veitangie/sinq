@@ -4,7 +4,9 @@
 
 `sinq` is free and Open Source software, distributed under the GNU General Public License v3 (GPLv3). 
 
-However, at this time, **the project operates on a closed contribution model**. While you are free to fork, read, and use the code according to the GPLv3 license, I am currently not accepting pull requests or feature contributions from the community. This allows me to keep my sanity, as this is a single man project. Possibly subject to change in the future.
+However, at this time, **the project operates on a closed contribution model for code**. While you are free to fork, read, and use the code according to the GPLv3 license, I am currently not accepting code pull requests or feature contributions from the community. This allows me to keep my sanity, as this is a single man project. Possibly subject to change in the future.
+
+Documentation is the exception: pull requests that improve the docs are welcome, under the same GPLv3 license. See [Community](community.md) for how to report bugs, ask questions and contribute.
 
 ## How do I pass variables between requests?
 
@@ -27,9 +29,7 @@ Authorization: Bearer ${AUTH_TOKEN}
 
 ## How does concurrency work in `sinq`?
 
-When you point `sinq` at a root directory, it recursively scans for files. **Every leaf directory (a folder with no subfolders) becomes an isolated "Scenario".** 
-
-`sinq` runs all of these Scenarios concurrently by default, bounded only by the `-w/--workers` flag (which defaults to 10). Each Scenario gets its own Lua VM and environment sandbox, so there is no shared state to race on.
+Every leaf directory (a folder with no subfolders) is one scenario. Scenarios run concurrently, up to `-w/--workers` at a time (default 10), and requests within a scenario run in order. Each scenario run gets a fresh Lua state and cookie jar, so there is no shared state to race on.
 
 ## Can I share state between different scenarios?
 
@@ -129,9 +129,7 @@ Skipped requests bypass the actual network call and all subsequent hooks (`$RETR
 
 ## What happens if an API returns a massive payload?
 
-`sinq` buffers responses in memory by default so that Lua scripts can parse them. To prevent out-of-memory crashes on massive payloads (like downloading a 2GB ISO), `sinq` enforces a `max_body` setting (configurable in `.scenario` files, defaults to 1MiB). 
-
-If a response exceeds this limit, `sinq` safely truncates it and flags the response with `oversized = true`.
+Responses are buffered in memory so Lua can read them, up to `max_body` (a `.scenario` setting, default 1MiB). A larger response is truncated and flagged with `res.oversized = true`.
 
 ## How do I download/save a response directly to disk?
 
@@ -142,11 +140,11 @@ GET ${env.BASE_URL}/download-report
 
 $PRE{ req.saveResponseTo("path/to/report.pdf") }
 ```
-When using `saveResponseTo`, the `res.bodyRaw` and `res.bodyJson` fields will remain empty to save memory.
+With `saveResponseTo`, `res.bodyRaw`, `res.json` and `res.extractBodyJson` are `nil`. `res.size` holds the bytes written, and `sinq.assert.fileMatches` compares the saved file against an expected one.
 
 ## How do I handle polling or wait for a job to complete?
 
-You can write retry policies inside the `$RETRY` hook. It executes immediately after the response is received. It must return the number of milliseconds to wait before retrying, or a negative number to stop retrying.
+You can write retry policies inside the `$RETRY` hook. It executes immediately after every attempt. It must return the number of milliseconds to wait before retrying, or a negative number to stop retrying.
 
 ```http
 GET ${env.BASE_URL}/job-status
@@ -160,17 +158,32 @@ $RETRY{
     return -1
 }
 ```
-The `sinq.retry.*` helpers wrap this pattern, e.g. `sinq.retry.when(condition, delay)`.
+The `sinq.retry.*` helpers wrap this pattern, e.g. `sinq.retry.when(condition, delay)`. If an attempt can get no response at all, check `res.error` before calling `res.json()` (see the next question).
+
+## How do I retry when the server is down or slow to start?
+
+`$RETRY` also runs when an attempt gets no response at all. Then `res.error` is set, with a `kind` such as `refused`, `timeout` or `dns`, and the response fields are `nil`:
+
+```http
+GET ${env.BASE_URL}/health
+
+$RETRY{
+    -- Wait for the service to come up, for at most max_retries attempts
+    return sinq.retry.when(res.error ~= nil and res.error.kind == "refused", 1000)
+}
+```
+
+If the last attempt still got no response, the request is reported as an error. See [Send Failures](lua-api.md#send-failures-reserror) for the full list of kinds.
 
 ## How do I override a deeply nested env/secret key or value?
 
-If you have a complex configuration object and you need to override a specific nested key from the command line, you can use dot-notation. `sinq` will automatically expand the dots into a nested JSON object structure.
+Use dot-notation; the dots expand into nested objects.
 
 ```bash
 sinq -e "API.TIMEOUT=500" -s "DB.CREDENTIALS.PASSWORD=secret123"
 ```
 
-Additionally, because the CLI arguments are unmarshaled via JSON under the hood, you can pass entire JSON objects or arrays as values:
+Values are parsed as JSON, so objects and arrays work too:
 
 ```bash
 sinq -e 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]'

@@ -28,10 +28,21 @@ import (
 func withCapturedIO(t *testing.T, out, err io.Writer) {
 	t.Helper()
 	oldOut, oldErr := stdout, stderr
-	stdout, stderr = out, spinq.WriterPassthrough{Writer: err}
+	stdout, stderr = &lockedWriter{w: out}, spinq.WriterPassthrough{Writer: &lockedWriter{w: err}}
 	t.Cleanup(func() {
 		stdout, stderr = oldOut, oldErr
 	})
+}
+
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 type erroringWriter struct{ err error }
@@ -147,6 +158,7 @@ $ASSERT{
 		tmpDir,
 	}
 
+	withCapturedIO(t, io.Discard, io.Discard)
 	exitCode := sinq(args)
 
 	if exitCode != 0 {
@@ -214,6 +226,7 @@ $POST{
 		tmpDir,
 	}
 
+	withCapturedIO(t, io.Discard, io.Discard)
 	exitCode := sinq(args)
 
 	if exitCode == 0 {
@@ -229,13 +242,7 @@ func TestSinq_EndToEnd_Stress(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	oldStderr := os.Stderr
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err == nil {
-		os.Stderr = devNull
-		defer devNull.Close()
-	}
-	defer func() { os.Stderr = oldStderr }()
+	withCapturedIO(t, io.Discard, io.Discard)
 
 	tmpDir := t.TempDir()
 	numScenarios := 1000
@@ -283,13 +290,7 @@ func TestSinq_CLI_BasicFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldStdout, oldStderr := os.Stdout, os.Stderr
-			devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-			os.Stdout, os.Stderr = devNull, devNull
-			defer func() {
-				os.Stdout, os.Stderr = oldStdout, oldStderr
-				devNull.Close()
-			}()
+			withCapturedIO(t, io.Discard, io.Discard)
 
 			if got := sinq(tt.args); got != tt.wantCode {
 				t.Errorf("sinq(%v) = %d; want %d", tt.args, got, tt.wantCode)
@@ -311,14 +312,7 @@ func TestSinq_CLI_OutputFormatters(t *testing.T) {
 		tmpDir,
 	}
 
-	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	os.Stdout, os.Stderr = devNull, devNull
-	defer func() {
-		os.Stdout, os.Stderr = oldStdout, oldStderr
-		devNull.Close()
-	}()
-
+	withCapturedIO(t, io.Discard, io.Discard)
 	sinq(args)
 
 	if _, err := os.Stat(outFilePath); os.IsNotExist(err) {
@@ -335,13 +329,7 @@ func TestSinq_CLI_ListScenarios(t *testing.T) {
 	args1 := []string{"--list", "--tag", "api", tmpDir}
 	args2 := []string{"--list", "--tag", "nonexistent", tmpDir}
 
-	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	os.Stdout, os.Stderr = devNull, devNull
-	defer func() {
-		os.Stdout, os.Stderr = oldStdout, oldStderr
-		devNull.Close()
-	}()
+	withCapturedIO(t, io.Discard, io.Discard)
 
 	if got := sinq(args1); got != 0 {
 		t.Errorf("sinq(--list --tag api) exited with %d; want 0", got)
@@ -369,13 +357,7 @@ func TestSinq_CLI_HandleReporting_Failure(t *testing.T) {
 		tmpDir,
 	}
 
-	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	os.Stdout, os.Stderr = devNull, devNull
-	defer func() {
-		os.Stdout, os.Stderr = oldStdout, oldStderr
-		devNull.Close()
-	}()
+	withCapturedIO(t, io.Discard, io.Discard)
 
 	if got := sinq(args); got != 1 {
 		t.Errorf("sinq() with failing test exited with %d; want 1", got)
@@ -444,13 +426,7 @@ func TestSinq_EndToEnd_SingleFile(t *testing.T) {
 		filePath,
 	}
 
-	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	os.Stdout, os.Stderr = devNull, devNull
-	defer func() {
-		os.Stdout, os.Stderr = oldStdout, oldStderr
-		devNull.Close()
-	}()
+	withCapturedIO(t, io.Discard, io.Discard)
 
 	exitCode := sinq(args)
 	if exitCode != 0 {
@@ -468,13 +444,7 @@ func TestSinq_EndToEnd_SingleFile_ParseFailure(t *testing.T) {
 		filePath,
 	}
 
-	oldStdout, oldStderr := os.Stdout, os.Stderr
-	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	os.Stdout, os.Stderr = devNull, devNull
-	defer func() {
-		os.Stdout, os.Stderr = oldStdout, oldStderr
-		devNull.Close()
-	}()
+	withCapturedIO(t, io.Discard, io.Discard)
 
 	exitCode := sinq(args)
 	if exitCode == 0 {
@@ -499,9 +469,11 @@ func TestSinq_EndToEnd_StupidFilename(t *testing.T) {
 		filePath,
 	}
 
+	out := &bytes.Buffer{}
+	withCapturedIO(t, out, out)
 	exitCode := sinq(args)
 	if exitCode != 0 {
-		t.Fatalf("BUG FOUND: Expected sinq to succeed even with slashes in the request name, but got exit code %d", exitCode)
+		t.Fatalf("BUG FOUND: Expected sinq to succeed even with slashes in the request name, but got exit code %d:\n%s", exitCode, out)
 	}
 }
 
@@ -759,7 +731,7 @@ func TestSinq_EndToEnd_CountJUnitReportIsValid(t *testing.T) {
 	defer srv.Close()
 
 	dir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(dir, "probe.sinq"), []byte(fmt.Sprintf("GET %s/probe\n$ASSERT{ sinq.assert.code(200) }\n", srv.URL)), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "probe.sinq"), fmt.Appendf(nil, "GET %s/probe\n$ASSERT{ sinq.assert.code(200) }\n", srv.URL), 0644)
 	_ = os.WriteFile(filepath.Join(dir, "config.scenario"), []byte(`{"name": "count", "tags": ["smoke"]}`), 0644)
 	outFile := filepath.Join(t.TempDir(), "report.xml")
 
@@ -800,13 +772,215 @@ func TestSinq_EndToEnd_CountJUnitReportIsValid(t *testing.T) {
 	if report.Tests != 3 || len(report.Suites) != 3 {
 		t.Fatalf("Expected 3 tests in 3 suites, one per run, got %d tests in %d suites\n%s", report.Tests, len(report.Suites), data)
 	}
+
+	names := map[string]bool{}
 	for i, suite := range report.Suites {
-		if suite.Name != "count" || suite.Tests != 1 || len(suite.TestCases) != 1 || suite.TestCases[0].Name != "probe.sinq" {
+		names[suite.Name] = true
+		if suite.Tests != 1 || len(suite.TestCases) != 1 || suite.TestCases[0].Name != "probe.sinq" {
 			t.Errorf("Expected suite %d to be a full copy of the scenario, got %+v", i, suite)
 		}
 		if len(suite.Properties) != 1 || len(suite.Properties[0].Property) != 1 ||
 			suite.Properties[0].Property[0].Name != "tags" || suite.Properties[0].Property[0].Value != "smoke" {
 			t.Errorf("Expected suite %d to carry the tags property, got %+v", i, suite.Properties)
 		}
+	}
+	for _, want := range []string{"count#1", "count#2", "count#3"} {
+		if !names[want] {
+			t.Errorf("Expected a suite named %q, got %v", want, names)
+		}
+	}
+}
+
+func TestSinq_EndToEnd_FileMatches(t *testing.T) {
+	const chunk = 32 << 10
+	big := bytes.Repeat([]byte("0123456789abcdef"), 5*chunk/16)
+	bigChanged := bytes.Clone(big)
+	bigChanged[len(bigChanged)-1] = 'X'
+
+	cases := []struct {
+		name     string
+		served   []byte
+		expected []byte
+		match    bool
+	}{
+		{"same content", []byte("hello"), []byte("hello"), true},
+		{"both empty", []byte{}, []byte{}, true},
+		{"same length, different content", []byte("hello"), []byte("hellO"), false},
+		{"response shorter", []byte("hell"), []byte("hello"), false},
+		{"response longer", []byte("hello!"), []byte("hello"), false},
+		{"response empty", []byte{}, []byte("hello"), false},
+		{"several chunks, same", big, big, true},
+		{"several chunks, last byte differs", big, bigChanged, false},
+		{"exactly one chunk vs one byte more", big[:chunk], big[:chunk+1], false},
+		{"one byte more vs exactly one chunk", big[:chunk+1], big[:chunk], false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write(tc.served)
+			}))
+			defer srv.Close()
+
+			dir := t.TempDir()
+			_ = os.WriteFile(filepath.Join(dir, "expected.bin"), tc.expected, 0644)
+			_ = os.WriteFile(filepath.Join(dir, "download.sinq"), fmt.Appendf(nil,
+				"$PRE{ req.saveResponseTo(\"out/got.bin\") }\nGET %s/file\n\n$ASSERT{ sinq.assert.fileMatches(\"expected.bin\") }\n", srv.URL), 0644)
+
+			out := &bytes.Buffer{}
+			withCapturedIO(t, out, io.Discard)
+			exitCode := sinq([]string{"--no-spinner", "--color", "never", dir})
+
+			if tc.match && exitCode != 0 {
+				t.Errorf("Expected matching files to pass, got exit code %d:\n%s", exitCode, out)
+			}
+			if !tc.match && (exitCode == 0 || !strings.Contains(out.String(), "Saved response and file did not match")) {
+				t.Errorf("Expected different files to fail the assertion, got exit code %d:\n%s", exitCode, out)
+			}
+		})
+	}
+}
+
+func TestSinq_EndToEnd_RootScenarioIsNamedAfterItsFolder(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	dir := filepath.Join(t.TempDir(), "checkout")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "probe.sinq"), fmt.Appendf(nil, "GET %s/probe\n$ASSERT{ sinq.assert.code(200) }\n", srv.URL), 0644)
+
+	suiteNames := func(t *testing.T, path string) []string {
+		t.Helper()
+		outFile := filepath.Join(t.TempDir(), "report.xml")
+		withCapturedIO(t, io.Discard, io.Discard)
+		if exitCode := sinq([]string{"--no-spinner", "--format", "junit", "--out", outFile, path}); exitCode != 0 {
+			t.Fatalf("Expected a passing run for %q, got exit code %d", path, exitCode)
+		}
+		data, err := os.ReadFile(outFile)
+		if err != nil {
+			t.Fatalf("Failed to read JUnit report: %v", err)
+		}
+		var report struct {
+			Suites []struct {
+				Name string `xml:"name,attr"`
+			} `xml:"testsuite"`
+		}
+		if err := xml.Unmarshal(data, &report); err != nil {
+			t.Fatalf("Invalid JUnit XML: %v\n%s", err, data)
+		}
+		names := []string{}
+		for _, s := range report.Suites {
+			names = append(names, s.Name)
+		}
+		return names
+	}
+
+	cases := []struct {
+		name  string
+		chdir bool
+		path  string
+		want  string
+	}{
+		{"absolute path", false, dir, "checkout"},
+		{"trailing slash", false, dir + string(filepath.Separator), "checkout"},
+		{"dot from inside the folder", true, ".", "checkout"},
+		{"dot slash from inside the folder", true, "." + string(filepath.Separator), "checkout"},
+		{"parent-relative path", true, filepath.Join("..", "checkout"), "checkout"},
+		{"single file by bare name", true, "probe.sinq", "probe.sinq"},
+		{"single file by relative path", true, filepath.Join("..", "checkout", "probe.sinq"), "probe.sinq"},
+		{"single file by absolute path", false, filepath.Join(dir, "probe.sinq"), "probe.sinq"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.chdir {
+				t.Chdir(dir)
+			}
+			if got := suiteNames(t, tc.path); len(got) != 1 || got[0] != tc.want {
+				t.Errorf("Expected one scenario named %q for path %q, got %v", tc.want, tc.path, got)
+			}
+		})
+	}
+}
+
+func TestSinq_CountZeroIsRejected(t *testing.T) {
+	var sent atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "probe.sinq"), fmt.Appendf(nil, "GET %s/probe\n", srv.URL), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config.scenario"), []byte(`{"name": "probe"}`), 0644)
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "alone", args: []string{"--no-spinner", "--count", "0", dir}},
+		{name: "with a filter that excludes the scenario", args: []string{"--no-spinner", "--count", "0", "--name", "nomatch", dir}},
+		{name: "with a filter that includes the scenario", args: []string{"--no-spinner", "--count", "0", "--name", "probe", dir}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sent.Store(0)
+			out, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
+			withCapturedIO(t, out, errBuf)
+
+			if code := sinq(tt.args); code == 0 {
+				t.Errorf("Expected --count 0 to be rejected with a non-zero exit code\nstdout:\n%s\nstderr:\n%s", out.String(), errBuf.String())
+			}
+			if !strings.Contains(strings.ToLower(errBuf.String()), "count") {
+				t.Errorf("Expected the error to mention --count, got %q", errBuf.String())
+			}
+			if sent.Load() != 0 {
+				t.Errorf("Expected no requests for a rejected --count 0, got %d", sent.Load())
+			}
+		})
+	}
+}
+
+func TestSinq_FiltersMatchingNothingFail(t *testing.T) {
+	var sent atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "probe.sinq"), fmt.Appendf(nil, "GET %s/probe\n", srv.URL), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config.scenario"), []byte(`{"name": "probe", "tags": ["smoke"]}`), 0644)
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "name typo", args: []string{"--no-spinner", "--name", "prboe", dir}},
+		{name: "tag typo", args: []string{"--no-spinner", "--tag", "smoek", dir}},
+		{name: "exclude everything", args: []string{"--no-spinner", "--no-tag", "smoke", dir}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sent.Store(0)
+			out, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
+			withCapturedIO(t, out, errBuf)
+
+			if code := sinq(tt.args); code == 0 {
+				t.Errorf("Expected a non-zero exit code when the filters leave nothing to run\nstdout:\n%s\nstderr:\n%s", out.String(), errBuf.String())
+			}
+			if !strings.Contains(errBuf.String(), "No scenarios to run") {
+				t.Errorf("Expected the no-scenarios error, got %q", errBuf.String())
+			}
+			if sent.Load() != 0 {
+				t.Errorf("Expected no requests, got %d", sent.Load())
+			}
+		})
 	}
 }

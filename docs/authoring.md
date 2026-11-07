@@ -8,23 +8,23 @@ Two leaf directories that share a setup file, four requests each.
 
 ```
 api/
-  00_setup.sinq          # health check + login, shared by both scenarios
+  setup.sinq          # health check + login, shared by both scenarios
   users/
     users.scenario       # tags this scenario "users"
-    01_users.sinq        # create a user, then read it back
+    users.sinq        # create a user, then read it back
   orders/
     orders.scenario      # tags this scenario "orders"
-    01_orders.sinq       # create an order, then cancel it
+    orders.sinq       # create an order, then cancel it
 ```
 
-`api/` has subdirectories, so it is not a scenario itself. `api/users/` and `api/orders/` are leaf directories, so each one is a scenario. Both inherit `00_setup.sinq` and run it first:
+`api/` has subdirectories, so it is not a scenario itself. `api/users/` and `api/orders/` are leaf directories, so each one is a scenario. Both inherit `setup.sinq` and run it first:
 
 - **`users`**: Health check &rarr; Log in &rarr; Create user &rarr; Fetch user
 - **`orders`**: Health check &rarr; Log in &rarr; Create order &rarr; Cancel order
 
 ### The shared setup file
 
-**`api/00_setup.sinq`** holds two requests, separated by `###`. The text after `###` names the request in `--list` output and in reports.
+**`api/setup.sinq`** holds two requests, separated by `###`. The text after `###` names the request in `--list` output and in reports.
 
 ```text
 ### Health check
@@ -56,7 +56,7 @@ $POST{ AUTH_TOKEN = res.json().token }
 { "tags": ["users"] }
 ```
 
-**`api/users/01_users.sinq`**:
+**`api/users/users.sinq`**:
 
 ```text
 ### Create user
@@ -93,7 +93,7 @@ Same shape, different resource.
 { "tags": ["orders"] }
 ```
 
-**`api/orders/01_orders.sinq`**:
+**`api/orders/orders.sinq`**:
 
 ```text
 ### Create order
@@ -140,7 +140,7 @@ Content-Type: application/json
 $ASSERT{ sinq.assert.code(env.expect, "wrong status for " .. env.role) }
 ```
 
-Four runs: `admin`+`card`, `admin`+`crypto`, `guest`+`card`, `guest`+`crypto`. The axis labels are appended to the scenario name.
+Four runs: `admin`+`card`, `admin`+`crypto`, `guest`+`card`, `guest`+`crypto`. The console report lists each run's labels under the scenario name, and JUnit reports append them to the suite name (`checkout_admin_card`).
 
 ### Upload a file
 
@@ -228,9 +228,10 @@ res.headers["Name"]          string, or array of strings if the header repeats
 res.bodyRaw                  raw body string
 res.json()                   parse bodyRaw; fails the request on invalid JSON
 res.extractBodyJson()        -> (table, err); does not throw
-res.attempt                  retry iteration
+res.attempt                  current attempt, from 1
 res.oversized                true if the body was truncated at max_body
 res.size                     bytes written (only set after req.saveResponseTo)
+res.error                    nil, or { kind, message } when the attempt got no response
 ```
 
 `$PRE` (setup and file I/O):
@@ -303,29 +304,35 @@ Reach for these flags, roughly in order:
 | --- | --- |
 | `--list` | Confirm which files make up the scenario and in what order. |
 | `-V` / `--verbose` | Per-stage timings, so you can see which stage is slow or hanging. |
-| `--dump-on-failure` | Print the full request and response on a failed assertion. |
+| `--dump-on-failure` | Print the full request and response of a request that failed, errored or was aborted. |
 | `-p` / `--print` | Attach your Lua `print` output to the report. |
 | `-L debug` | Everything, including request and response bodies. Avoid in CI with retained logs; it can expose secrets. |
 
 ### Failure vs error
 
 - **Failure**: an assertion said no (`sinq.assert.*`). The service responded and the check did not pass. JUnit `<failure>`.
-- **Error**: something broke before an assertion could run, such as a Lua exception, a timeout, a refused connection, or a malformed request. JUnit `<error>`.
+- **Error**: something broke before an assertion could run, such as a Lua exception, a malformed request, or a request that still got no response after `$RETRY` (refused, timed out, ...; see [`res.error`](lua-api.md#send-failures-reserror)). JUnit `<error>`.
 
 ### Error messages
 
 | Message | Cause |
 | --- | --- |
 | `Empty request (did you add ### ...)` | The file, or the part after a `###`, has no request line. |
-| `Expected method to be defined, got nil` | The first non-hook line is not `METHOD url`. |
+| `<line>: URL is not absolute, unable to derive scheme` | The URL on the request line has no scheme (`/api/users` instead of `${env.BASE_URL}/api/users`). |
+| `<line>: Unsupported scheme: ...` | The URL's scheme is not `http` or `https`. |
+| `<line>: Empty host in URL` | The URL has a scheme but no host (`https:///path`). |
+| `<line>: Malformed header field, ...` | A header line has no `:` right after its name. |
 | `<file>:<line>:<col> Failed to parse lua script` | Lua syntax error in a hook or inline script. |
 | `Error occurred while executing lua script` | Lua runtime error: a nil index, an explicit `error(...)`, and so on. |
 | `Pre script is defined more than once` | Two `$PRE` (or `$ASSERT`, or `$POST`) blocks in one request. |
 | `Too many retries` | `$RETRY` kept returning a non-negative number past `max_retries`. |
-| `Request has more than one body ...` | A literal body plus `req.attach` or `req.multipart`. |
+| `Request has both body and a file source` | A literal body plus `req.attach`. |
+| `Request has more than one body ...` | `req.multipart` together with a literal body or `req.attach`. |
 | `req.attach: invalid file path ...` / `req.multipart: invalid source path ...` | The path is absolute, missing, or a directory. Paths are relative to the `.sinq` file. |
 | `Failed to parse scenario config` | Invalid JSON in a `.scenario` file. |
 | `Failed to parse env matrix: keys ... have non-object values` | An `env_matrix` axis value is not an object. |
 | `Non positive request timeout` (or `script` / `scenario`) | A timeout in a `.scenario` file is `0` or negative. |
 | `Failed to extract body as json` | `res.json()` on a body that is not valid JSON. |
-| `Context cancelled` / `connection refused` | The run was interrupted, or the target was unreachable. Reported as an error, not a failure. |
+| `request timeout` | The last attempt ran out of `req_timeout`. `$RETRY` saw it as `res.error.kind == "timeout"`. |
+| `... connection refused` and other network messages | The last attempt got no response. `$RETRY` saw it on `res.error`. |
+| `Context cancelled` / `context deadline exceeded` | The run was interrupted, or the scenario's `timeout` ran out. These skip `$RETRY`. |

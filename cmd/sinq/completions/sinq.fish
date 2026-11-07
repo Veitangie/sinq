@@ -25,7 +25,7 @@ complete -c sinq -s c -l count      -r -d 'Number of launches for every scenario
 complete -c sinq -s t -l tag        -r -d 'Execute only scenarios that have at least one of passed tags'
 complete -c sinq -s n -l name       -r -d 'Execute only scenarios which names match at least one of passed regular expressions'
 complete -c sinq      -l no-spinner -d 'Disable spinner animation'
-complete -c sinq      -l dump-on-failure -d 'Print full request and response data on failed assertion'
+complete -c sinq      -l dump-on-failure -d 'Print full request and response data of failed, errored or aborted requests'
 complete -c sinq      -l secrets-file -r -F -d 'Path to JSON-formatted secrets file'
 complete -c sinq      -l no-tag     -r -d 'Do not execute scenarios that have the tag'
 complete -c sinq      -l no-name    -r -d 'Do not execute scenarios which names match the regular expression'

@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -26,7 +25,7 @@ func newTestCachedRequestProcessor(t *testing.T, transport http.RoundTripper) *c
 		transport:    transport,
 		maxCacheSize: config.DataSize{ByteAmount: 1 << 20, Unit: config.MiByte},
 		cacheTimeout: 5 * time.Second,
-		logger:       slog.Default(),
+		eb:           newTestBus(t),
 	}
 }
 
@@ -120,7 +119,7 @@ func TestCachedRequestProcessor_PanicDuringProcess(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.invalid/", nil)
 	ws := &mockWorkspace{FS: fstest.MapFS{}}
 
-	ch := sp.process("hash-panic", *req, "", panicking, ws)
+	ch := sp.process("hash-panic", *req, "", panicking, ws, 1)
 	res := <-ch
 	if res.Err == nil {
 		t.Fatal("expected an error surfaced from the recovered panic, got nil")
@@ -143,14 +142,21 @@ func TestCachedRequestProcessor_CacheHit(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.invalid/", nil)
 	ws := &mockWorkspace{FS: fstest.MapFS{}}
 
-	first := <-sp.process("hash-cache", *req, "", closedBody(""), ws)
+	first := <-sp.process("hash-cache", *req, "", closedBody(""), ws, 1)
 	if first.Err != nil {
 		t.Fatalf("first request failed: %v", first.Err)
 	}
 
-	second := <-sp.process("hash-cache", *req, "", closedBody(""), ws)
+	second := <-sp.process("hash-cache", *req, "", closedBody(""), ws, 2)
 	if second.Err != nil {
 		t.Fatalf("second (cached) request failed: %v", second.Err)
+	}
+
+	if r := first.Val.(intermediate); r.fromCache || r.leaderToken != 1 {
+		t.Errorf("expected the first result unmarked with token 1, got fromCache=%v token=%d", r.fromCache, r.leaderToken)
+	}
+	if r := second.Val.(intermediate); !r.fromCache || r.leaderToken != 1 {
+		t.Errorf("expected the cached result marked fromCache with the first caller's token 1, got fromCache=%v token=%d", r.fromCache, r.leaderToken)
 	}
 
 	mu.Lock()
@@ -173,7 +179,7 @@ func TestCachedRequestProcessor_GetBodyError(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.invalid/", nil)
 	ws := &mockWorkspace{FS: fstest.MapFS{}}
 
-	res := <-sp.process("hash-getbody-err", *req, "", failingBody, ws)
+	res := <-sp.process("hash-getbody-err", *req, "", failingBody, ws, 1)
 	if res.Err == nil {
 		t.Fatal("expected an error when getBody fails, got nil")
 	}
@@ -187,7 +193,7 @@ func TestCachedRequestProcessor_TransportError(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.invalid/", nil)
 	ws := &mockWorkspace{FS: fstest.MapFS{}}
 
-	res := <-sp.process("hash-transport-err", *req, "", closedBody(""), ws)
+	res := <-sp.process("hash-transport-err", *req, "", closedBody(""), ws, 1)
 	if res.Err == nil {
 		t.Fatal("expected an error when the transport fails, got nil")
 	}

@@ -52,7 +52,7 @@ func NewParser(writer io.Writer) Parser {
 	flagSet.StringVarP(&result.Out, "out", "o", "", "-o path/to/file.out")
 	flagSet.Var(DataSizeValue{&result.MaxCacheSize}, "max-cache-size", "--max-cache-size 10MiB")
 	flagSet.Var(PositiveDurationValue{&result.CacheTimeout}, "cache-timeout", "--cache-timeout 30s")
-	flagSet.UintVarP(&result.Count, "count", "c", result.Count, "--count 1")
+	flagSet.VarP(PositiveIntValue{&result.Count}, "count", "c", "--count 1")
 	flagSet.Var(LuaPathsValue{&result.LuaPaths}, "plugins", "--plugins /path/to/lua/dir")
 	flagSet.StringSliceVarP(&result.TagsInclude, "tag", "t", result.TagsInclude, "-t goodTag")
 	flagSet.StringSliceVar(&result.TagsExclude, "no-tag", result.TagsExclude, "--no-tag badTag")

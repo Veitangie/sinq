@@ -15,7 +15,7 @@ Multiple paths may be listed and are scanned independently.
 | Flag | Value | Default | Notes |
 | --- | --- | --- | --- |
 | `-w, --workers` | int | `10` | Number of scenarios run concurrently. Must be positive. |
-| `-c, --count` | uint | `1` | Run every scenario this many times. Multiplies with `env_matrix` variants, so a scenario with a 4-way matrix and `--count 3` runs 12 times. |
+| `-c, --count` | int | `1` | Run every scenario this many times. Must be positive. Multiplies with `env_matrix` variants, so a scenario with a 4-way matrix and `--count 3` runs 12 times. With more than one run, each is reported with its run number, counting from 1, after the scenario name (`checkout#2`). |
 | `-i, --insecure` | | off | Skip TLS certificate verification. |
 | `-u, --unrestricted` | | off | Load the Lua `os` and `io` libraries. This disables the script sandbox; only use it with files you trust. See [Libraries](lua-api.md#12-libraries). |
 | `-l, --list` | | | Parse the paths and print the scenarios that would run, without executing them. |
@@ -35,7 +35,7 @@ How the four combine:
 - Across flag types the conditions are **AND**-ed: a scenario must satisfy the tag filter *and* the name filter to run.
 - The `--no-*` filters win: if a scenario matches an exclude, it is skipped even if it also matches an include.
 
-A scenario's name comes from its `.scenario` file (`"name"`), defaulting to the leaf directory path. Its tags are the union of the `"tags"` arrays in every `.scenario` file along its path.
+A scenario's name comes from its `.scenario` file (`"name"`), defaulting to the leaf directory's path relative to the folder you run `sinq` on (the folder's own name for a scenario directly in it, the file name for a single `.sinq` file). Filters match this base name, without matrix labels or run numbers. Its tags are the union of the `"tags"` arrays in every `.scenario` file along its path.
 
 ### Output and reporting
 
@@ -48,7 +48,7 @@ A scenario's name comes from its `.scenario` file (`"name"`), defaulting to the 
 | `-p, --print` | | off | Capture Lua `print` / `io.write` output and attach it to the scenario result. Without this, that output is discarded. |
 | `-C, --color` | `always` \| `never` \| `auto` | `auto` | Terminal color. `auto` disables color when the output is not a TTY or when a CI/`NO_COLOR` environment variable is set. |
 | `--no-spinner` | | off | Disable the live spinner / progress bar. |
-| `--dump-on-failure` | | off | Print the full request and response on a failed assertion. May expose secrets; use with care in CI where logs are retained. |
+| `--dump-on-failure` | | off | Print the full request and response of a request that failed, errored or was aborted. May expose secrets; use with care in CI where logs are retained. |
 | `-L, --log-level` | `debug` \| `info` \| `warn` \| `error` | `warn` | Diagnostic log verbosity, written to stderr. `debug` includes request/response bodies and may expose secrets. |
 
 ### Overrides and inputs
@@ -62,7 +62,7 @@ A scenario's name comes from its `.scenario` file (`"name"`), defaulting to the 
 
 ### Caching
 
-These tune the opt-in per-request response cache (`req.cache(true)` or `req.cache(key)`); see [Execution Runner](runner.md#ast-bytecode-caching-request-collapsing).
+These tune the opt-in per-request response cache (`req.cache(true)` or `req.cache(key)`); see [Execution Runner](runner.md#response-caching-request-collapsing).
 
 | Flag | Value | Default | Notes |
 | --- | --- | --- | --- |
@@ -91,7 +91,7 @@ These tune the opt-in per-request response cache (`req.cache(true)` or `req.cach
 | Code | Meaning |
 | --- | --- |
 | `0` | Every scenario ran and passed. |
-| `1` | A scenario failed an assertion or errored, or the arguments were invalid. |
+| `1` | A scenario failed an assertion, errored or was aborted (`Ctrl+C`), the arguments were invalid, or no scenario was selected to run (none found, or the filters excluded all of them). |
 
 ## Examples
 

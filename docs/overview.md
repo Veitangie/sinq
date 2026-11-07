@@ -10,12 +10,12 @@ The Treewalker walks the directories you point `sinq` at and turns them into a l
 
 ## 2. Execution Runner
 
-The Runner takes the scenarios from the Treewalker and runs them on a pool of workers. Each worker has its own Lua state and its own HTTP cookie jar, so one scenario cannot see another's variables or session even though they run at the same time.
+The Runner takes the scenarios from the Treewalker and runs them on a pool of workers. Every scenario run gets a fresh Lua state and its own HTTP cookie jar, so one scenario cannot see another's variables or session even though they run at the same time.
 
 [Runner & concurrency](runner.md)
 
 ## 3. Reporters
 
-The Runner streams results to a reporter as scenarios finish. Reporters render the console output or write a JUnit XML file for CI.
+The Runner emits events as each request progresses, and an aggregator turns them into one result per scenario run as it finishes. Reporters render those results to the console or write a JUnit XML file for CI.
 
 [CI/CD integration](ci-cd-integration.md)

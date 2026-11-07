@@ -6,12 +6,14 @@ package standard
 import (
 	"bytes"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"veitangie.dev/sinq/internal/config"
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 )
 
 type countdownErrorWriter struct {
@@ -43,20 +45,20 @@ func TestReportData_WriteErrors(t *testing.T) {
 		writer := &countdownErrorWriter{Count: i}
 		rep := NewReporter(config.ReporterConfig{Verbose: true, Color: config.Always}, writer)
 
-		sourceCh := make(chan runner.ScenarioResult, 1)
+		sourceCh := make(chan aggregator.ScenarioResult, 1)
 		timerCh := make(chan time.Duration, 1)
 
 		outBuf := bytes.NewBufferString("hello")
-		sourceCh <- runner.ScenarioResult{
+		sourceCh <- aggregator.ScenarioResult{
 			Name:          "Error Test",
-			Status:        runner.Failure,
+			Status:        event.Failure,
 			Output:        outBuf,
 			StartedAt:     time.Now(),
 			TotalDuration: time.Second,
-			RequestResults: []runner.RequestResult{
+			RequestResults: []aggregator.RequestResult{
 				{
 					Name:             "ErrReq",
-					Status:           runner.Failure,
+					Status:           event.Failure,
 					FailedAssertions: []string{"assert1"},
 					ErrorMessage:     "err msg",
 					Request:          "GET /",
@@ -86,17 +88,17 @@ func TestReportData_ErrorRequestTallyingBug(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rep := NewReporter(config.ReporterConfig{Color: config.Never, Verbose: false}, buf)
 
-	sourceCh := make(chan runner.ScenarioResult, 1)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
 
-	sourceCh <- runner.ScenarioResult{
+	sourceCh <- aggregator.ScenarioResult{
 		Name:          "Error Scenario",
-		Status:        runner.Error,
+		Status:        event.Error,
 		TotalDuration: 1 * time.Millisecond,
-		RequestResults: []runner.RequestResult{
+		RequestResults: []aggregator.RequestResult{
 			{
 				Name:         "ErrorReq",
-				Status:       runner.Error,
+				Status:       event.Error,
 				ErrorMessage: "failed to parse",
 			},
 		},
@@ -118,29 +120,29 @@ func TestReportData_ShowNone(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rep := NewReporter(config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.None}, buf)
 
-	sourceCh := make(chan runner.ScenarioResult, 2)
+	sourceCh := make(chan aggregator.ScenarioResult, 2)
 	timerCh := make(chan time.Duration, 1)
 
-	sourceCh <- runner.ScenarioResult{
+	sourceCh <- aggregator.ScenarioResult{
 		Name:          "Passed Scenario",
-		Status:        runner.Success,
+		Status:        event.Success,
 		TotalDuration: 1 * time.Millisecond,
-		RequestResults: []runner.RequestResult{
+		RequestResults: []aggregator.RequestResult{
 			{
 				Name:     "PassReq",
-				Status:   runner.Success,
+				Status:   event.Success,
 				Attempts: 1,
 			},
 		},
 	}
-	sourceCh <- runner.ScenarioResult{
+	sourceCh <- aggregator.ScenarioResult{
 		Name:          "Failed Scenario",
-		Status:        runner.Failure,
+		Status:        event.Failure,
 		TotalDuration: 1 * time.Millisecond,
-		RequestResults: []runner.RequestResult{
+		RequestResults: []aggregator.RequestResult{
 			{
 				Name:         "FailReq",
-				Status:       runner.Failure,
+				Status:       event.Failure,
 				ErrorMessage: "failed",
 				Attempts:     1,
 			},
@@ -185,17 +187,17 @@ func TestReportData_RequestTallyArithmetic(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rep := NewReporter(config.ReporterConfig{Color: config.Never, Show: config.All}, buf)
 
-	sourceCh := make(chan runner.ScenarioResult, 1)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
 
-	sourceCh <- runner.ScenarioResult{
+	sourceCh <- aggregator.ScenarioResult{
 		Name:          "Tally Scenario",
-		Status:        runner.Failure,
+		Status:        event.Failure,
 		TotalDuration: time.Millisecond,
-		RequestResults: []runner.RequestResult{
-			{Name: "R1", Status: runner.Success},
-			{Name: "R2", Status: runner.Error},
-			{Name: "R3", Status: runner.Aborted},
+		RequestResults: []aggregator.RequestResult{
+			{Name: "R1", Status: event.Success},
+			{Name: "R2", Status: event.Error},
+			{Name: "R3", Status: event.Aborted},
 		},
 	}
 	close(sourceCh)
@@ -216,14 +218,14 @@ func TestReportData_RequestTallyArithmetic(t *testing.T) {
 func TestReportData_ShowFailed_Filtering(t *testing.T) {
 	tests := []struct {
 		name      string
-		status    runner.ResultStatus
+		status    event.ResultStatus
 		wantShown bool
 	}{
-		{"Success not shown", runner.Success, false},
-		{"Skipped not shown", runner.Unset, false},
-		{"Aborted not shown", runner.Aborted, false},
-		{"Failure shown", runner.Failure, true},
-		{"Error shown", runner.Error, true},
+		{"Success not shown", event.Success, false},
+		{"Skipped not shown", event.Unset, false},
+		{"Aborted not shown", event.Aborted, false},
+		{"Failure shown", event.Failure, true},
+		{"Error shown", event.Error, true},
 	}
 
 	for _, tt := range tests {
@@ -231,9 +233,9 @@ func TestReportData_ShowFailed_Filtering(t *testing.T) {
 			buf := &bytes.Buffer{}
 			rep := NewReporter(config.ReporterConfig{Color: config.Never, Show: config.Failed}, buf)
 
-			sourceCh := make(chan runner.ScenarioResult, 1)
+			sourceCh := make(chan aggregator.ScenarioResult, 1)
 			timerCh := make(chan time.Duration, 1)
-			sourceCh <- runner.ScenarioResult{
+			sourceCh <- aggregator.ScenarioResult{
 				Name:   "FilterScenario",
 				Status: tt.status,
 			}
@@ -257,7 +259,7 @@ func TestReportData_ReportRequest_NoFailedAssertions(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rd := newReportData(config.ReporterConfig{Color: config.Never}, buf, 1)
 
-	err := rd.reportRequest(runner.RequestResult{Name: "Req", Status: runner.Success})
+	err := rd.reportRequest(aggregator.RequestResult{Name: "Req", Status: event.Success})
 	if err != nil {
 		t.Fatalf("reportRequest failed: %v", err)
 	}
@@ -271,7 +273,7 @@ func TestReportData_ReportOutput_CopyErrorPropagates(t *testing.T) {
 	w := &substringErrorWriter{trigger: "OUTPUT_MARKER"}
 	rd := newReportData(config.ReporterConfig{Color: config.Never}, w, 1)
 
-	result := runner.ScenarioResult{
+	result := aggregator.ScenarioResult{
 		Output: bytes.NewBufferString("OUTPUT_MARKER content\n"),
 	}
 
@@ -286,7 +288,7 @@ func TestReportData_ReportOutput_ResetWriteErrorPropagates(t *testing.T) {
 	rd := newReportData(config.ReporterConfig{Color: config.Never}, w, 1)
 	rd.reset = marker
 
-	result := runner.ScenarioResult{
+	result := aggregator.ScenarioResult{
 		Output: bytes.NewBufferString("harmless content\n"),
 	}
 
@@ -300,12 +302,12 @@ func TestReportData_Report_RequestLoopErrorStopsIteration(t *testing.T) {
 	w := &substringErrorWriter{trigger: marker}
 	rd := newReportData(config.ReporterConfig{Color: config.Never, Verbose: true, Show: config.All}, w, 1)
 
-	result := runner.ScenarioResult{
+	result := aggregator.ScenarioResult{
 		Name:   "LoopScenario",
-		Status: runner.Success,
-		RequestResults: []runner.RequestResult{
-			{Name: marker, Status: runner.Success},
-			{Name: "ReqB", Status: runner.Success},
+		Status: event.Success,
+		RequestResults: []aggregator.RequestResult{
+			{Name: marker, Status: event.Success},
+			{Name: "ReqB", Status: event.Success},
 		},
 	}
 
@@ -322,9 +324,9 @@ func TestReportData_ReportRequest_ErrorMessageWriteErrorPropagates(t *testing.T)
 	w := &substringErrorWriter{trigger: marker}
 	rd := newReportData(config.ReporterConfig{Color: config.Never}, w, 1)
 
-	err := rd.reportRequest(runner.RequestResult{
+	err := rd.reportRequest(aggregator.RequestResult{
 		Name:         "Req",
-		Status:       runner.Failure,
+		Status:       event.Failure,
 		ErrorMessage: marker,
 	})
 	if err == nil {
@@ -336,9 +338,9 @@ func TestReportData_ReportRequest_DurationsWriteErrorPropagates(t *testing.T) {
 	w := &substringErrorWriter{trigger: "Pre:"}
 	rd := newReportData(config.ReporterConfig{Color: config.Never, Verbose: true}, w, 1)
 
-	err := rd.reportRequest(runner.RequestResult{
+	err := rd.reportRequest(aggregator.RequestResult{
 		Name:   "Req",
-		Status: runner.Success,
+		Status: event.Success,
 		Pre:    time.Millisecond,
 	})
 	if err == nil {
@@ -351,9 +353,9 @@ func TestReportData_ReportRequest_ResponseWriteErrorPropagates(t *testing.T) {
 	w := &substringErrorWriter{trigger: marker}
 	rd := newReportData(config.ReporterConfig{Color: config.Never}, w, 1)
 
-	err := rd.reportRequest(runner.RequestResult{
+	err := rd.reportRequest(aggregator.RequestResult{
 		Name:     "Req",
-		Status:   runner.Success,
+		Status:   event.Success,
 		Response: marker,
 	})
 	if err == nil {
@@ -361,23 +363,149 @@ func TestReportData_ReportRequest_ResponseWriteErrorPropagates(t *testing.T) {
 	}
 }
 
+func reportOne(t *testing.T, result aggregator.ScenarioResult) (out string) {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	rep := NewReporter(config.ReporterConfig{Color: config.Never, Show: config.All}, buf)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
+	timerCh := make(chan time.Duration, 1)
+	sourceCh <- result
+	close(sourceCh)
+	timerCh <- time.Millisecond
+	close(timerCh)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Reporting panicked: %v\nOutput so far:\n%s", r, buf.String())
+		}
+	}()
+	if err := rep.Report(sourceCh, timerCh, 1); err != nil {
+		t.Fatalf("Report failed: %v", err)
+	}
+	return buf.String()
+}
+
+func TestReportData_LabelsAreListed(t *testing.T) {
+	out := reportOne(t, aggregator.ScenarioResult{
+		Name:           "Checkout",
+		Labels:         []string{"admin", "card"},
+		Status:         event.Success,
+		TotalDuration:  time.Millisecond,
+		RequestResults: []aggregator.RequestResult{{Name: "Pay", Status: event.Success, Attempts: 1}},
+	})
+
+	lines := strings.Split(out, "\n")
+	for _, label := range []string{"admin", "card"} {
+		found := false
+		for _, line := range lines {
+			if strings.TrimSpace(line) == label {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Expected the label %q on a line of its own, got:\n%s", label, out)
+		}
+	}
+	if strings.Contains(out, "admin10") || strings.Contains(out, "card10") {
+		t.Errorf("Expected newlines after the labels, not the number 10 ('\\n' printed as a rune), got:\n%s", out)
+	}
+}
+
+func TestReportData_RunNumberSuffix(t *testing.T) {
+	cases := []struct {
+		name     string
+		cntId    int
+		total    int
+		wantRun  string
+		wantNone bool
+	}{
+		{"second of three", 1, 3, "#2", false},
+		{"first of two", 0, 2, "#1", false},
+		{"single run", 0, 1, "", true},
+		{"skipped", 0, 0, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := reportOne(t, aggregator.ScenarioResult{
+				Name:           "Counted",
+				CntId:          tc.cntId,
+				TotalRunCount:  tc.total,
+				Status:         event.Success,
+				TotalDuration:  time.Millisecond,
+				RequestResults: []aggregator.RequestResult{{Name: "Req", Status: event.Success, Attempts: 1}},
+			})
+
+			var scenarioLine string
+			for line := range strings.SplitSeq(out, "\n") {
+				if strings.Contains(line, "Scenario: Counted") {
+					scenarioLine = line
+				}
+			}
+			if tc.wantNone && strings.Contains(scenarioLine, "#") {
+				t.Errorf("Expected no run number for a scenario that runs once, got %q", scenarioLine)
+			}
+			if !tc.wantNone && !strings.Contains(scenarioLine, tc.wantRun) {
+				t.Errorf("Expected run number %s in the scenario line, got %q", tc.wantRun, scenarioLine)
+			}
+		})
+	}
+}
+
+func TestReportData_RequestsSentPlural(t *testing.T) {
+	cases := []struct {
+		attempts int
+		want     string
+	}{
+		{0, "| 0 requests sent\n"},
+		{1, "| 1 request sent\n"},
+		{2, "| 2 requests sent\n"},
+		{11, "| 11 requests sent\n"},
+		{21, "| 21 requests sent\n"},
+		{101, "| 101 requests sent\n"},
+	}
+	for _, tc := range cases {
+		t.Run(strconv.Itoa(tc.attempts), func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			rep := NewReporter(config.ReporterConfig{Color: config.Never, Show: config.None}, buf)
+
+			sourceCh := make(chan aggregator.ScenarioResult, 1)
+			timerCh := make(chan time.Duration, 1)
+			sourceCh <- aggregator.ScenarioResult{
+				Name:           "Counted",
+				Status:         event.Success,
+				TotalDuration:  time.Millisecond,
+				RequestResults: []aggregator.RequestResult{{Name: "Request", Status: event.Success, Attempts: tc.attempts}},
+			}
+			close(sourceCh)
+			timerCh <- time.Millisecond
+			close(timerCh)
+
+			_ = rep.Report(sourceCh, timerCh, 1)
+
+			if !strings.HasSuffix(buf.String(), tc.want) {
+				t.Errorf("Expected the summary to end with %q, got:\n%s", tc.want, buf.String())
+			}
+		})
+	}
+}
+
 func TestReportData_RequestsSentSumsAttempts(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rep := NewReporter(config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.None}, buf)
 
-	sourceCh := make(chan runner.ScenarioResult, 1)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
 
-	sourceCh <- runner.ScenarioResult{
+	sourceCh <- aggregator.ScenarioResult{
 		Name:          "Mixed Scenario",
-		Status:        runner.Aborted,
+		Status:        event.Aborted,
 		TotalDuration: 1 * time.Millisecond,
-		RequestResults: []runner.RequestResult{
-			{Name: "Repeated", Status: runner.Success, Attempts: 3},
-			{Name: "Failed", Status: runner.Failure, Attempts: 2},
-			{Name: "Errored", Status: runner.Error, Attempts: 1},
-			{Name: "Interrupted", Status: runner.Aborted, Attempts: 2},
-			{Name: "NeverRan", Status: runner.Unset},
+		RequestResults: []aggregator.RequestResult{
+			{Name: "Repeated", Status: event.Success, Attempts: 3},
+			{Name: "Failed", Status: event.Failure, Attempts: 2},
+			{Name: "Errored", Status: event.Error, Attempts: 1},
+			{Name: "Interrupted", Status: event.Aborted, Attempts: 2},
+			{Name: "NeverRan", Status: event.Unset},
 		},
 	}
 	close(sourceCh)

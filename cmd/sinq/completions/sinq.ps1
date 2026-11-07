@@ -82,7 +82,7 @@ Register-ArgumentCompleter -CommandName sinq -Native -ScriptBlock {
             @{ Name = '-n';                Tip = 'Execute only scenarios which names match at least one of passed regular expressions' },
             @{ Name = '--name';            Tip = 'Execute only scenarios which names match at least one of passed regular expressions' },
             @{ Name = '--no-spinner';      Tip = 'Disable spinner animation' },
-            @{ Name = '--dump-on-failure'; Tip = 'Print full request and response data on failed assertion' },
+            @{ Name = '--dump-on-failure'; Tip = 'Print full request and response data of failed, errored or aborted requests' },
             @{ Name = '--secrets-file';    Tip = 'Path to JSON-formatted secrets file' },
             @{ Name = '--no-tag';          Tip = 'Do not execute scenarios that have the tag' },
             @{ Name = '--no-name';         Tip = 'Do not execute scenarios which names match the regular expression' },

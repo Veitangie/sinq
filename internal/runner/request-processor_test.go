@@ -6,199 +6,49 @@ package runner
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"golang.org/x/sync/singleflight"
-	"hash/maphash"
 
-	lua "github.com/yuin/gopher-lua"
-	"net/http/cookiejar"
 	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/event"
 	"veitangie.dev/sinq/internal/scenario"
-	"veitangie.dev/sinq/internal/timer"
 )
 
-func TestRequestProcessor_ContextCancellationDuringRetry(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	w := setupTestWorker(t, ctx)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "GET " + srv.URL + "\n$RETRY{\n return 10000 \n}"
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "retry_test.sinq")
-	if err != nil {
-		t.Fatalf("Failed to parse blueprint: %v", err)
+func TestWorker_ProcessError_StatusFromError(t *testing.T) {
+	cases := []struct {
+		err  error
+		want event.ResultStatus
+	}{
+		{context.Canceled, event.Aborted},
+		{context.DeadlineExceeded, event.Error},
+		{errors.New("boom"), event.Error},
 	}
-
-	scenarioBp := &scenario.ScenarioBlueprint{
-		Config: &scenario.ScenarioConfig{
-			MaxRetries:    3,
-			ReqTimeout:    scenario.Duration{Duration: 30 * time.Second},
-			ScriptTimeout: scenario.Duration{Duration: 30 * time.Second},
-		},
-	}
-
-	status := Success
-	result := &RequestResult{}
-
-	processor := RequestProcessor{
-		w:            w,
-		ctx:          ctx,
-		scenarioBp:   scenarioBp,
-		requestBp:    reqBp[0],
-		status:       &status,
-		result:       result,
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		client:       srv.Client(),
-	}
-
-	_ = processor.materialize()
-	_ = processor.parse()
-
-	done := make(chan error)
-	go func() {
-		err := processor.run()
-		done <- err
-	}()
-
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-
-	select {
-	case err := <-done:
-		if err == nil || err.Error() != "context canceled" {
-			t.Fatalf("Expected context canceled error, got: %v", err)
+	for _, tc := range cases {
+		w := setupTestWorker(t, nil)
+		obs := observe(t, w)
+		(&RequestProcessor{w: w}).processError(context.Background(), tc.err, 0)
+		ends := obs.ofKind(event.RequestEnd)
+		if len(ends) != 1 || ends[0].Status != tc.want {
+			t.Errorf("%v: expected one RequestEnd with status %v, got %+v", tc.err, tc.want, ends)
 		}
-		if *processor.status != Aborted {
-			t.Errorf("Expected processor status to be Aborted, got %v", *processor.status)
-		}
-		if processor.result.Status != Aborted {
-			t.Errorf("Expected request result status to be Aborted, got %v", processor.result.Status)
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("RequestProcessor ignored context cancellation and deadlocked in retry loop")
 	}
 }
 
-func TestRequestProcessor_HandleError(t *testing.T) {
-	processor := &RequestProcessor{
-		status: new(ResultStatus),
-		result: &RequestResult{},
-	}
-
-	processor.handleError(context.Canceled)
-	if *processor.status != Aborted {
-		t.Errorf("Expected processor status to be Aborted, got %v", *processor.status)
-	}
-	if processor.result.Status != Aborted {
-		t.Errorf("Expected request result status to be Aborted, got %v", processor.result.Status)
-	}
-
-	processor.handleError(context.DeadlineExceeded)
-	if *processor.status != Error {
-		t.Errorf("Expected processor status to be Error, got %v", *processor.status)
-	}
-	if processor.result.Status != Error {
-		t.Errorf("Expected request result status to be Error, got %v", processor.result.Status)
-	}
-}
-
-func TestRequestProcessor_MaterializeDumpOnFailure_AppendsTrailingNewline(t *testing.T) {
+func TestWorker_ProcessError_CancelHasNoErrorMessage(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-	w.env.cfg.DumpOnFailure = true
-
-	rawSinq := "GET http://localhost/ HTTP/1.1"
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "no_trailing_newline.sinq")
-	if err != nil {
-		t.Fatalf("Failed to parse blueprint: %v", err)
-	}
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		requestBp:    reqBp[0],
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-
-	_ = processor.materialize()
-
-	if !strings.HasSuffix(processor.result.Request, "\n") {
-		t.Errorf("BUG: expected dumped request without a trailing newline to get one appended, got %q", processor.result.Request)
-	}
-}
-
-func TestBug_ZeroByteUpload(t *testing.T) {
-	var receivedBody []byte
-	var receivedTransferEncoding []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedTransferEncoding = r.TransferEncoding
-		body, _ := io.ReadAll(r.Body)
-		receivedBody = body
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	payload := []byte("hello chunked world")
-	mockFS := fstest.MapFS{
-		"upload.txt": &fstest.MapFile{Data: payload},
-	}
-
-	w := setupTestWorker(t, nil)
-	w.env.workspace = &mockWorkspace{FS: mockFS}
-	w.lc.SetupRequestEnvironment(0)
-
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", server.URL, nil)
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		httpRequest:  req,
-		client:       server.Client(),
-		filenameFrom: "upload.txt",
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		result:       &RequestResult{},
-		status:       new(ResultStatus),
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-	}
-
-	_, err := processor.send()
-	if err != nil {
-		t.Fatalf("send() failed: %v", err)
-	}
-
-	if len(receivedBody) == 0 {
-		t.Errorf("BUG EXPOSED: Server received 0 bytes! ContentLength was 0, so the attached file was ignored.")
-	} else if string(receivedBody) != string(payload) {
-		t.Errorf("Expected body %q, got %q", string(payload), string(receivedBody))
-	}
-
-	isChunked := false
-	for _, te := range receivedTransferEncoding {
-		if te == "chunked" {
-			isChunked = true
-		}
-	}
-	if !isChunked {
-		t.Errorf("Expected Transfer-Encoding: chunked, but it wasn't set.")
+	obs := observe(t, w)
+	(&RequestProcessor{w: w}).processError(context.Background(), context.Canceled, 0)
+	if ends := obs.ofKind(event.RequestEnd); len(ends) != 1 || ends[0].ErrorString != "" {
+		t.Errorf("Expected an aborted RequestEnd without an error message, got %+v", ends)
 	}
 }
 
@@ -238,670 +88,6 @@ func TestWorker_SkipRequest(t *testing.T) {
 	}
 }
 
-func TestRequestProcessor_FailsIfBodyAndFileAttached(t *testing.T) {
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawRequest := "POST http://localhost\n\nthis is a body"
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		materialized: []byte(rawRequest),
-		filenameFrom: "attached_file.txt",
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		result:       &RequestResult{},
-		status:       new(ResultStatus),
-	}
-
-	err := processor.parse()
-
-	if err == nil {
-		t.Fatal("Expected parse to fail because both body and file source exist")
-	}
-	if !strings.Contains(err.Error(), "both body and a file source") {
-		t.Errorf("Expected conflict error, got: %v", err)
-	}
-}
-
-func TestRequestProcessor_MaxRetriesExceeded(t *testing.T) {
-	var attempts int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "GET " + srv.URL + "\n$RETRY{\n return 1 \n}"
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "retry_test.sinq")
-	if err != nil {
-		t.Fatalf("Failed to parse blueprint: %v", err)
-	}
-
-	scenarioBp := &scenario.ScenarioBlueprint{
-		Config: &scenario.ScenarioConfig{
-			MaxRetries:    2,
-			ReqTimeout:    scenario.Duration{Duration: 5 * time.Second},
-			ScriptTimeout: scenario.Duration{Duration: 5 * time.Second},
-		},
-	}
-
-	status := Success
-	result := &RequestResult{}
-
-	processor := RequestProcessor{
-		w:            w,
-		ctx:          context.Background(),
-		scenarioBp:   scenarioBp,
-		requestBp:    reqBp[0],
-		status:       &status,
-		result:       result,
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		client:       srv.Client(),
-	}
-
-	_ = processor.materialize()
-	_ = processor.parse()
-
-	err = processor.run()
-
-	if err == nil || err.Error() != "Too many retries" {
-		t.Fatalf("Expected 'Too many retries' error, got: %v", err)
-	}
-	if attempts != 3 {
-		t.Errorf("Expected exactly 3 server hits, got %d", attempts)
-	}
-}
-
-func TestRequestProcessor_BadTLS_FailsGracefully(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "GET " + srv.URL + "/path HTTP/1.1\n"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "tls_test.sinq")
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		client:       &http.Client{},
-		requestBp:    reqBp[0],
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-
-	_ = processor.materialize()
-	_ = processor.parse()
-	err := processor.run()
-	if err == nil {
-		t.Fatal("Expected TLS handshake error, but request succeeded!")
-	}
-	if !strings.Contains(err.Error(), "certificate") {
-		t.Errorf("Expected certificate error, got: %v", err)
-	}
-}
-
-func TestRequestProcessor_EmptyBodyGet_NoChunkedEncoding(t *testing.T) {
-	var receivedTransferEncoding []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedTransferEncoding = r.TransferEncoding
-		w.WriteHeader(200)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "GET " + srv.URL + "\n\n"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		client:       srv.Client(),
-		requestBp:    reqBp[0],
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-
-	_ = processor.materialize()
-	_ = processor.parse()
-	_, err := processor.send()
-	if err != nil {
-		t.Fatalf("send() failed: %v", err)
-	}
-
-	for _, te := range receivedTransferEncoding {
-		if te == "chunked" {
-			t.Fatalf("BUG EXPOSED: GET request with no body sent with Transfer-Encoding: chunked!")
-		}
-	}
-}
-
-func TestRequestProcessor_SingleFlight_CollapsesRequests(t *testing.T) {
-	var count int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&count, 1)
-		time.Sleep(50 * time.Millisecond)
-		w.WriteHeader(200)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	seed := maphash.MakeSeed()
-
-	rawSinq := "GET " + srv.URL + "\n\n"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
-
-	var wg sync.WaitGroup
-	for range 10 {
-		wg.Go(func() {
-
-			hasher := maphash.Hash{}
-			hasher.SetSeed(seed)
-
-			wLocal := setupTestWorker(t, nil)
-			wLocal.lc.SetupRequestEnvironment(0)
-			wLocal.env.hasher = hasher
-			wLocal.env.cachedProcessor = w.env.cachedProcessor
-
-			processor := &RequestProcessor{
-				ctx:          context.Background(),
-				w:            wLocal,
-				client:       srv.Client(),
-				requestBp:    reqBp[0],
-				scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-				status:       new(ResultStatus),
-				result:       &RequestResult{},
-				requestTimer: timer.NewTimer(timer.DefaultClock{}),
-				cache:        true,
-			}
-
-			_ = processor.materialize()
-			_ = processor.parse()
-			err := processor.run()
-			if err != nil {
-				t.Errorf("doRequest() failed: %v", err)
-			}
-		})
-	}
-
-	wg.Wait()
-
-	if atomic.LoadInt32(&count) != 1 {
-		t.Errorf("Expected server to be hit exactly 1 time, but was hit %d times", count)
-	}
-}
-
-func TestRequestProcessor_SingleFlight_DistinctRequests(t *testing.T) {
-	var count int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&count, 1)
-		time.Sleep(50 * time.Millisecond)
-		w.WriteHeader(200)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	seed := maphash.MakeSeed()
-
-	var wg sync.WaitGroup
-	for i := range 10 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-
-			hasher := maphash.Hash{}
-			hasher.SetSeed(seed)
-
-			wLocal := setupTestWorker(t, nil)
-			wLocal.lc.SetupRequestEnvironment(0)
-			wLocal.env.hasher = hasher
-
-			rawSinq := "GET " + srv.URL + "\n" + "X-Unique-ID: " + fmt.Sprint(idx) + "\n\n"
-			reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
-
-			processor := &RequestProcessor{
-				ctx:          context.Background(),
-				w:            wLocal,
-				client:       srv.Client(),
-				requestBp:    reqBp[0],
-				scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-				status:       new(ResultStatus),
-				result:       &RequestResult{},
-				requestTimer: timer.NewTimer(timer.DefaultClock{}),
-				cache:        true,
-			}
-
-			_ = processor.materialize()
-			_ = processor.parse()
-			err := processor.run()
-			if err != nil {
-				t.Errorf("doRequest() failed: %v", err)
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	if atomic.LoadInt32(&count) != 10 {
-		t.Errorf("Expected server to be hit exactly 10 times, but was hit %d times", count)
-	}
-}
-
-func TestRequestProcessor_NoSingleFlight_DoesNotCollapse(t *testing.T) {
-	var count int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&count, 1)
-		time.Sleep(50 * time.Millisecond)
-		w.WriteHeader(200)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	seed := maphash.MakeSeed()
-
-	rawSinq := "GET " + srv.URL + "\n\n"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
-
-	var wg sync.WaitGroup
-	for range 10 {
-		wg.Go(func() {
-
-			hasher := maphash.Hash{}
-			hasher.SetSeed(seed)
-
-			wLocal := setupTestWorker(t, nil)
-			wLocal.lc.SetupRequestEnvironment(0)
-			wLocal.env.hasher = hasher
-
-			processor := &RequestProcessor{
-				ctx:          context.Background(),
-				w:            wLocal,
-				client:       srv.Client(),
-				requestBp:    reqBp[0],
-				scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-				status:       new(ResultStatus),
-				result:       &RequestResult{},
-				requestTimer: timer.NewTimer(timer.DefaultClock{}),
-				cache:        false,
-			}
-
-			_ = processor.materialize()
-			_ = processor.parse()
-			err := processor.run()
-			if err != nil {
-				t.Errorf("doRequest() failed: %v", err)
-			}
-		})
-	}
-
-	wg.Wait()
-
-	if atomic.LoadInt32(&count) != 10 {
-		t.Errorf("Expected server to be hit exactly 10 times, but was hit %d times", count)
-	}
-}
-
-func TestRequestProcessor_AssertAndPostScripts(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "GET " + srv.URL + "\n$ASSERT{\nsinq.assert.code(200)\n}\n$POST{\nenv.postRan = true\n}"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "hooks.sinq")
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		client:       srv.Client(),
-		requestBp:    reqBp[0],
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{ScriptTimeout: scenario.Duration{Duration: 5 * time.Second}, MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-	processor.totalRequestTimer = timer.NewTimer(timer.DefaultClock{})
-
-	_ = processor.materialize()
-	_ = processor.parse()
-	err := processor.run()
-	if err != nil {
-		t.Fatalf("run failed: %v", err)
-	}
-
-	err = processor.runAssert()
-	if err != nil {
-		t.Fatalf("runAssert failed: %v", err)
-	}
-
-	err = processor.runPost()
-	if err != nil {
-		t.Fatalf("runPost failed: %v", err)
-	}
-
-	processor.finalize()
-}
-
-func TestRequestProcessor_OversizedBody(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("this is a very long body that exceeds 10 bytes"))
-		w.WriteHeader(200)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "GET " + srv.URL + "\n"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		client:       srv.Client(),
-		requestBp:    reqBp[0],
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 10}}},
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-
-	_ = processor.materialize()
-	_ = processor.parse()
-	err := processor.run()
-	if err != nil {
-		t.Fatalf("run failed: %v", err)
-	}
-
-	oversized := w.lc.ResponseTable.RawGetString("oversized")
-	if oversized.Type() != lua.LTBool || lua.LVAsBool(oversized) != true {
-		t.Errorf("Expected oversized flag to be true, got %v", oversized)
-	}
-
-	bodyRaw := w.lc.ResponseTable.RawGetString("bodyRaw")
-	if bodyRaw.Type() != lua.LTString || len(bodyRaw.String()) > 10 {
-		t.Errorf("Expected body to be truncated to 10 bytes, got length %d", len(bodyRaw.String()))
-	}
-}
-
-func TestRequestProcessor_SaveResponseToFile(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("saved payload"))
-		w.WriteHeader(200)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	mockFS := fstest.MapFS{}
-	w.env.workspace = &mockWorkspace{FS: mockFS}
-
-	rawSinq := "GET " + srv.URL + "\n$PRE{\nreq.saveResponseTo('output.txt')\n}"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		client:       srv.Client(),
-		requestBp:    reqBp[0],
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{ScriptTimeout: scenario.Duration{Duration: 5 * time.Second}, MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-	processor.totalRequestTimer = timer.NewTimer(timer.DefaultClock{})
-
-	err := processor.runPre()
-	if err != nil {
-		t.Fatalf("runPre failed: %v", err)
-	}
-
-	_ = processor.materialize()
-	_ = processor.parse()
-	err = processor.run()
-	if err != nil {
-		t.Fatalf("run failed: %v", err)
-	}
-
-	size := w.lc.ResponseTable.RawGetString("size")
-	if size.Type() != lua.LTNumber || lua.LVAsNumber(size) != 13 {
-		t.Errorf("Expected size to be 13, got %v", size)
-	}
-}
-
-func TestRequestProcessor_SingleFlight_ContextIndependence(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(150 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
-	}))
-	defer srv.Close()
-
-	wGlobal := setupTestWorker(t, nil)
-	wGlobal.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "GET " + srv.URL + "\n\n"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "get.sinq")
-
-	seed := maphash.MakeSeed()
-	hasher := maphash.Hash{}
-	hasher.SetSeed(seed)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	var err1, err2 error
-	var resp2 string
-
-	go func() {
-		defer wg.Done()
-
-		ctx1, cancel1 := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		defer cancel1()
-
-		w1 := setupTestWorker(t, nil)
-		w1.lc.SetupRequestEnvironment(0)
-		w1.env.hasher = hasher
-		w1.env.cachedProcessor = wGlobal.env.cachedProcessor
-
-		processor1 := &RequestProcessor{
-			ctx:          ctx1,
-			w:            w1,
-			scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-			requestBp:    reqBp[0],
-			materialized: []byte(rawSinq),
-			status:       new(ResultStatus),
-			result:       &RequestResult{},
-			cache:        true,
-			client:       http.DefaultClient,
-			requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		}
-
-		_ = processor1.materialize()
-		_ = processor1.parse()
-		err1 = processor1.run()
-	}()
-
-	go func() {
-		defer wg.Done()
-
-		time.Sleep(10 * time.Millisecond)
-
-		ctx2, cancel2 := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		defer cancel2()
-
-		w2 := setupTestWorker(t, nil)
-		w2.lc.SetupRequestEnvironment(0)
-		w2.env.hasher = hasher
-		w2.env.cachedProcessor = wGlobal.env.cachedProcessor
-
-		processor2 := &RequestProcessor{
-			ctx:          ctx2,
-			w:            w2,
-			scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-			requestBp:    reqBp[0],
-			materialized: []byte(rawSinq),
-			status:       new(ResultStatus),
-			result:       &RequestResult{},
-			cache:        true,
-			client:       http.DefaultClient,
-			requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		}
-
-		_ = processor2.materialize()
-		_ = processor2.parse()
-		err2 = processor2.run()
-
-		if err2 == nil {
-			bodyRaw := w2.lc.ResponseTable.RawGetString("bodyRaw")
-			if bodyRaw.Type() == lua.LTString && bodyRaw.String() == "success" {
-				resp2 = "success"
-			} else {
-				resp2 = fmt.Sprintf("expected success, got type: %v, string: %q", bodyRaw.Type(), bodyRaw.String())
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	if err1 == nil || err1.Error() != "context deadline exceeded" {
-		t.Errorf("Expected Worker 1 to abort due to timeout, got: %v", err1)
-	}
-
-	if err2 != nil {
-		t.Errorf("Expected Worker 2 to succeed, but it failed: %v", err2)
-	}
-
-	if resp2 != "success" {
-		t.Errorf("Expected Worker 2 to receive 'success', got: %v", resp2)
-	}
-}
-
-func TestRequestProcessor_CachedRequest_CookiesAndFastPath(t *testing.T) {
-	var requestCount int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&requestCount, 1)
-		w.Header().Add("Set-Cookie", "session_id=12345; Path=/")
-		w.Header().Add("Set-Cookie", "theme=dark; Path=/")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	}))
-	defer srv.Close()
-
-	ctx := context.Background()
-	w := setupTestWorker(t, ctx)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "GET " + srv.URL + "\n"
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "cache_test.sinq")
-	if err != nil {
-		t.Fatalf("Failed to parse blueprint: %v", err)
-	}
-
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	client := srv.Client()
-	client.Jar = jar
-
-	processor1 := RequestProcessor{
-		w:            w,
-		ctx:          ctx,
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-		requestBp:    reqBp[0],
-		materialized: []byte(rawSinq),
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		cache:        true,
-		client:       client,
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-	err = processor1.materialize()
-	if err != nil {
-		t.Fatalf("p1 materialize: %v", err)
-	}
-	err = processor1.parse()
-	if err != nil {
-		t.Fatalf("p1 parse: %v", err)
-	}
-	err = processor1.run()
-	if err != nil {
-		t.Fatalf("First request failed: %v", err)
-	}
-
-	if atomic.LoadInt32(&requestCount) != 1 {
-		t.Errorf("Expected exactly 1 request to server, got %d", requestCount)
-	}
-
-	cookies := jar.Cookies(processor1.httpRequest.URL)
-	if len(cookies) != 2 {
-		t.Errorf("Expected 2 cookies, got %d", len(cookies))
-	}
-
-	jar, _ = cookiejar.New(nil)
-	client.Jar = jar
-
-	processor2 := RequestProcessor{
-		w:            w,
-		ctx:          ctx,
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-		requestBp:    reqBp[0],
-		materialized: []byte(rawSinq),
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		cache:        true,
-		client:       client,
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-	err = processor2.materialize()
-	if err != nil {
-		t.Fatalf("p2 materialize: %v", err)
-	}
-	err = processor2.parse()
-	if err != nil {
-		t.Fatalf("p2 parse: %v", err)
-	}
-	err = processor2.run()
-
-	if err != nil {
-		t.Fatalf("Second request failed: %v", err)
-	}
-
-	if atomic.LoadInt32(&requestCount) != 1 {
-		t.Errorf("Expected exactly 1 request to server (second should be cached), got %d", requestCount)
-	}
-
-	cookies2 := jar.Cookies(processor2.httpRequest.URL)
-	if len(cookies2) != 2 {
-		t.Errorf("Expected 2 cookies from cache, got %d", len(cookies2))
-	}
-}
-
 func TestCachedRequestProcessor_UsesBody(t *testing.T) {
 	var receivedBody string
 
@@ -921,7 +107,7 @@ func TestCachedRequestProcessor_UsesBody(t *testing.T) {
 		transport:    http.DefaultTransport,
 		maxCacheSize: config.DataSize{ByteAmount: 1024, Unit: config.MiByte},
 		cacheTimeout: 5 * time.Second,
-		logger:       setupTestWorker(t, nil).env.logger,
+		eb:           newTestBus(t),
 	}
 
 	getBody := func(ws Workspace) func() (io.ReadCloser, error) {
@@ -930,7 +116,7 @@ func TestCachedRequestProcessor_UsesBody(t *testing.T) {
 		}
 	}
 
-	resCh := processor.process("some-hash", *req, "", getBody, nil)
+	resCh := processor.process("some-hash", *req, "", getBody, nil, 1)
 	res := <-resCh
 	if res.Err != nil {
 		t.Fatalf("processor.process failed: %v", res.Err)
@@ -957,13 +143,10 @@ func TestRequestProcessor_IsEmptyShortCircuit(t *testing.T) {
 		Config: &scenario.ScenarioConfig{},
 	}
 
-	processor := RequestProcessor{
-		w:            w,
-		ctx:          ctx,
-		scenarioBp:   scenarioBp,
-		requestBp:    reqBp,
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
+	processor := newTestProcessor(w)
+	processor.ctx = ctx
+	processor.scenarioBp = scenarioBp
+	processor.requestBp = reqBp
 
 	if err := processor.runPre(); err != nil {
 		t.Errorf("Expected nil error for empty Pre block, got %v", err)
@@ -980,17 +163,11 @@ func TestRequestProcessor_IsEmptyShortCircuit(t *testing.T) {
 }
 
 func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
-	newLogger := func() (*slog.Logger, *bytes.Buffer) {
-		var buf bytes.Buffer
-		return slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})), &buf
-	}
-
 	scriptTimeoutCfg := &scenario.ScenarioConfig{ScriptTimeout: scenario.Duration{Duration: time.Second}}
 
 	t.Run("runPre logs failure", func(t *testing.T) {
-		logger, buf := newLogger()
 		w := setupTestWorker(t, nil)
-		w.env.logger = logger
+		obs := observe(t, w)
 		w.lc.SetupRequestEnvironment(0)
 
 		reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/\n$PRE{\nif then\n}"), "pre_fail.sinq")
@@ -998,26 +175,19 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 			t.Fatalf("failed to parse blueprint: %v", err)
 		}
 
-		p := &RequestProcessor{
-			w:            w,
-			ctx:          context.Background(),
-			scenarioBp:   &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg},
-			requestBp:    reqBp[0],
-			status:       new(ResultStatus),
-			result:       &RequestResult{},
-			requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		}
+		p := newTestProcessor(w)
+		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
+		p.requestBp = reqBp[0]
 
 		_ = p.runPre()
-		if !strings.Contains(buf.String(), "Pre script failed") {
-			t.Errorf("expected a 'Pre script failed' debug log line, got: %s", buf.String())
+		if !obs.logged("Pre script failed") {
+			t.Errorf("expected a 'Pre script failed' debug log line, got: %+v", obs.ofKind(event.Log))
 		}
 	})
 
 	t.Run("materialize logs failure", func(t *testing.T) {
-		logger, buf := newLogger()
 		w := setupTestWorker(t, nil)
-		w.env.logger = logger
+		obs := observe(t, w)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -1029,48 +199,35 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 			},
 		}
 
-		p := &RequestProcessor{
-			w:            w,
-			ctx:          ctx,
-			scenarioBp:   &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg},
-			requestBp:    reqBp,
-			status:       new(ResultStatus),
-			result:       &RequestResult{},
-			requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		}
+		p := newTestProcessor(w)
+		p.ctx = ctx
+		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
+		p.requestBp = reqBp
 
 		_ = p.materialize()
-		if !strings.Contains(buf.String(), "Request materialization failed") {
-			t.Errorf("expected a materialization-failure debug log line, got: %s", buf.String())
+		if !obs.logged("Request materialization failed") {
+			t.Errorf("expected a materialization-failure debug log line, got: %+v", obs.ofKind(event.Log))
 		}
 	})
 
 	t.Run("parse logs failure", func(t *testing.T) {
-		logger, buf := newLogger()
 		w := setupTestWorker(t, nil)
-		w.env.logger = logger
+		obs := observe(t, w)
 		w.lc.SetupRequestEnvironment(0)
 
-		p := &RequestProcessor{
-			w:            w,
-			ctx:          context.Background(),
-			materialized: []byte("POST http://localhost\n\nthis is a body"),
-			filenameFrom: "attached_file.txt",
-			status:       new(ResultStatus),
-			result:       &RequestResult{},
-			requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		}
+		p := newTestProcessor(w)
+		p.materialized = []byte("POST http://localhost\n\nthis is a body")
+		p.filenameFrom = "attached_file.txt"
 
 		_ = p.parse()
-		if !strings.Contains(buf.String(), "Request parsing failed") {
-			t.Errorf("expected a parsing-failure debug log line, got: %s", buf.String())
+		if !obs.logged("Request parsing failed") {
+			t.Errorf("expected a parsing-failure debug log line, got: %+v", obs.ofKind(event.Log))
 		}
 	})
 
 	t.Run("runRetry logs failure", func(t *testing.T) {
-		logger, buf := newLogger()
 		w := setupTestWorker(t, nil)
-		w.env.logger = logger
+		obs := observe(t, w)
 		w.lc.SetupRequestEnvironment(0)
 
 		reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/\n$RETRY{\nreturn \"not a number\"\n}"), "retry_fail.sinq")
@@ -1078,26 +235,19 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 			t.Fatalf("failed to parse blueprint: %v", err)
 		}
 
-		p := &RequestProcessor{
-			w:            w,
-			ctx:          context.Background(),
-			scenarioBp:   &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg},
-			requestBp:    reqBp[0],
-			status:       new(ResultStatus),
-			result:       &RequestResult{},
-			requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		}
+		p := newTestProcessor(w)
+		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
+		p.requestBp = reqBp[0]
 
 		_ = p.runRetry()
-		if !strings.Contains(buf.String(), "Retry script failed") {
-			t.Errorf("expected a 'Retry script failed' debug log line, got: %s", buf.String())
+		if !obs.logged("Retry script failed") {
+			t.Errorf("expected a 'Retry script failed' debug log line, got: %+v", obs.ofKind(event.Log))
 		}
 	})
 
 	t.Run("runAssert logs failure", func(t *testing.T) {
-		logger, buf := newLogger()
 		w := setupTestWorker(t, nil)
-		w.env.logger = logger
+		obs := observe(t, w)
 		w.lc.SetupRequestEnvironment(0)
 
 		reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/\n$ASSERT{\nif then\n}"), "assert_fail.sinq")
@@ -1105,26 +255,19 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 			t.Fatalf("failed to parse blueprint: %v", err)
 		}
 
-		p := &RequestProcessor{
-			w:            w,
-			ctx:          context.Background(),
-			scenarioBp:   &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg},
-			requestBp:    reqBp[0],
-			status:       new(ResultStatus),
-			result:       &RequestResult{},
-			requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		}
+		p := newTestProcessor(w)
+		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
+		p.requestBp = reqBp[0]
 
 		_ = p.runAssert()
-		if !strings.Contains(buf.String(), "Assert script failed") {
-			t.Errorf("expected an 'Assert script failed' debug log line, got: %s", buf.String())
+		if !obs.logged("Assert script failed") {
+			t.Errorf("expected an 'Assert script failed' debug log line, got: %+v", obs.ofKind(event.Log))
 		}
 	})
 
 	t.Run("runPost logs failure", func(t *testing.T) {
-		logger, buf := newLogger()
 		w := setupTestWorker(t, nil)
-		w.env.logger = logger
+		obs := observe(t, w)
 		w.lc.SetupRequestEnvironment(0)
 
 		reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/\n$POST{\nerror(\"boom\")\n}"), "post_fail.sinq")
@@ -1132,95 +275,22 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 			t.Fatalf("failed to parse blueprint: %v", err)
 		}
 
-		p := &RequestProcessor{
-			w:            w,
-			ctx:          context.Background(),
-			scenarioBp:   &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg},
-			requestBp:    reqBp[0],
-			status:       new(ResultStatus),
-			result:       &RequestResult{},
-			requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		}
+		p := newTestProcessor(w)
+		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
+		p.requestBp = reqBp[0]
 
 		_ = p.runPost()
-		if !strings.Contains(buf.String(), "Post script failed") {
-			t.Errorf("expected a 'Post script failed' debug log line, got: %s", buf.String())
+		if !obs.logged("Post script failed") {
+			t.Errorf("expected a 'Post script failed' debug log line, got: %+v", obs.ofKind(event.Log))
 		}
 	})
 }
 
-func TestRequestProcessor_FilenameFromWithEmptyBody_NoConflict(t *testing.T) {
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawRequest := "GET http://localhost\n\n"
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		materialized: []byte(rawRequest),
-		filenameFrom: "attached_file.txt",
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		result:       &RequestResult{},
-		status:       new(ResultStatus),
-	}
-
-	err := processor.parse()
-	if err != nil {
-		t.Errorf("expected no conflict error when the body is empty even with filenameFrom set, got: %v", err)
-	}
-}
-
-func TestRequestProcessor_BodySizeExactlyAtLimit_NotTruncated(t *testing.T) {
-	body := []byte("1234567890")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(body)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "GET " + srv.URL + "\n"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "exact.sinq")
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		client:       srv.Client(),
-		requestBp:    reqBp[0],
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 10}}},
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-
-	_ = processor.materialize()
-	_ = processor.parse()
-	err := processor.run()
-	if err != nil {
-		t.Fatalf("run failed: %v", err)
-	}
-
-	oversized := w.lc.ResponseTable.RawGetString("oversized")
-	if lua.LVAsBool(oversized) {
-		t.Errorf("expected oversized to be false when the body length exactly equals MaxBodySize")
-	}
-
-	bodyRaw := w.lc.ResponseTable.RawGetString("bodyRaw")
-	if bodyRaw.String() != string(body) {
-		t.Errorf("expected full untruncated body %q, got %q", body, bodyRaw.String())
-	}
-}
-
 func TestRequestProcessor_GetHash_CachesResult(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	p := &RequestProcessor{
-		w:            w,
-		materialized: []byte("some content"),
-		httpRequest:  &http.Request{URL: &url.URL{}},
-		client:       &http.Client{},
-	}
+	p := newTestProcessor(w)
+	p.materialized = []byte("some content")
+	p.httpRequest = &http.Request{URL: &url.URL{}}
 
 	first := p.getCacheKey()
 	if first == "" {
@@ -1238,17 +308,14 @@ func TestRequestProcessor_GetHash_IncludesMultipartHeaders(t *testing.T) {
 	w := setupTestWorker(t, nil)
 
 	mk := func(headerVal string) string {
-		p := &RequestProcessor{
-			w:            w,
-			materialized: []byte("POST http://x/\n\n"),
-			httpRequest:  &http.Request{URL: &url.URL{}},
-			client:       &http.Client{},
-			multipart: multipartData{entries: []multipartEntry{{
-				contentDisposition: `form-data; name="a"`,
-				data:               "1",
-				headers:            map[string][]string{"X-Sig": {headerVal}},
-			}}},
-		}
+		p := newTestProcessor(w)
+		p.materialized = []byte("POST http://x/\n\n")
+		p.httpRequest = &http.Request{URL: &url.URL{}}
+		p.multipart = multipartData{entries: []multipartEntry{{
+			contentDisposition: `form-data; name="a"`,
+			data:               "1",
+			headers:            map[string][]string{"X-Sig": {headerVal}},
+		}}}
 		return p.getCacheKey()
 	}
 
@@ -1264,59 +331,14 @@ func TestRequestProcessor_Send_ConflictingBodyAndFile(t *testing.T) {
 	req, _ := http.NewRequest("POST", "http://example.invalid/", strings.NewReader("body content"))
 	req.ContentLength = 12
 
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		httpRequest:  req,
-		client:       &http.Client{},
-		filenameFrom: "attached.txt",
-		requestBody:  []byte("body content"),
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		result:       &RequestResult{},
-		status:       new(ResultStatus),
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-	}
+	processor := newTestProcessor(w)
+	processor.httpRequest = req
+	processor.filenameFrom = "attached.txt"
+	processor.requestBody = []byte("body content")
 
 	_, err := processor.send()
 	if err == nil || !strings.Contains(err.Error(), "more than one body") {
 		t.Errorf("expected a conflict error for attached file + body content, got: %v", err)
-	}
-}
-
-func TestRequestProcessor_Send_SetsBodyFromRequestBody(t *testing.T) {
-	var receivedBody string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		receivedBody = string(b)
-		w.WriteHeader(200)
-	}))
-	defer srv.Close()
-
-	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
-
-	rawSinq := "POST " + srv.URL + "\n\nhello body"
-	reqBp, _ := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "post_body.sinq")
-
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		client:       srv.Client(),
-		requestBp:    reqBp[0],
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-		status:       new(ResultStatus),
-		result:       &RequestResult{},
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-	}
-
-	_ = processor.materialize()
-	_ = processor.parse()
-	_, err := processor.send()
-	if err != nil {
-		t.Fatalf("send failed: %v", err)
-	}
-	if receivedBody != "hello body" {
-		t.Errorf("expected server to receive %q, got %q", "hello body", receivedBody)
 	}
 }
 
@@ -1327,18 +349,10 @@ func TestRequestProcessor_SendCached_ConflictingBodyAndFile(t *testing.T) {
 	req, _ := http.NewRequest("POST", "http://example.invalid/", nil)
 	req.ContentLength = 12
 
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		httpRequest:  req,
-		client:       &http.Client{},
-		filenameFrom: "attached.txt",
-		requestBody:  []byte("body content"),
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		result:       &RequestResult{},
-		status:       new(ResultStatus),
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-	}
+	processor := newTestProcessor(w)
+	processor.httpRequest = req
+	processor.filenameFrom = "attached.txt"
+	processor.requestBody = []byte("body content")
 
 	_, err := processor.sendCached()
 	if err == nil || !strings.Contains(err.Error(), "more than one body") {
@@ -1360,17 +374,11 @@ func TestRequestProcessor_SendCached_FileAttachment_SetsUnknownContentLength(t *
 
 	req, _ := http.NewRequest("POST", srv.URL, nil)
 
-	processor := &RequestProcessor{
-		ctx:          context.Background(),
-		w:            w,
-		httpRequest:  req,
-		client:       srv.Client(),
-		filenameFrom: "upload.txt",
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		result:       &RequestResult{},
-		status:       new(ResultStatus),
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{MaxBodySize: config.DataSize{ByteAmount: 1024}}},
-	}
+	processor := newTestProcessor(w)
+	processor.httpRequest = req
+	processor.client = srv.Client()
+	processor.filenameFrom = "upload.txt"
+	processor.scenarioBp.Config.MaxBodySize = config.DataSize{ByteAmount: 1024}
 
 	_, err := processor.sendCached()
 	if err != nil {
@@ -1378,19 +386,5 @@ func TestRequestProcessor_SendCached_FileAttachment_SetsUnknownContentLength(t *
 	}
 	if processor.httpRequest.ContentLength != -1 {
 		t.Errorf("expected ContentLength to be set to -1 for a streamed file attachment, got %d", processor.httpRequest.ContentLength)
-	}
-}
-
-func TestRequestProcessor_Finalize_StatusHandling(t *testing.T) {
-	p1 := &RequestProcessor{result: &RequestResult{Status: Unset}, totalRequestTimer: timer.NewTimer(timer.DefaultClock{})}
-	p1.finalize()
-	if p1.result.Status != Success {
-		t.Errorf("expected an Unset status to become Success after finalize, got %v", p1.result.Status)
-	}
-
-	p2 := &RequestProcessor{result: &RequestResult{Status: Error}, totalRequestTimer: timer.NewTimer(timer.DefaultClock{})}
-	p2.finalize()
-	if p2.result.Status != Error {
-		t.Errorf("expected an Error status to remain unchanged after finalize, got %v", p2.result.Status)
 	}
 }

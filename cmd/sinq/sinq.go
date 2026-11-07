@@ -25,6 +25,8 @@ import (
 
 	"github.com/mattn/go-isatty"
 	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 	"veitangie.dev/sinq/internal/reporter"
 	"veitangie.dev/sinq/internal/reporter/junit"
 	"veitangie.dev/sinq/internal/reporter/result"
@@ -149,10 +151,16 @@ func parseFilePath(ctx context.Context, path string, walker *treewalker.Treewalk
 	}
 
 	var res []scenario.ScenarioBlueprint
+	rootName := wsPath
+
+	if abs, err := filepath.Abs(rootName); err == nil {
+		rootName = filepath.Base(abs)
+	}
+
 	if stat.IsDir() {
 		var err error
 		newCtx := context.WithValue(ctx, treewalker.PathCtxKey, path)
-		res, err = walker.ParseFiletree(newCtx, fs)
+		res, err = walker.ParseFiletree(newCtx, fs, rootName)
 		if err != nil {
 			return nil, fs, fmt.Errorf("Error: Failed to parse filetree from %s: %s\n", path, err)
 		}
@@ -238,10 +246,18 @@ func sinq(args []string) int {
 	}
 
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
-	logger.Debug("[sinq] Initialization complete", "duration", mainTimer.Time())
 	go attachSpinnerLogger(logger)
 
-	walker, err := treewalker.NewTreewalker(cfg, *logger, scenario.ParseRequestBlueprints, scenario.ParseConfig)
+	eb, err := event.NewBus(cfg.Workers*2, logger)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: Failed to construct event bus: %s\n", err.Error())
+		return 1
+	}
+	eb.Start()
+	defer eb.Close()
+	logger.Debug("[sinq] Initialization complete", "duration", mainTimer.Time())
+
+	walker, err := treewalker.NewTreewalker(cfg, eb, scenario.ParseRequestBlueprints, scenario.ParseConfig)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: Failed to construct treewalker: %s\n", err.Error())
 		return 1
@@ -289,7 +305,7 @@ func sinq(args []string) int {
 			variantCount *= int(count)
 			scenarioCount += variantCount
 			willRunCount += variantCount
-			allScenarios = append(allScenarios, runner.ScenarioBundle{ScenarioBlueprint: scenarioBlueprint, Workspace: fs, Count: count})
+			allScenarios = append(allScenarios, runner.ScenarioBundle{ScenarioBlueprint: scenarioBlueprint, Workspace: fs, Count: uint(count)})
 		}
 	}
 	logger.Debug("[sinq] Discovery complete", "duration", discoveryTimer.Time())
@@ -303,8 +319,8 @@ func sinq(args []string) int {
 		return 0
 	}
 
-	if scenarioCount == 0 {
-		fmt.Fprintf(stderr, "Error: No scenarios found\n")
+	if willRunCount == 0 {
+		fmt.Fprintf(stderr, "Error: No scenarios to run. Did you mistype filters?\n")
 		return 1
 	}
 
@@ -313,7 +329,7 @@ func sinq(args []string) int {
 			fmt.Fprintf(stderr, "WARNING: Running in a CI environment with --log-level debug. This risks leaking secrets in CI logs.\n")
 		}
 		if cfg.DumpOnFailure {
-			fmt.Fprintf(stderr, "WARNING: Running in a CI environment with --dump-on-failure. This risks leaking secrets in CI logs if assertions fail.\n")
+			fmt.Fprintf(stderr, "WARNING: Running in a CI environment with --dump-on-failure. This risks leaking secrets in CI logs if requests fail.\n")
 		}
 	}
 
@@ -332,25 +348,32 @@ func sinq(args []string) int {
 		TLSClientConfig:       &tls.Config{InsecureSkipVerify: cfg.Insecure},
 	}
 
-	rn, err := runner.NewRunner(cfg, ctx, transport, *logger, timer.DefaultClock{}, OSWorkspace{})
+	rn, err := runner.NewRunner(cfg, ctx, transport, eb, timer.DefaultClock{}, OSWorkspace{})
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: Failed to construct runner: %s\n", err.Error())
 		return 1
 	}
 
-	resultCh, durationCh, errorCh := rn.RunScenarios(ctx, allScenarios, secrets, &mainTimer)
+	agg := aggregator.NewAggregator()
+	resultCh, durationCh := agg.AggregateOver(eb.RegisterMC(cfg.Workers * 2))
 
-	code := handleReporting(cfg, logger, resultCh, durationCh, errorCh, scenarioCount, willRunCount, wantColorErr, wantColorOut)
+	codeCh := make(chan int)
+	go func() {
+		code := handleReporting(cfg, logger, resultCh, durationCh, scenarioCount, willRunCount, wantColorErr, wantColorOut)
+		codeCh <- code
+		close(codeCh)
+	}()
 
-	return code
+	rn.RunScenarios(ctx, allScenarios, secrets, &mainTimer)
+
+	return <-codeCh
 }
 
 func handleReporting(
 	cfg config.Config,
 	logger *slog.Logger,
-	resultCh <-chan runner.ScenarioResult,
+	resultCh <-chan aggregator.ScenarioResult,
 	durationCh <-chan time.Duration,
-	errorCh <-chan error,
 	scenarioCount int,
 	willRunCount int,
 	wantColorErr, wantColorOut bool,
@@ -407,22 +430,13 @@ func handleReporting(
 	}
 
 	wg := sync.WaitGroup{}
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		err := report.Report(resultCh, durationCh, scenarioCount)
 
 		if err != nil {
 			fmt.Fprintf(stderr, "Error: Failed to report results: %s\n", err.Error())
 		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		for err := range errorCh {
-			fmt.Fprintf(stderr, "Error: %s\n", err.Error())
-		}
-	}()
+	})
 
 	wg.Wait()
 

@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"veitangie.dev/sinq/internal/config"
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 	"veitangie.dev/spinq"
 )
 
@@ -25,48 +26,48 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 	tests := []struct {
 		name       string
 		cfg        config.ReporterConfig
-		results    []runner.ScenarioResult
+		results    []aggregator.ScenarioResult
 		wantOutput []string
 	}{
 		{
 			name: "Basic Output without Color",
 			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false},
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
 					Name:   "Test Scenario",
-					Status: runner.Success,
-					RequestResults: []runner.RequestResult{
-						{Name: "Req1", Status: runner.Success, Attempts: 1},
+					Status: event.Success,
+					RequestResults: []aggregator.RequestResult{
+						{Name: "Req1", Status: event.Success, Attempts: 1},
 					},
 				},
 			},
-			wantOutput: []string{" ✓ Scenario: Test Scenario", " ✓ PASSED in 100ms | Scenarios: 1✓ | 1 requests sent"},
+			wantOutput: []string{" ✓ Scenario: Test Scenario", " ✓ PASSED in 100ms | Scenarios: 1✓ | 1 request sent"},
 		},
 		{
 			name: "Output with Color",
 			cfg:  config.ReporterConfig{Color: config.Always, Verbose: false},
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
 					Name:   "Color Scenario",
-					Status: runner.Failure,
-					RequestResults: []runner.RequestResult{
-						{Name: "ReqColor", Status: runner.Failure, ErrorMessage: "boom", Attempts: 1},
+					Status: event.Failure,
+					RequestResults: []aggregator.RequestResult{
+						{Name: "ReqColor", Status: event.Failure, ErrorMessage: "boom", Attempts: 1},
 					},
 				},
 			},
-			wantOutput: []string{spinq.Red + "✗" + spinq.ResetStyle + " Scenario: Color Scenario", "   " + spinq.Red + "✗" + spinq.ResetStyle + " ReqColor", "     " + spinq.Red + "✗" + spinq.ResetStyle + " Error: boom", spinq.Red + "✗" + spinq.ResetStyle + " FAILED in 100ms | Scenarios: 1" + spinq.Red + "✗" + spinq.ResetStyle + " | 1 requests sent"},
+			wantOutput: []string{spinq.Red + "✗" + spinq.ResetStyle + " Scenario: Color Scenario", "   " + spinq.Red + "✗" + spinq.ResetStyle + " ReqColor", "     " + spinq.Red + "✗" + spinq.ResetStyle + " Error: boom", spinq.Red + "✗" + spinq.ResetStyle + " FAILED in 100ms | Scenarios: 1" + spinq.Red + "✗" + spinq.ResetStyle + " | 1 request sent"},
 		},
 		{
 			name: "Verbose Timings and Assertions",
 			cfg:  config.ReporterConfig{Color: config.Never, Verbose: true},
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
 					Name:   "Verbose Scenario",
-					Status: runner.Failure,
-					RequestResults: []runner.RequestResult{
+					Status: event.Failure,
+					RequestResults: []aggregator.RequestResult{
 						{
 							Name:             "ReqV",
-							Status:           runner.Failure,
+							Status:           event.Failure,
 							Pre:              1 * time.Millisecond,
 							Materialization:  2 * time.Millisecond,
 							Parsing:          3 * time.Millisecond,
@@ -93,12 +94,12 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 		{
 			name: "Aborted Status Formatting",
 			cfg:  config.ReporterConfig{Color: config.Always, Verbose: false},
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
 					Name:   "Aborted Scenario",
-					Status: runner.Aborted,
-					RequestResults: []runner.RequestResult{
-						{Name: "ReqA", Status: runner.Aborted},
+					Status: event.Aborted,
+					RequestResults: []aggregator.RequestResult{
+						{Name: "ReqA", Status: event.Aborted},
 					},
 				},
 			},
@@ -107,12 +108,12 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 		{
 			name: "Skipped Status Formatting",
 			cfg:  config.ReporterConfig{Color: config.Always, Verbose: false, Show: config.All},
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
 					Name:   "Skipped Scenario",
-					Status: runner.Unset,
-					RequestResults: []runner.RequestResult{
-						{Name: "ReqS", Status: runner.Unset},
+					Status: event.Unset,
+					RequestResults: []aggregator.RequestResult{
+						{Name: "ReqS", Status: event.Unset},
 					},
 				},
 			},
@@ -121,14 +122,14 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 		{
 			name: "Show NoSkip filters Skipped",
 			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.NoSkip},
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
 					Name:   "Skipped Scenario",
-					Status: runner.Unset,
+					Status: event.Unset,
 				},
 				{
 					Name:   "Success Scenario",
-					Status: runner.Success,
+					Status: event.Success,
 				},
 			},
 			wantOutput: []string{" ✓ Scenario: Success Scenario"},
@@ -136,14 +137,14 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 		{
 			name: "Success with skipped scenario prints PASSED",
 			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false},
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
 					Name:   "Skipped Scenario",
-					Status: runner.Unset,
+					Status: event.Unset,
 				},
 				{
 					Name:   "Success Scenario",
-					Status: runner.Success,
+					Status: event.Success,
 				},
 			},
 			wantOutput: []string{" ✓ PASSED in 100ms | Scenarios: 1✓ 1- | 0 requests sent"},
@@ -151,24 +152,24 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 		{
 			name: "Show Failures filters Success and Skipped",
 			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.Failed},
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
 					Name:   "Skipped Scenario",
-					Status: runner.Unset,
+					Status: event.Unset,
 				},
 				{
 					Name:   "Success Scenario",
-					Status: runner.Success,
-					RequestResults: []runner.RequestResult{
-						{Name: "Req1", Status: runner.Success},
-						{Name: "Req2", Status: runner.Unset},
+					Status: event.Success,
+					RequestResults: []aggregator.RequestResult{
+						{Name: "Req1", Status: event.Success},
+						{Name: "Req2", Status: event.Unset},
 					},
 				},
 				{
 					Name:   "Failure Scenario",
-					Status: runner.Failure,
-					RequestResults: []runner.RequestResult{
-						{Name: "Req3", Status: runner.Failure},
+					Status: event.Failure,
+					RequestResults: []aggregator.RequestResult{
+						{Name: "Req3", Status: event.Failure},
 					},
 				},
 			},
@@ -177,14 +178,14 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 		{
 			name: "Dump On Failure fields",
 			cfg:  config.ReporterConfig{Color: config.Never, Verbose: false, Show: config.All},
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
 					Name:   "Dump Scenario",
-					Status: runner.Failure,
-					RequestResults: []runner.RequestResult{
+					Status: event.Failure,
+					RequestResults: []aggregator.RequestResult{
 						{
 							Name:     "ReqDump",
-							Status:   runner.Failure,
+							Status:   event.Failure,
 							Request:  "GET / HTTP/1.1\n",
 							Response: "HTTP/1.1 500 Internal Server Error\n",
 						},
@@ -200,7 +201,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 			buf := &bytes.Buffer{}
 			rep := NewReporter(tt.cfg, buf)
 
-			sourceCh := make(chan runner.ScenarioResult, len(tt.results))
+			sourceCh := make(chan aggregator.ScenarioResult, len(tt.results))
 			timerCh := make(chan time.Duration, 1)
 
 			for _, res := range tt.results {
@@ -226,16 +227,16 @@ func TestStandardReporter_OutputPrint(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rep := NewReporter(config.ReporterConfig{Color: config.Never, Verbose: false}, buf)
 
-	sourceCh := make(chan runner.ScenarioResult, 1)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
 
 	outputBuf := bytes.NewBufferString("hello\nworld\n")
-	sourceCh <- runner.ScenarioResult{
+	sourceCh <- aggregator.ScenarioResult{
 		Name:   "Print Scenario",
-		Status: runner.Failure,
+		Status: event.Failure,
 		Output: outputBuf,
-		RequestResults: []runner.RequestResult{
-			{Name: "Req", Status: runner.Failure},
+		RequestResults: []aggregator.RequestResult{
+			{Name: "Req", Status: event.Failure},
 		},
 	}
 	close(sourceCh)

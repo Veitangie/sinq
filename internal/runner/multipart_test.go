@@ -146,6 +146,22 @@ func TestMakeMultipartBody_CustomBoundary(t *testing.T) {
 	})
 }
 
+func TestMakeMultipartBody_EndsWithClosingDelimiter(t *testing.T) {
+	ws := &mockWorkspace{FS: fstest.MapFS{}}
+	data := multipartData{
+		boundary: "SinqBoundary1234",
+		entries:  []multipartEntry{mpEntry(multipartEntry{contentDisposition: `form-data; name="a"`, data: "1"})},
+	}
+
+	body, _, err := makeMultipartBody(data, ws)
+	if err != nil {
+		t.Fatalf("makeMultipartBody: %v", err)
+	}
+	if !strings.HasSuffix(string(body), "\r\n--SinqBoundary1234--\r\n") {
+		t.Errorf("body does not end with the closing delimiter, tail: %q", string(body[max(0, len(body)-40):]))
+	}
+}
+
 func TestMakeMultipartBody_HandlesNilHeaders(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {

@@ -4,6 +4,7 @@
 package standard
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"strconv"
@@ -11,7 +12,8 @@ import (
 	"time"
 
 	"veitangie.dev/sinq/internal/config"
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 	"veitangie.dev/spinq"
 )
 
@@ -36,6 +38,7 @@ type reportData struct {
 	ranRequests            int
 	successfulRequests     int
 	abortedRequests        int
+	prefixedLabelsWriter   *prefixedWriter
 	prefixedScenarioWriter *prefixedWriter
 	prefixedRequestWriter  *prefixedWriter
 	prefixedVerboseWriter  *prefixedWriter
@@ -64,6 +67,7 @@ func newReportData(cfg config.ReporterConfig, writer io.Writer, size int) *repor
 		result.lightGray = LightGray
 		result.reset = spinq.ResetStyle
 	}
+	result.prefixedLabelsWriter = &prefixedWriter{prefix: []byte{' ', ' ', ' ', ' ', ' '}, underlying: writer}
 	result.prefixedScenarioWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "   %s┃%s ", result.magenta, result.reset), underlying: writer}
 	result.prefixedRequestWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "     %s┃%s ", result.cyan, result.reset), underlying: writer}
 	result.prefixedVerboseWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "     %s┃%s ", result.lightGray, result.reset), underlying: writer}
@@ -71,20 +75,20 @@ func newReportData(cfg config.ReporterConfig, writer io.Writer, size int) *repor
 	return &result
 }
 
-func (rd *reportData) report(result runner.ScenarioResult) error {
+func (rd *reportData) report(result aggregator.ScenarioResult) error {
 	rd.totalScenarios += 1
 
 	scenarioMark := rd.markSuccess
 	switch result.Status {
-	case runner.Unset:
+	case event.Unset:
 		fallthrough
-	case runner.Skipped:
+	case event.Skipped:
 		scenarioMark = rd.markSkipped
-	case runner.Aborted:
+	case event.Aborted:
 		scenarioMark = rd.markAborted
 		rd.ranScenarios += 1
 		rd.abortedScenarios += 1
-	case runner.Success:
+	case event.Success:
 		rd.ranScenarios += 1
 		rd.successfulScenarios += 1
 	default:
@@ -104,15 +108,15 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 	for _, request := range result.RequestResults {
 		rd.totalRequests += 1
 		switch request.Status {
-		case runner.Success:
+		case event.Success:
 			successfulRequestsScenario += 1
 			fallthrough
-		case runner.Failure:
+		case event.Failure:
 			fallthrough
-		case runner.Error:
+		case event.Error:
 			ranRequestsScenario += 1
 			sentRequestsScenario += request.Attempts
-		case runner.Aborted:
+		case event.Aborted:
 			abortedRequestsScenario += 1
 			ranRequestsScenario += 1
 			sentRequestsScenario += request.Attempts
@@ -130,14 +134,21 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 	case config.None:
 		return nil
 	case config.NoSkip:
-		if result.Status == runner.Unset || result.Status == runner.Skipped {
+		if result.Status == event.Unset || result.Status == event.Skipped {
 			return nil
 		}
 	case config.Failed:
-		if result.Status != runner.Failure && result.Status != runner.Error {
+		if result.Status != event.Failure && result.Status != event.Error {
 			return nil
 		}
 	case config.All:
+	}
+
+	fullScenarioName := bytes.NewBufferString(result.Name)
+	if result.TotalRunCount > 1 {
+		numberString := strconv.Itoa(result.CntId + 1)
+		fullScenarioName.WriteByte('#')
+		fullScenarioName.WriteString(numberString)
 	}
 
 	rd.printed = true
@@ -145,11 +156,16 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 
 	_, err := fmt.Fprintf(rd.writer, " %s Scenario: %s (%s in %s)%s\n",
 		scenarioMark,
-		result.Name,
+		fullScenarioName,
 		strings.Join(tally, " "),
 		fmtDuration(result.TotalDuration),
 		scenarioTackOn,
 	)
+	if err != nil {
+		return err
+	}
+
+	err = rd.reportLabels(result)
 	if err != nil {
 		return err
 	}
@@ -159,7 +175,7 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 		return err
 	}
 
-	if !rd.cfg.Verbose && (result.Status == runner.Success || result.Status == runner.Unset || result.Status == runner.Skipped) {
+	if !rd.cfg.Verbose && (result.Status == event.Success || result.Status == event.Unset || result.Status == event.Skipped) {
 		return nil
 	}
 
@@ -172,7 +188,27 @@ func (rd *reportData) report(result runner.ScenarioResult) error {
 	return nil
 }
 
-func (rd *reportData) reportOutput(result runner.ScenarioResult) error {
+func (rd *reportData) reportLabels(result aggregator.ScenarioResult) error {
+	if len(result.Labels) != 0 {
+		_, err := fmt.Fprint(rd.writer, "   Labels:\n")
+		if err != nil {
+			return err
+		}
+		for _, label := range result.Labels {
+			_, err := fmt.Fprint(rd.prefixedLabelsWriter, label)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprint(rd.prefixedLabelsWriter, "\n")
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (rd *reportData) reportOutput(result aggregator.ScenarioResult) error {
 	if result.Output != nil && result.Output.Len() != 0 {
 		_, err := fmt.Fprint(rd.writer, "   Output:\n")
 		if err != nil {
@@ -191,16 +227,16 @@ func (rd *reportData) reportOutput(result runner.ScenarioResult) error {
 	return nil
 }
 
-func (rd *reportData) reportRequest(request runner.RequestResult) error {
+func (rd *reportData) reportRequest(request aggregator.RequestResult) error {
 	requestMark := rd.markSuccess
 	switch request.Status {
-	case runner.Unset:
+	case event.Unset:
 		fallthrough
-	case runner.Skipped:
+	case event.Skipped:
 		requestMark = rd.markSkipped
-	case runner.Aborted:
+	case event.Aborted:
 		requestMark = rd.markAborted
-	case runner.Success:
+	case event.Success:
 	default:
 		requestMark = rd.markFail
 	}
@@ -260,7 +296,7 @@ func (rd *reportData) reportRequest(request runner.RequestResult) error {
 	return nil
 }
 
-func (rd *reportData) reportDurations(request runner.RequestResult) error {
+func (rd *reportData) reportDurations(request aggregator.RequestResult) error {
 	_, err := reportTime(rd.prefixedVerboseWriter, "Pre:    %8s\n", request.Pre)
 	if err != nil {
 		return err
@@ -318,13 +354,19 @@ func (rd *reportData) reportEnd(duration time.Duration) error {
 		prefix = "\n"
 	}
 
-	_, err := fmt.Fprintf(rd.writer, "%s %s %s in %s | Scenarios: %s | %d requests sent\n",
+	plural := "s"
+	if rd.ranRequests == 1 {
+		plural = ""
+	}
+
+	_, err := fmt.Fprintf(rd.writer, "%s %s %s in %s | Scenarios: %s | %d request%s sent\n",
 		prefix,
 		finalMark,
 		statusText,
 		fmtDuration(duration),
 		strings.Join(tally, " "),
 		rd.ranRequests,
+		plural,
 	)
 	return err
 }

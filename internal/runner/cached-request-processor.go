@@ -14,18 +14,23 @@ import (
 
 	"golang.org/x/sync/singleflight"
 	"veitangie.dev/sinq/internal/config"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/sinqerror"
 )
 
 type intermediate struct {
-	status     string
-	statusCode int
-	headers    http.Header
-	proto      string
-	filenameTo string
-	size       int64
-	oversized  bool
-	body       []byte
-	attempt    int
+	body        []byte
+	headers     http.Header
+	status      string
+	proto       string
+	filenameTo  string
+	size        int64
+	leaderToken int
+	attempt     int
+	statusCode  int
+	oversized   bool
+	fromCache   bool
+	leader      bool
 }
 
 type cachedRequestProcessor struct {
@@ -34,8 +39,18 @@ type cachedRequestProcessor struct {
 	transport    http.RoundTripper
 	maxCacheSize config.DataSize
 	cacheTimeout time.Duration
-	logger       *slog.Logger
+	eb           *event.Bus
 	cache        sync.Map
+}
+
+func (sp *cachedRequestProcessor) log(level slog.Level, msg string, attrs ...slog.Attr) event.Event {
+	return event.Event{
+		Kind:    event.Log,
+		Level:   level,
+		Message: msg,
+		Attrs:   attrs,
+		Source:  event.Runner,
+	}
 }
 
 func (sp *cachedRequestProcessor) lookup(hash string) (intermediate, error, bool) {
@@ -53,39 +68,50 @@ func (sp *cachedRequestProcessor) process(
 	filenameTo string,
 	getBody func(Workspace) func() (io.ReadCloser, error),
 	workspace Workspace,
+	leaderToken int,
 ) <-chan singleflight.Result {
 
 	client := http.Client{
 		Transport: sp.transport,
-		Timeout:   sp.cacheTimeout,
 	}
 
 	res := sp.group.DoChan(hash, singleflightSafe(func() (any, error) {
 		if res, err, ok := sp.lookup(hash); ok {
-			sp.logger.Debug("[Runner] Found cached request, not running", "host", request.URL.Host, "path", request.URL.Path)
+			sp.eb.Send(
+				context.Background(),
+				sp.log(slog.LevelDebug, "[Runner] Found cached request, not running", slog.String("host", request.URL.Host), slog.String("path", request.URL.Path)),
+			)
 			return res, err
 		}
 
-		sp.logger.Debug("[Runner] Running cached http request for the first time", "host", request.URL.Host, "path", request.URL.Path)
+		sp.eb.Send(
+			context.Background(),
+			sp.log(slog.LevelDebug, "[Runner] Running cached http request for the first time", slog.String("host", request.URL.Host), slog.String("path", request.URL.Path)),
+		)
 		request.GetBody = getBody(workspace)
 		body, err := getBody(workspace)()
 		if err != nil {
-			sp.logger.Debug("[Runner] Failed to open request body", "error", err)
+			sp.eb.Send(context.Background(), sp.log(slog.LevelDebug, "[Runner] Failed to open request body", errAttr(err)))
 			return intermediate{}, err
 		}
 
 		request.Body = body
-		betterContext, cancel := context.WithTimeout(sp.ctx, sp.cacheTimeout)
+		betterContext, cancel := context.WithTimeoutCause(sp.ctx, sp.cacheTimeout, sinqerror.ErrRequestTimeout)
 		defer cancel()
 		betterRequest := request.WithContext(betterContext)
 
 		resp, err := client.Do(betterRequest)
 		if err != nil {
+			err = sinqerror.WrapContextTimeoutErr(betterContext, err)
 			return intermediate{}, fixClientErr(err)
 		}
 
 		res, err := makeIntermediate(workspace, filenameTo, int64(sp.maxCacheSize.ByteAmount), resp)
-		sp.cache.Store(hash, cachedResult[intermediate]{res: res, err: err})
+		res.leaderToken = leaderToken
+		cachedRes := res
+		cachedRes.fromCache = true
+		err = sinqerror.SwapContextTimeoutErr(betterContext, err)
+		sp.cache.Store(hash, cachedResult[intermediate]{res: cachedRes, err: err})
 		return res, err
 	}))
 
@@ -122,7 +148,7 @@ func makeIntermediate(workspace Workspace, filenameTo string, maxBodySize int64,
 		}
 		defer file.Close()
 
-		written, err := io.Copy(file, response.Body)
+		written, err := io.Copy(file, wrappingReader{response.Body})
 		if err != nil {
 			return result, err
 		}
@@ -134,7 +160,7 @@ func makeIntermediate(workspace Workspace, filenameTo string, maxBodySize int64,
 	limited := io.LimitReader(response.Body, maxBodySize+1)
 	data, err := io.ReadAll(limited)
 	if err != nil {
-		return result, err
+		return result, sinqerror.WrapNetworkError(err)
 	}
 
 	if uint64(len(data)) > uint64(maxBodySize) {

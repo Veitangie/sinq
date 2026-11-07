@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 )
 
 type mockReporter struct {
@@ -19,7 +19,7 @@ type mockReporter struct {
 	receivedCount atomic.Int32
 }
 
-func (m *mockReporter) Report(source <-chan runner.ScenarioResult, timer <-chan time.Duration, size int) error {
+func (m *mockReporter) Report(source <-chan aggregator.ScenarioResult, timer <-chan time.Duration, size int) error {
 	for range source {
 		m.receivedCount.Add(1)
 	}
@@ -34,14 +34,14 @@ func TestReporterPool_ConcurrencyRaceAndDelivery(t *testing.T) {
 
 	pool := NewPool(rep1, rep2, rep3)
 
-	sourceCh := make(chan runner.ScenarioResult, 50)
+	sourceCh := make(chan aggregator.ScenarioResult, 50)
 	timerCh := make(chan time.Duration, 1)
 
 	payloadCount := 1000
 
 	go func() {
 		for range payloadCount {
-			sourceCh <- runner.ScenarioResult{Name: "RaceTestPayload"}
+			sourceCh <- aggregator.ScenarioResult{Name: "RaceTestPayload"}
 		}
 		close(sourceCh)
 		timerCh <- 1 * time.Second
@@ -102,9 +102,9 @@ func TestReporterPool_PropagatesReporterError(t *testing.T) {
 
 	pool := NewPool(good, bad)
 
-	sourceCh := make(chan runner.ScenarioResult, 1)
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
 	timerCh := make(chan time.Duration, 1)
-	sourceCh <- runner.ScenarioResult{Name: "Payload"}
+	sourceCh <- aggregator.ScenarioResult{Name: "Payload"}
 	close(sourceCh)
 	timerCh <- 1 * time.Millisecond
 	close(timerCh)

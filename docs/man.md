@@ -1,4 +1,4 @@
-# sinq 1 "June 2026" "sinq" "Sinq Manual"
+# sinq 1 "November 2026" "sinq" "Sinq Manual"
 
 ## NAME
 
@@ -14,10 +14,10 @@ sinq - The Spanish Inquisition
 
 ## CONCEPTS
 ### Scenarios and Treewalker
-The basic unit of execution for `sinq` is a scenario. `sinq` uses a directory-traversal engine called the Treewalker to treat your physical filesystem as a Directed Acyclic Graph (DAG). It recursively descends into subdirectories, inheriting and appending sorted `.scenario` and `.sinq` files from parent directories. Once it reaches a leaf directory (a directory containing at least one `.sinq` or `.scenario` file but no subdirectories), it compiles the path into an executable scenario.
+The unit of execution is a scenario. Each directory inherits the naturally sorted `.scenario` and `.sinq` files of its parents and appends its own. A leaf directory (no subdirectories, at least one `.sinq` or `.scenario` file) becomes one scenario.
 
 ### Concurrency
-In `sinq`, the absolute unit of concurrency is the Scenario, not the Request. Requests within each scenario are strictly guaranteed to execute sequentially, while multiple scenarios execute simultaneously in a worker pool.
+Requests within a scenario run in order. Scenarios run concurrently in a pool of `--workers` workers.
 
 ## FILE FORMAT
 
@@ -42,15 +42,15 @@ Lifecycle scripts have reserved names, and are executed at different times durin
 
 * `$PRE`: Executes immediately when a worker picks up the request, before it is materialized.
 
-* `$RETRY`: Executes immediately after receiving the HTTP response. It must return a Lua number representing milliseconds to wait before retrying, or a negative number to stop.
+* `$RETRY`: Executes immediately after every attempt, including one that got no response (then `res.error` is set). It must return a Lua number representing milliseconds to wait before retrying, or a negative number to stop.
 
 * `$ASSERT`: Executes after the retry loop completes. Used to fail tests.
 
-* `$POST`: Executes after assertions. Used to extract data from the response and save it to the global sandbox.
+* `$POST`: Executes after assertions (after failed ones only if `fail_fast` is off). Used to extract data from the response and save it to the global sandbox.
 
 ## CONFIGURATION
 
-`sinq` uses JSON-formatted `.scenario` files along the scenario path to manage environments, timeouts, and other configurations. When a leaf directory inherits a `.scenario` file from a parent, the configurations are deep merged (the only exclusion being the `env_matrix` and `tag` lists, which all get combined into flat lists), with the deeper (child) configuration taking precedence. Unmentioned default values are preserved. 
+`sinq` uses JSON-formatted `.scenario` files along the scenario path to manage environments, timeouts, and other configurations. When a leaf directory inherits a `.scenario` file from a parent, the configurations are deep merged (the only exclusion being the `env_matrix` and `tags` lists, which all get combined into flat lists), with the deeper (child) configuration taking precedence. Unmentioned default values are preserved. 
 
 Available keys include `name`, `description`, `env`, `req_timeout`, `script_timeout`, `timeout`, `fail_fast`, `max_retries`, `max_redirects`, `max_body`, `env_matrix` and `tags`. The `env` object is parsed into a global Lua table and can be accessed directly in any Lua script. `env_matrix` is accumulated from all the `.scenario` files in the scenario. Every entry should be a json object, every key being a label for a particular dataset, and the value for the key being another object. Then, treating every entry as a matrix or axis, `sinq` creates a Cartesian product of all of them, and the scenario is run multiple times for every unique resulting combination, the combinations being deep merged with the `env` data.
 
@@ -80,8 +80,8 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **-w**, **--workers** *int*
 : Number of concurrent workers (default 10).
 
-**-c**, **--count** *uint*
-: Number of launches for every scenario (default 1).
+**-c**, **--count** *int*
+: Number of launches for every scenario (default 1). Must be positive. With more than one launch, each is reported with its run number, counting from 1, after the scenario name (for example *checkout#2*).
 
 **-s**, **--secret** *string*
 : Key=value pair overrides for scenario secrets.
@@ -114,7 +114,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Disable spinner animation.
 
 **--dump-on-failure**
-: Print full request and response data on failed assertion.
+: Print full request and response data of a request that failed, errored or was aborted.
 
 **--secrets-file** *path*
 : Path to JSON-formatted secrets file.
@@ -137,21 +137,24 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **--completion**
 : Output shell completion script for the detected shell (bash, zsh, fish, or powershell).
 
-## ENVIRONMENTAL VARIABLES
+## ENVIRONMENT
 
 `sinq` reads the following environment variables:
 
 **SINQ_LUA_PATH**
-: Defines a list of directories that `sinq` will look for plugins in, joined with ':' on Linux and MacOS, ';' on Windows. Is ignored if **--plugins** flag is used
+: Defines a list of directories that `sinq` will look for plugins in, joined with ':' on Linux and MacOS, ';' on Windows. Is ignored if **--plugins** flag is used.
 
-**HTTP_PROXY**
-: Defines the proxy to use for http requests
+**NO_COLOR**, **SINQ_NO_COLOR**
+: Any non-empty value disables colored output and the spinner under `--color auto`.
 
-**HTTPS_PROXY**
-: Defines the proxy to use for https requests
+**CI**
+: Any non-empty value has the same effect as **NO_COLOR**, and makes `sinq` warn when `--log-level debug` or `--dump-on-failure` is set.
+
+**HTTP_PROXY**, **HTTPS_PROXY**
+: The proxy to use for http and https requests.
 
 **NO_PROXY**
-: If set, no proxy is used
+: Comma-separated hosts that bypass the proxy.
 
 ## LUA API REFERENCE
 ### Global Variables
@@ -218,10 +221,10 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Decodes a JWT token without validating signature.
 
 **sinq.jwt.verify(token, key, algo?)**
-: Verifies the token using the key and optional algorithm. Algorithm defaults to hs256.
+: Verifies the token using the key. Without `algo`, the algorithm named in the token's own header is used; pass `algo` to require a specific one.
 
 **sinq.jwt.sign(claimsTable, key, method?)**
-: Creates and signs a JWT token. Method defaults to hs256. Passing a cyclic `claimsTable` is UB.
+: Creates and signs a JWT token. Method defaults to HS256. A cyclic `claimsTable` returns `nil` and an error.
 
 ### JSON API
 
@@ -333,7 +336,10 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Lua table representation of response headers.
 
 **res.attempt**
-: Count of times the request was retried before.
+: The current attempt, counting from 1.
+
+**res.error**
+: Set when the attempt got no response (refused, DNS, TLS, `req_timeout`, ...), otherwise nil. A table with `kind` (`timeout`, `dns`, `refused`, `reset`, `tls`, `redirects` or `other`) and `message`; `tostring(res.error)` gives `kind: message`. The response fields are nil for that attempt. `$RETRY` still runs; if the last attempt failed, the request is an error and `$ASSERT`/`$POST` don't run. Named kinds are stable within a major version; `other` may be split in a minor release.
 
 **res.size**
 : Count of bytes written to file if `req.saveResponseTo` was called in `$PRE` hook.
@@ -346,7 +352,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Success. All discovered scenarios executed successfully, all network calls completed, and no `$ASSERT` blocks triggered a failure.
 
 **1**
-: Failure. One or more scenarios failed an assertion, encountered a network timeout, crashed, or the CLI received invalid arguments.
+: Failure. One or more scenarios failed an assertion, errored (including a request that still got no response after `$RETRY`) or were aborted, or the CLI received invalid arguments. Also returned when no scenario is selected to run: none were found, or the **--tag**/**--name** filters excluded all of them.
 
 ## AUTO-COMPLETION
 To load completions dynamically in your current session:

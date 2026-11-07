@@ -23,6 +23,11 @@ type requestParser struct {
 
 const userAgent string = "The Spanish Inquisition/1.0"
 
+var allowedSchemes map[string]bool = map[string]bool{
+	"http":  true,
+	"https": true,
+}
+
 func coalesceErrors(errs ...error) error {
 	for _, err := range errs {
 		if err != nil {
@@ -227,6 +232,9 @@ func (r *requestParser) validateURL(full *url.URL) error {
 	}
 	if len(full.Host) == 0 {
 		return r.parsingError("Empty host in URL")
+	}
+	if !allowedSchemes[full.Scheme] {
+		return r.parsingError(fmt.Sprintf("Unsupported scheme: %v", full.Scheme))
 	}
 	return nil
 }

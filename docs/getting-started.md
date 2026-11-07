@@ -67,33 +67,113 @@ To get syntax highlighting and better editor support, check out the community ex
 
 ## Your First Test
 
-`sinq` builds scenarios from your directory layout. Here is a one-request health check.
+Let's test a real login flow against [DummyJSON](https://dummyjson.com), a free public API made for practice. It needs no sign-up and comes with a demo user. The flow has three steps:
 
-1. Make a directory for it:
+1. log in and receive a token,
+2. use the token to read your own profile,
+3. create a product.
+
+In `sinq`, a flow like this is a folder, and each step is one file in it. Files run in name order, which is why they start with numbers.
+
+1. Make a folder for the flow:
    ```bash
-   mkdir -p my-tests/health
-   cd my-tests/health
+   mkdir -p my-tests/login-flow
+   cd my-tests/login-flow
    ```
 
-2. Create `01_healthcheck.sinq`:
+2. Create `01_login.sinq`. The top half is the HTTP request exactly as it goes over the wire. The `$ASSERT` block checks the response, and the `$POST` block saves what later steps need:
    ```http
-   ### Check API Health
-   GET https://httpbin.org/get
+   ### Log in
+   POST https://dummyjson.com/auth/login
+   Content-Type: application/json
+
+   {
+       "username": "emilys",
+       "password": "emilyspass"
+   }
 
    $ASSERT{
-       sinq.assert.code(200, "Healthcheck failed")
+       -- The request itself must succeed...
+       sinq.assert.code(200, "Login failed")
+       -- ...and the response must contain a token we can use.
+       sinq.assert.isTrue(type(res.json().accessToken) == "string", "No token in the response")
+   }
+
+   $POST{
+       -- Keep the token for the next requests. Without `local`, the
+       -- variable lives for the whole scenario.
+       TOKEN = res.json().accessToken
+   }
+   ```
+   The blocks are written in [Lua](https://www.lua.org/start.html), a small scripting language. `res.json()` reads the response body as JSON, and lines starting with `--` are comments.
+
+3. Create `02_profile.sinq`. `${ TOKEN }` drops the saved token into the header:
+   ```http
+   ### Read your own profile
+   GET https://dummyjson.com/auth/me
+   Authorization: Bearer ${ TOKEN }
+
+   $ASSERT{
+       sinq.assert.code(200, "Could not read the profile")
+       -- We logged in as emilys, so that's who the API should say we are.
+       sinq.assert.equals(res.json().username, "emilys", "Logged in as the wrong user")
    }
    ```
 
+4. Create `03_create_product.sinq`:
+   ```http
+   ### Create a product
+   POST https://dummyjson.com/products/add
+   Content-Type: application/json
+
+   {
+       "title": "Neutrino detector",
+       "price": 42
+   }
+
+   $ASSERT{
+       sinq.assert.code(201, "Product was not created")
+       -- The API answers with the product it created, including a new id.
+       sinq.assert.equals(res.json().title, "Neutrino detector")
+       sinq.assert.isTrue(type(res.json().id) == "number", "The new product has no id")
+   }
+   ```
+   DummyJSON only pretends to save it, so you can run this as often as you like.
+
 ## Running `sinq`
 
-Point `sinq` at the directory:
+Go back to the folder above `my-tests` and point `sinq` at it:
 
 ```bash
+cd ../..
 sinq ./my-tests
 ```
 
-`sinq` finds one scenario (`health`), sends its single request, and prints a pass line for it. The process exits `0`. If the assertion fails, the line is red and the exit code is `1`.
+`sinq` finds one scenario, `login-flow`, runs its three requests in order and prints:
+
+```text
+ ✓ PASSED in 994ms | Scenarios: 1✓ | 3 requests sent
+```
+
+The process exits with code `0`, which is what CI looks at.
+
+## Break It on Purpose
+
+Change the password in `01_login.sinq` to `"wrong"` and run `sinq ./my-tests` again:
+
+```text
+ ✗ Scenario: login-flow (1✗ 2- in 463ms)
+   ✗ Log in (463ms)
+     ✗ Failed assertions: Login failed, No token in the response
+   - Read your own profile (0ns)
+   - Create a product (0ns)
+
+ ✗ FAILED in 464ms | Scenarios: 1✗ | 1 request sent
+```
+
+The login fails with both of your messages, and the two later steps don't run (`-`): by default (`fail_fast`), a scenario stops at its first failed request. The exit code is now `1`, so a CI pipeline would stop here. Put the password back and everything passes again.
+
+From here, every new folder you add under `my-tests` becomes another scenario, and `sinq` runs them all at the same time.
 
 ## Next
 

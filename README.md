@@ -13,7 +13,7 @@ Have you ever felt the pain of wiring up a bunch of independent requests into on
 
 # sinq 
 
-`sinq` is a concurrent integration and end-to-end http testing tool that treats your filesystem as a workflow definition.
+`sinq` tests your API. It runs sequences of HTTP requests as workflows (log in, create, poll, check) and verifies every response along the way.
 
 Write requests as near-raw HTTP, add Lua where logic is needed, and organize files into directory trees. Every leaf directory becomes an isolated execution scenario with its own state, configuration, and request chain.
 
@@ -81,7 +81,7 @@ Authorization: Bearer ${AUTH_TOKEN}
 
 { "action": "export" }
 
-$RETRY{ return sinq.retry.when(res.json().status == "pending", 50 * sinq.time.ms) }
+$RETRY{ return sinq.retry.when(res.error ~= nil or res.json().status == "pending", 50 * sinq.time.ms) }
 
 $ASSERT{ sinq.assert.isTrue(res.json().status == "complete", "Job never completed") }
 ```
@@ -220,7 +220,7 @@ curl -sL https://raw.githubusercontent.com/Veitangie/sinq/refs/heads/main/instal
 </details>
 
 <details>
-<summary><strong>🐹 Go Install (Requires Go 1.26.6+)</strong></summary>
+<summary><strong>🐹 Go Install (Requires Go 1.27.3+)</strong></summary>
 
 If you have a Go environment set up, you can compile and install directly from the module.
 
@@ -348,11 +348,11 @@ There are two categories of scripts within a `.sinq` file:
     * `req.attach("path/file.txt")` — Replaces the request body with the contents of a file. (Fails if a body is already defined in the request).
     * `req.saveResponseTo("path/download.bin")` — Streams the incoming response body directly to disk, bypassing the Lua memory buffer.
     * `req.cache(bool?)` / `req.cache(key)` — Opts-in to client-side request caching. Parameter defaults to `true` if omitted. Without a key, the cache is based on the data sent over the wire, its cookies and any attached filenames. With a string key, every request using that key shares one cached response, so prefix keys yourself when requests must stay apart (`"auth:" .. env.phone`). The first request to fill a key decides what's stored, including a `saveResponseTo` target. Retries are cached separately, so polling still works.
-    * `req.skip(bool?)` — Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is marked as `Aborted` without throwing a failure.
+    * `req.skip(bool?)` — Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is reported as skipped, without a test failure.
     * `req.multipart(entry, ...)` — Builds a `multipart/form-data` body from one or more part tables (`{ name, data | source, filename?, contentType?, contentDisposition?, headers? }`), passed positionally or as one array table. Repeated calls accumulate. Mutually exclusive with `req.attach` and a literal body.
     * `req.multipartBoundary(string)` — Pins the multipart boundary instead of using a random one.
 
-* **`$RETRY` (Retry Policies):** Executes immediately after receiving the HTTP response. **This is the only lifecycle script that must return a value.** It must return a Lua number representing milliseconds to wait before retrying, or a negative number to stop retrying.
+* **`$RETRY` (Retry Policies):** Executes immediately after every attempt, including one that got no response (`res.error` is set then). **This is the only lifecycle script that must return a value.** It must return a Lua number representing milliseconds to wait before retrying, or a negative number to stop retrying.
     * Scope-Exclusive API: `sinq.retry.when()`, `sinq.retry.whenExponential()`, `sinq.retry.withJitter()`.
 
 * **`$ASSERT` (Validation):** Executes after the retry loop completes. Used to fail tests.
@@ -368,7 +368,7 @@ There are two categories of scripts within a `.sinq` file:
 
 ### Globals & Control Flow
 * `env` — Table of environment variables configured for the scenario.
-* `secrets` — Table of secrets passed via the `-s, --secrets, --secrets-file` arguments.
+* `secrets` — Table of secrets passed via the `-s, --secret, --secrets-file` arguments.
 * `sinq.setNextRequest(index)` — Change execution flow to the n-th request (1-indexed). Allows loops or skipping requests. A request that runs several times is reported once, with the most severe status of its runs, the failures of all runs, and its attempts and timings added up.
 * `sinq.finishScenario()` — Change execution flow to end after the current request.
 * `res` — Shorthand for current request's response table
@@ -408,10 +408,11 @@ There are two categories of scripts within a `.sinq` file:
 All completed responses are stored in the global `sinq.responses` table. Lua is 1-indexed, so the response to the first request is `sinq.responses[1]`.
 
 Each response table contains:
-* `attempt` *(number)* — The current retry iteration.
+* `attempt` *(number)* — The current attempt, counting from 1.
+* `error` *(table | nil)* — Set when the attempt got no response (refused, DNS, TLS, `req_timeout`, ...): `kind` (`timeout`, `dns`, `refused`, `reset`, `tls`, `redirects` or `other`) and `message`; `tostring(res.error)` gives `kind: message`. The response fields are `nil` then. `$RETRY` still runs; if the last attempt failed, the request is an error. See the [documentation](https://sinq.veitangie.dev/lua-api#send-failures-reserror).
 * `code` *(number)* — HTTP status code.
 * `headers` *(table)* — Response headers (multiple headers with the same key are stored as nested array tables).
-* `oversized` *(boolean | nil)* — `true` if the payload exceeded `MaxBodySize` and was clamped.
+* `oversized` *(boolean | nil)* — `true` if the payload exceeded `max_body` and was truncated.
 * `size` *(number | nil)* — Total bytes written to disk (only present if `req.saveResponseTo()` was used in `$PRE`).
 * `bodyRaw` *(string | nil)* — Raw response body bytes (only present if `req.saveResponseTo()` wasn't used in `$PRE`).
 * `bodyJson` *(table | nil)* — The cached JSON table (initially `nil`).
@@ -448,13 +449,13 @@ Default configuration that can be overridden in `.scenario` files:
 
 * **`name`**: The name of the scenario. If this particular `.scenario` file is used in several scenarios - they will all have the same name.
 * **`description`**: Description of the scenario.
-* **`env`**: Object that will be parsed into `sinq.env` Lua table, which will then be accessible from all Lua scripts.
+* **`env`**: Values available as the `env` table in Lua and `${env.KEY}` in requests.
 * **`req_timeout`**: Timeout for any single request in the scenario.
 * **`script_timeout`**: Timeout for any single script run in the scenario.
 * **`timeout`**: Total timeout for the whole scenario.
-* **`fail_fast`**: When true, scenarios will not be ran if any of them fails to compile for some reason, and the scenarios stop at the first failed assertion.
-* **`max_retries`**: The maximum amount of times any request in the scenario can be retried upon retry script returning a valid non-negative number.
-* **`max_redirects`**: The maximum amount of redirects the client will follow before returning the redirect as the actual response.
+* **`fail_fast`**: When true, the scenario stops at the first failed assertion and that request's `$POST` is skipped.
+* **`max_retries`**: Maximum number of retries per request when `$RETRY` keeps returning a non-negative delay.
+* **`max_redirects`**: Maximum number of redirects to follow. One more redirect fails the attempt with `res.error.kind` `redirects`.
 * **`max_body`**: Maximum size of response body that will be stored in memory during scenario execution. If a response exceeds this limit, it is safely truncated and the response's `oversized` flag is set to `true`.
 * **`env_matrix`**: Data sets for the environment matrix mechanism - `sinq`'s take on matrix/combinatorial/parametrized testing. For more information and examples please check out the [documentation](https://sinq.veitangie.dev/env-matrix).
 * **`tags`**: Tags or labels assigned to scenarios containing this `.scenario` file. They get collected into one list for the resulting scenario. In JUnit reports they're written as a `tags` property of the scenario's `<testsuite>`.
@@ -465,7 +466,7 @@ Default configuration that can be overridden in `.scenario` files:
 
 Secrets are loaded from a JSON file provided through `--secrets-file` and overrides passed with `--secret|-s` flag (for multiple overrides use the flag multiple times).
 
-To reduce the risk of accidental exposure, some error messages intentionally omit possibly sensitive data. Verbose mode (`--verbose`) as well as `--log-level debug` and `--dump-on-failure` may include additional debugging information and **should be used carefully in CI environments where logs are retained**. Assertion failure messages from `sinq.assert.equals` and `sinq.assert.contains` leave out the values they compare and report only types and field paths. Custom messages are shown as written, so don't put secrets in them.
+To reduce the risk of accidental exposure, some error messages intentionally omit possibly sensitive data. `--log-level debug` and `--dump-on-failure` may include additional debugging information and **should be used carefully in CI environments where logs are retained**. Assertion failure messages from `sinq.assert.equals` and `sinq.assert.contains` leave out the values they compare and report only types and field paths. Custom messages are shown as written, so don't put secrets in them.
 
 `--unrestricted` (`-u`) loads the full Lua `os` and `io` libraries, which lets scenario scripts run shell commands, access the filesystem outside the scenario directory, and terminate `sinq`. Only use it with scenario files you fully trust. See [Libraries](https://sinq.veitangie.dev/lua-api/#12-libraries) for details.
 
@@ -482,7 +483,7 @@ sinq ./tests/integration
 # Run tests and output a JUnit report for your CI pipeline
 sinq -f junit -o report.xml ./tests/integration
 
-# Ignore self-signed TLS certificates and enable verbose debug logging
+# Ignore self-signed TLS certificates and show per-stage timings
 sinq -iV ./tests/local
 
 # Run a single file as a standalone scenario with default configuration
@@ -503,7 +504,7 @@ sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
   -u, --unrestricted      Load Lua os/io modules - disables the script sandbox
   -p, --print             Capture lua output and show it in the report
   -w, --workers int       Number of concurrent workers (default 10)
-  -c, --count uint        Number of launches for every scenario (default 1)
+  -c, --count int         Number of launches for every scenario (default 1)
   -s, --secret string     Key=value pair overrides for scenario secrets
   -e, --env string        Key=value pair overrides for all scenario environments
   -o, --out path          Path to write the output file (prints to stdout if omitted)
@@ -514,7 +515,7 @@ sinq -e "API.TIMEOUT=500" -s 'DB.HOSTS=["10.0.0.1", "10.0.0.2"]' ./tests
   -t, --tag string        Execute only scenarios that have at least one of passed tags
   -n, --name string       Execute only scenarios which names match at least one of passed regular expressions
   --no-spinner            Disable spinner animation
-  --dump-on-failure       Print full request and response data on failed assertion
+  --dump-on-failure       Print full request and response data of failed, errored or aborted requests
   --secrets-file string   Path to JSON-formatted secrets file
   --no-tag string         Do not execute scenarios that have the tag
   --no-name string        Do not execute scenarios which names match the regular expression
@@ -557,14 +558,21 @@ The compatibility promise covers:
 - The `.sinq` file format and the `.scenario` configuration schema.
 - The Lua API surface exposed to scripts (globals, the `sinq.*` namespace, and the
   lifecycle scopes).
+- The `res.error.kind` values. A named kind (`timeout`, `dns`, `refused`, `reset`,
+  `tls`, `redirects`) keeps its meaning and is only removed or narrowed in a major
+  release. The one exception is `other`: a minor release may split errors off it into
+  a new named kind, so a check against `other` can change in a minor release.
 - The structure of the JUnit XML report.
 
 It does **not** cover, and any of the following may change in any release:
 
 - The exact text, layout, and colors of the human-readable `std` reporter.
 - Log message wording and formatting.
+- The wording of error messages, including `res.error.message` and `tostring(res.error)`.
 - Anything under `internal/` (this module exposes no importable Go API).
 - Performance characteristics.
+
+Changes in each release are listed in the [changelog](CHANGELOG.md).
 
 ---
 

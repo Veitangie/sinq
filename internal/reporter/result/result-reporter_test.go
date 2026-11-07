@@ -7,23 +7,24 @@ import (
 	"testing"
 	"time"
 
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 )
 
 func TestResultReporter(t *testing.T) {
 	tests := []struct {
 		name        string
-		results     []runner.ScenarioResult
+		results     []aggregator.ScenarioResult
 		size        int
 		wantSuccess bool
 	}{
 		{
 			name: "All Success",
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
-					RequestResults: []runner.RequestResult{
-						{Status: runner.Success},
-						{Status: runner.Success},
+					RequestResults: []aggregator.RequestResult{
+						{Status: event.Success},
+						{Status: event.Success},
 					},
 				},
 			},
@@ -31,11 +32,11 @@ func TestResultReporter(t *testing.T) {
 		},
 		{
 			name: "One Failure",
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
-					RequestResults: []runner.RequestResult{
-						{Status: runner.Success},
-						{Status: runner.Failure},
+					RequestResults: []aggregator.RequestResult{
+						{Status: event.Success},
+						{Status: event.Failure},
 					},
 				},
 			},
@@ -43,10 +44,10 @@ func TestResultReporter(t *testing.T) {
 		},
 		{
 			name: "One Error",
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
-					RequestResults: []runner.RequestResult{
-						{Status: runner.Error},
+					RequestResults: []aggregator.RequestResult{
+						{Status: event.Error},
 					},
 				},
 			},
@@ -54,10 +55,10 @@ func TestResultReporter(t *testing.T) {
 		},
 		{
 			name: "Request Aborted counts as failure",
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
-					RequestResults: []runner.RequestResult{
-						{Status: runner.Aborted},
+					RequestResults: []aggregator.RequestResult{
+						{Status: event.Aborted},
 					},
 				},
 			},
@@ -65,19 +66,19 @@ func TestResultReporter(t *testing.T) {
 		},
 		{
 			name: "Scenario Aborted counts as failure",
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
-					Status: runner.Aborted,
+					Status: event.Aborted,
 				},
 			},
 			wantSuccess: false,
 		},
 		{
 			name: "Missing scenarios count as failure",
-			results: []runner.ScenarioResult{
+			results: []aggregator.ScenarioResult{
 				{
-					RequestResults: []runner.RequestResult{
-						{Status: runner.Success},
+					RequestResults: []aggregator.RequestResult{
+						{Status: event.Success},
 					},
 				},
 			},
@@ -89,7 +90,7 @@ func TestResultReporter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rep := NewResultReporter()
-			sourceCh := make(chan runner.ScenarioResult, len(tt.results))
+			sourceCh := make(chan aggregator.ScenarioResult, len(tt.results))
 			timerCh := make(chan time.Duration, 1)
 
 			for _, res := range tt.results {

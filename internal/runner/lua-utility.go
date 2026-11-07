@@ -541,6 +541,11 @@ func (w *worker) captureBodyToFile(body io.Reader, filenameTo string) (int64, er
 	return io.Copy(file, body)
 }
 
+func (w *worker) requestCompletedErr(attempt int, err error) error {
+	w.lc.RecordResponseError(attempt, err)
+	return nil
+}
+
 func (w *worker) requestCompleted(response intermediate) (string, error) {
 	w.lc.RecordResponseMeta(response.attempt, response.statusCode, response.headers)
 
@@ -597,4 +602,11 @@ func (w *worker) setupScenarioEnvironment(ctx context.Context, env map[string]an
 	w.lc.SetupScenarioEnvironment(w.setRequestIdx, w.finishScenario, w.failAssert, w.env.secrets, env)
 
 	return nil
+}
+
+func (w *worker) teardownScenarioEnvironment() {
+	if w.lc != nil {
+		w.lc.Close()
+		w.lc = nil
+	}
 }

@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"veitangie.dev/sinq/internal/runner"
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 	"veitangie.dev/sinq/internal/timer"
 	"veitangie.dev/spinq"
 )
@@ -49,10 +50,10 @@ func TestSpinnerReporter_Report_SimpleMode_DrainsResults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	sourceCh := make(chan runner.ScenarioResult, 2)
+	sourceCh := make(chan aggregator.ScenarioResult, 2)
 	timerCh := make(chan time.Duration, 1)
-	sourceCh <- runner.ScenarioResult{Status: runner.Success}
-	sourceCh <- runner.ScenarioResult{Status: runner.Skipped}
+	sourceCh <- aggregator.ScenarioResult{Status: event.Success}
+	sourceCh <- aggregator.ScenarioResult{Status: event.Skipped}
 	close(sourceCh)
 	timerCh <- 1 * time.Millisecond
 	close(timerCh)
@@ -69,12 +70,12 @@ func TestSpinnerReporter_Report_BarMode_DrainsResults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	sourceCh := make(chan runner.ScenarioResult, 4)
+	sourceCh := make(chan aggregator.ScenarioResult, 4)
 	timerCh := make(chan time.Duration, 1)
-	sourceCh <- runner.ScenarioResult{Status: runner.Success}
-	sourceCh <- runner.ScenarioResult{Status: runner.Skipped}
-	sourceCh <- runner.ScenarioResult{Status: runner.Unset}
-	sourceCh <- runner.ScenarioResult{Status: runner.Failure}
+	sourceCh <- aggregator.ScenarioResult{Status: event.Success}
+	sourceCh <- aggregator.ScenarioResult{Status: event.Skipped}
+	sourceCh <- aggregator.ScenarioResult{Status: event.Unset}
+	sourceCh <- aggregator.ScenarioResult{Status: event.Failure}
 	close(sourceCh)
 	timerCh <- 1 * time.Millisecond
 	close(timerCh)
@@ -97,7 +98,7 @@ func TestSpinnerReporter_Report_SwallowsErrClosedFromStop(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	sourceCh := make(chan runner.ScenarioResult)
+	sourceCh := make(chan aggregator.ScenarioResult)
 	timerCh := make(chan time.Duration, 1)
 	close(sourceCh)
 	timerCh <- 1 * time.Millisecond
@@ -126,7 +127,7 @@ func TestSpinnerReporter_Report_AlwaysStopsSpinner(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	sourceCh := make(chan runner.ScenarioResult)
+	sourceCh := make(chan aggregator.ScenarioResult)
 	timerCh := make(chan time.Duration, 1)
 	close(sourceCh)
 	timerCh <- 1 * time.Millisecond

@@ -17,6 +17,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 	"veitangie.dev/sinq/internal/luapi"
 	"veitangie.dev/sinq/internal/scenario"
 	"veitangie.dev/sinq/internal/timer"
@@ -111,15 +113,11 @@ func TestWorker_RequestCompleted_JSONArrayBlindspot(t *testing.T) {
 
 func TestWorker_ContextCancellation_CleanExit(t *testing.T) {
 	taskCh := make(chan taskBundle)
-	errorCh := make(chan error, 1)
-	resCh := make(chan ScenarioResult, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	w := setupTestWorker(t, ctx)
 	w.taskCh = taskCh
-	w.errorCh = errorCh
-	w.resCh = resCh
 
 	done := make(chan struct{})
 	go func() {
@@ -137,21 +135,16 @@ func TestWorker_ContextCancellation_CleanExit(t *testing.T) {
 }
 
 func TestWorker_ProcessScenario_EmptyRequestFailsCleanly(t *testing.T) {
-	resCh := make(chan ScenarioResult, 1)
-	errorCh := make(chan error, 1)
 
 	w := setupTestWorker(t, nil)
-	w.resCh = resCh
-	w.errorCh = errorCh
+	resCh := observe(t, w).results
 
 	bundle := taskBundle{
-		ScenarioBlueprint: scenario.ScenarioBlueprint{
-			Config: &scenario.ScenarioConfig{
-				Name:       "EmptyRequestScenario",
-				ReqTimeout: scenario.Duration{Duration: 1 * time.Second},
-			},
-			Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
+		Config: &scenario.ScenarioConfig{
+			Name:       "EmptyRequestScenario",
+			ReqTimeout: scenario.Duration{Duration: 1 * time.Second},
 		},
+		Requests:  []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
 		workspace: &mockWorkspace{FS: fstest.MapFS{}},
 		env:       map[string]any{},
 		labels:    []string{},
@@ -162,7 +155,7 @@ func TestWorker_ProcessScenario_EmptyRequestFailsCleanly(t *testing.T) {
 
 	select {
 	case res := <-resCh:
-		if res.Status != Error {
+		if res.Status != event.Error {
 			t.Errorf("Expected scenario status to be Error for an empty request, got %v", res.Status)
 		}
 	case <-time.After(1 * time.Second):
@@ -245,30 +238,25 @@ func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
 	}
 
 	bundle := taskBundle{
-		ScenarioBlueprint: scenario.ScenarioBlueprint{
-			Config: &scenario.ScenarioConfig{
-				Name:          "SkipThenFailScenario",
-				ReqTimeout:    scenario.Duration{Duration: 1 * time.Second},
-				ScriptTimeout: scenario.Duration{Duration: 1 * time.Second},
-			},
-			Requests: []*scenario.RequestBlueprint{skipBP[0], failBP[0]},
+		Config: &scenario.ScenarioConfig{
+			Name:          "SkipThenFailScenario",
+			ReqTimeout:    scenario.Duration{Duration: 1 * time.Second},
+			ScriptTimeout: scenario.Duration{Duration: 1 * time.Second},
 		},
+		Requests:  []*scenario.RequestBlueprint{skipBP[0], failBP[0]},
 		workspace: &mockWorkspace{},
 		env:       map[string]any{"base_url": "http://localhost"},
 		labels:    []string{},
 		run:       true,
 	}
 
-	resCh := make(chan ScenarioResult, 1)
-	errorCh := make(chan error, 1)
-	w.resCh = resCh
-	w.errorCh = errorCh
+	resCh := observe(t, w).results
 
 	w.processScenario(context.Background(), bundle)
 
 	select {
 	case res := <-resCh:
-		if res.Status != Failure {
+		if res.Status != event.Failure {
 			t.Errorf("Expected scenario status to be Failure, got %v: %+v", res.Status, res.RequestResults)
 		}
 	case <-time.After(1 * time.Second):
@@ -283,7 +271,7 @@ func (r *countingRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	return &http.Response{StatusCode: 200, Body: http.NoBody}, nil
 }
 
-func runRepeatedStageScenario(t *testing.T, items, failOn []string, setup ...func(*worker)) (ScenarioResult, int) {
+func runRepeatedStageScenario(t *testing.T, items, failOn []string, setup ...func(*worker)) (aggregator.ScenarioResult, int) {
 	t.Helper()
 	return runScenarioSource(t, repeatedStageSource(items, failOn), setup...)
 }
@@ -322,18 +310,18 @@ func luaSet(list []string) string {
 	return "{ " + strings.Join(entries, ", ") + " }"
 }
 
-func runScenarioSource(t *testing.T, raw string, setup ...func(*worker)) (ScenarioResult, int) {
+func runScenarioSource(t *testing.T, raw string, setup ...func(*worker)) (aggregator.ScenarioResult, int) {
 	t.Helper()
 	res, sent := runScenarioSourceAllowingErrors(t, raw, setup...)
 	for _, rr := range res.RequestResults {
-		if rr.Status == Error {
+		if rr.Status == event.Error {
 			t.Fatalf("Stage %q errored, the scenario itself is broken: %s", rr.Name, rr.ErrorMessage)
 		}
 	}
 	return res, sent
 }
 
-func runScenarioSourceAllowingErrors(t *testing.T, raw string, setup ...func(*worker)) (ScenarioResult, int) {
+func runScenarioSourceAllowingErrors(t *testing.T, raw string, setup ...func(*worker)) (aggregator.ScenarioResult, int) {
 	t.Helper()
 	w := setupTestWorker(t, nil)
 	transport := &countingRoundTripper{}
@@ -348,25 +336,21 @@ func runScenarioSourceAllowingErrors(t *testing.T, raw string, setup ...func(*wo
 	}
 
 	bundle := taskBundle{
-		ScenarioBlueprint: scenario.ScenarioBlueprint{
-			Config: &scenario.ScenarioConfig{
-				Name:          "RepeatedStage",
-				ReqTimeout:    scenario.Duration{Duration: 1 * time.Second},
-				ScriptTimeout: scenario.Duration{Duration: 1 * time.Second},
-				MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
-				MaxRetries:    3,
-				FailFast:      false,
-			},
-			Requests: bps,
+		Config: &scenario.ScenarioConfig{
+			Name:          "RepeatedStage",
+			ReqTimeout:    scenario.Duration{Duration: 1 * time.Second},
+			ScriptTimeout: scenario.Duration{Duration: 1 * time.Second},
+			MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
+			MaxRetries:    3,
+			FailFast:      false,
 		},
+		Requests:  bps,
 		workspace: &mockWorkspace{},
 		labels:    []string{},
 		run:       true,
 	}
 
-	resCh := make(chan ScenarioResult, 1)
-	w.resCh = resCh
-	w.errorCh = make(chan error, 1)
+	resCh := observe(t, w).results
 
 	w.processScenario(context.Background(), bundle)
 
@@ -379,7 +363,7 @@ func runScenarioSourceAllowingErrors(t *testing.T, raw string, setup ...func(*wo
 	case <-time.After(2 * time.Second):
 		t.Fatal("Worker did not return a result")
 	}
-	return ScenarioResult{}, 0
+	return aggregator.ScenarioResult{}, 0
 }
 
 func TestWorker_ProcessScenario_RepeatedStage_SendsEveryPass(t *testing.T) {
@@ -392,17 +376,17 @@ func TestWorker_ProcessScenario_RepeatedStage_SendsEveryPass(t *testing.T) {
 func TestWorker_ProcessScenario_RepeatedStage_EarlierFailedPassFailsStage(t *testing.T) {
 	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"a"})
 
-	if res.Status != Failure {
+	if res.Status != event.Failure {
 		t.Errorf("Expected scenario status Failure, got %v", res.Status)
 	}
 	loop := res.RequestResults[1]
-	if loop.Status != Failure {
+	if loop.Status != event.Failure {
 		t.Errorf("Expected Loop to be marked Failure because one of its passes failed, got %v", loop.Status)
 	}
 	if !slices.Contains(loop.FailedAssertions, "iteration for a failed") {
 		t.Errorf("Expected Loop to keep the failure from its first pass, got %v", loop.FailedAssertions)
 	}
-	if res.RequestResults[0].Status != Success || res.RequestResults[2].Status != Success {
+	if res.RequestResults[0].Status != event.Success || res.RequestResults[2].Status != event.Success {
 		t.Errorf("Expected Setup and After to succeed, got %v and %v", res.RequestResults[0].Status, res.RequestResults[2].Status)
 	}
 }
@@ -411,7 +395,7 @@ func TestWorker_ProcessScenario_RepeatedStage_LastFailedPassFailsStage(t *testin
 	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"c"})
 
 	loop := res.RequestResults[1]
-	if loop.Status != Failure {
+	if loop.Status != event.Failure {
 		t.Errorf("Expected Loop to be marked Failure, got %v", loop.Status)
 	}
 	if !slices.Contains(loop.FailedAssertions, "iteration for c failed") {
@@ -423,7 +407,7 @@ func TestWorker_ProcessScenario_RepeatedStage_KeepsFailuresFromEveryPass(t *test
 	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"a", "c"})
 
 	loop := res.RequestResults[1]
-	if loop.Status != Failure {
+	if loop.Status != event.Failure {
 		t.Errorf("Expected Loop to be marked Failure, got %v", loop.Status)
 	}
 	want := []string{"iteration for a failed", "iteration for c failed"}
@@ -435,11 +419,11 @@ func TestWorker_ProcessScenario_RepeatedStage_KeepsFailuresFromEveryPass(t *test
 func TestWorker_ProcessScenario_RepeatedStage_AllPassesSucceed(t *testing.T) {
 	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, nil)
 
-	if res.Status != Success {
+	if res.Status != event.Success {
 		t.Errorf("Expected scenario status Success, got %v", res.Status)
 	}
 	for _, rr := range res.RequestResults {
-		if rr.Status != Success || len(rr.FailedAssertions) != 0 {
+		if rr.Status != event.Success || len(rr.FailedAssertions) != 0 {
 			t.Errorf("Expected stage %q to succeed with no failures, got %v %v", rr.Name, rr.Status, rr.FailedAssertions)
 		}
 	}
@@ -449,7 +433,7 @@ type loopPlan struct {
 	items, failOn, skipOn, retryOn []string
 }
 
-func runPreDrivenLoopScenario(t *testing.T, plan loopPlan) (ScenarioResult, int) {
+func runPreDrivenLoopScenario(t *testing.T, plan loopPlan) (aggregator.ScenarioResult, int) {
 	t.Helper()
 	items := make([]string, len(plan.items))
 	for i, item := range plan.items {
@@ -480,7 +464,7 @@ func TestWorker_ProcessScenario_RepeatedStage_SkippedThenRanPassIsSuccess(t *tes
 	if sent != 4 {
 		t.Fatalf("Expected 4 requests on the wire (Setup, Loop for b and c, After), got %d", sent)
 	}
-	if loop := res.RequestResults[1]; loop.Status != Success {
+	if loop := res.RequestResults[1]; loop.Status != event.Success {
 		t.Errorf("Expected Loop to be Success since two of its passes ran and passed, got %v", loop.Status)
 	}
 }
@@ -488,7 +472,7 @@ func TestWorker_ProcessScenario_RepeatedStage_SkippedThenRanPassIsSuccess(t *tes
 func TestWorker_ProcessScenario_RepeatedStage_RanThenSkippedPassIsSuccess(t *testing.T) {
 	res, _ := runPreDrivenLoopScenario(t, loopPlan{items: []string{"a", "b", "c"}, skipOn: []string{"c"}})
 
-	if loop := res.RequestResults[1]; loop.Status != Success {
+	if loop := res.RequestResults[1]; loop.Status != event.Success {
 		t.Errorf("Expected Loop to be Success since two of its passes ran and passed, got %v", loop.Status)
 	}
 }
@@ -497,7 +481,7 @@ func TestWorker_ProcessScenario_RepeatedStage_FailedThenSkippedPassIsFailure(t *
 	res, _ := runPreDrivenLoopScenario(t, loopPlan{items: []string{"a", "b", "c"}, failOn: []string{"a"}, skipOn: []string{"b"}})
 
 	loop := res.RequestResults[1]
-	if loop.Status != Failure {
+	if loop.Status != event.Failure {
 		t.Errorf("Expected Loop to stay Failure after a later pass was skipped, got %v", loop.Status)
 	}
 	if !slices.Equal(loop.FailedAssertions, []string{"iteration for a failed"}) {
@@ -566,10 +550,10 @@ func TestWorker_ProcessScenario_RepeatedStage_LaterPassInterruptedIsAborted(t *t
 		w.env.transport = &failingRoundTripper{failQuery: "id=c", failErr: context.Canceled}
 	})
 
-	if res.Status != Aborted {
+	if res.Status != event.Aborted {
 		t.Errorf("Expected scenario status Aborted, got %v", res.Status)
 	}
-	if loop := res.RequestResults[1]; loop.Status != Aborted {
+	if loop := res.RequestResults[1]; loop.Status != event.Aborted {
 		t.Errorf("Expected Loop to be Aborted since its last pass was interrupted, got %v", loop.Status)
 	}
 }
@@ -580,7 +564,7 @@ func TestWorker_ProcessScenario_RepeatedStage_ErrorAfterFailedPassIsError(t *tes
 	})
 
 	loop := res.RequestResults[1]
-	if loop.Status != Error {
+	if loop.Status != event.Error {
 		t.Errorf("Expected Loop to be Error since its last pass errored, got %v", loop.Status)
 	}
 	if !slices.Equal(loop.FailedAssertions, []string{"iteration for a failed"}) {
@@ -677,7 +661,7 @@ GET http://localhost/after HTTP/1.1
 			res, sent := runScenarioSourceAllowingErrors(t, raw, cachedVia)
 
 			cached := res.RequestResults[1]
-			if cached.Status != Error || !strings.Contains(cached.ErrorMessage, tt.wantErr) {
+			if cached.Status != event.Error || !strings.Contains(cached.ErrorMessage, tt.wantErr) {
 				t.Errorf("Expected the stage to error with %q, got %v %q", tt.wantErr, cached.Status, cached.ErrorMessage)
 			}
 			if sent != 1 {
@@ -785,53 +769,40 @@ GET http://localhost/after HTTP/1.1
 	}
 }
 
-func TestWorker_ReportResult_ExtractsOutput(t *testing.T) {
+func TestWorker_ScenarioEnd_ExtractsOutput(t *testing.T) {
 	ctx := context.Background()
 	w := setupTestWorker(t, ctx)
-
-	resCh := make(chan ScenarioResult, 1)
-	w.resCh = resCh
+	obs := observe(t, w)
 
 	buf := bytes.NewBufferString("hello world\n")
 	w.lc = luapi.NewLuaContext(timer.DefaultClock{}, false, nil, buf)
 
-	scenarioTimer := timer.NewTimer(timer.DefaultClock{})
-	result := ScenarioResult{Name: "test_scenario"}
+	w.send(w.scenarioEnd(ctx, timer.NewTimer(timer.DefaultClock{})))
 
-	go w.reportResult(ctx, scenarioTimer, result)
-
-	select {
-	case res := <-resCh:
-		if res.Output == nil {
-			t.Fatal("Expected Output to be populated in ScenarioResult, got nil")
-		}
-		if res.Output.String() != "hello world\n" {
-			t.Errorf("Expected Output to contain 'hello world\\n', got %q", res.Output.String())
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("reportResult deadlocked")
+	ends := obs.ofKind(event.ScenarioEnd)
+	if len(ends) != 1 || ends[0].Output == nil {
+		t.Fatalf("Expected one ScenarioEnd carrying the Lua output, got %+v", ends)
+	}
+	if ends[0].Output.String() != "hello world\n" {
+		t.Errorf("Expected Output to contain 'hello world\\n', got %q", ends[0].Output.String())
 	}
 }
 
 func TestWorker_Run_NilContext(t *testing.T) {
-	errorCh := make(chan error, 1)
 	w := setupTestWorker(t, context.Background())
-	w.errorCh = errorCh
+	obs := observe(t, w)
 
 	w.run(nil) //nolint:staticcheck
 
-	select {
-	case err := <-errorCh:
-		if err == nil {
-			t.Fatal("expected an error for a nil context, got nil")
-		}
-	default:
-		t.Fatal("expected run(nil) to report an error on errorCh")
+	errs := obs.ofKind(event.WorkerError)
+	if len(errs) != 1 || errs[0].ErrorString == "" {
+		t.Fatalf("Expected run(nil) to report one WorkerError, got %+v", errs)
 	}
 }
 
 func TestWorker_ProcessRequest_ContextAlreadyCanceled(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
+	obs := observe(t, w)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -840,26 +811,18 @@ func TestWorker_ProcessRequest_ContextAlreadyCanceled(t *testing.T) {
 		Config:   &scenario.ScenarioConfig{Name: "cancelled"},
 		Requests: []*scenario.RequestBlueprint{{Filename: "req.sinq"}},
 	}
-	status := Success
-	result := &RequestResult{}
 
-	shouldContinue, err := w.processRequest(ctx, scenarioBp, 0, &http.Client{}, &status, result)
-	if shouldContinue {
+	if w.processRequest(ctx, scenarioBp, 0, &http.Client{}, time.Second) {
 		t.Error("expected shouldContinue to be false when the context is already cancelled")
 	}
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("expected context.Canceled, got %v", err)
-	}
-	if status != Aborted {
-		t.Errorf("expected status Aborted for a cancelled context, got %v", status)
-	}
-	if result.Status != Aborted {
-		t.Errorf("expected result.Status Aborted, got %v", result.Status)
+	if ends := obs.ofKind(event.RequestEnd); len(ends) != 1 || ends[0].Status != event.Aborted {
+		t.Errorf("expected one Aborted RequestEnd for a cancelled context, got %+v", ends)
 	}
 }
 
 func TestWorker_ProcessRequest_ContextDeadlineExceeded(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
+	obs := observe(t, w)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 0)
 	defer cancel()
@@ -869,21 +832,12 @@ func TestWorker_ProcessRequest_ContextDeadlineExceeded(t *testing.T) {
 		Config:   &scenario.ScenarioConfig{Name: "timed-out"},
 		Requests: []*scenario.RequestBlueprint{{Filename: "req.sinq"}},
 	}
-	status := Success
-	result := &RequestResult{}
 
-	shouldContinue, err := w.processRequest(ctx, scenarioBp, 0, &http.Client{}, &status, result)
-	if shouldContinue {
+	if w.processRequest(ctx, scenarioBp, 0, &http.Client{}, time.Second) {
 		t.Error("expected shouldContinue to be false when the context deadline is exceeded")
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("expected context.DeadlineExceeded, got %v", err)
-	}
-	if status != Error {
-		t.Errorf("expected status Error for a deadline-exceeded context, got %v", status)
-	}
-	if result.Status != Error {
-		t.Errorf("expected result.Status Error, got %v", result.Status)
+	if ends := obs.ofKind(event.RequestEnd); len(ends) != 1 || ends[0].Status != event.Error {
+		t.Errorf("expected one Error RequestEnd for a deadline-exceeded context, got %+v", ends)
 	}
 }
 
@@ -891,27 +845,22 @@ func TestWorker_ProcessScenario_TagFilterExcludesScenario(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 	w.env.cfg.TagsInclude = []string{"nonexistent-tag"}
 
-	resCh := make(chan ScenarioResult, 1)
-	errorCh := make(chan error, 1)
-	w.resCh = resCh
-	w.errorCh = errorCh
+	resCh := observe(t, w).results
 
 	bundle := taskBundle{
-		ScenarioBlueprint: scenario.ScenarioBlueprint{
-			Config: &scenario.ScenarioConfig{
-				Name: "FilteredScenario",
-				Tags: map[string]struct{}{"other": {}},
-			},
-			Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
+		Config: &scenario.ScenarioConfig{
+			Name: "FilteredScenario",
+			Tags: map[string]struct{}{"other": {}},
 		},
-		env: map[string]any{},
+		Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
+		env:      map[string]any{},
 	}
 
 	w.processScenario(context.Background(), bundle)
 
 	select {
 	case res := <-resCh:
-		if res.Status != Unset {
+		if res.Status != event.Unset && res.Status != event.Skipped {
 			t.Errorf("expected an excluded scenario to report Unset status, got %v", res.Status)
 		}
 	case <-time.After(1 * time.Second):
@@ -923,10 +872,7 @@ func TestWorker_ProcessScenario_RequestNamePrefersExplicitName(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 	w.env.transport = mockRoundTripper{}
 
-	resCh := make(chan ScenarioResult, 1)
-	errorCh := make(chan error, 1)
-	w.resCh = resCh
-	w.errorCh = errorCh
+	resCh := observe(t, w).results
 
 	bp, err := scenario.ParseRequestBlueprints(bytes.NewBufferString("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req1.sinq")
 	if err != nil {
@@ -935,11 +881,9 @@ func TestWorker_ProcessScenario_RequestNamePrefersExplicitName(t *testing.T) {
 	bp[0].Name = "Custom Request Name"
 
 	bundle := taskBundle{
-		ScenarioBlueprint: scenario.ScenarioBlueprint{
-			Config:   &scenario.ScenarioConfig{Name: "NamedRequestScenario"},
-			Requests: bp,
-		},
-		env: map[string]any{},
+		Config:   &scenario.ScenarioConfig{Name: "NamedRequestScenario"},
+		Requests: bp,
+		env:      map[string]any{},
 	}
 
 	w.processScenario(context.Background(), bundle)
@@ -1016,34 +960,30 @@ func TestWorker_MaterializeRequest_UnexpectedDelimiter(t *testing.T) {
 func TestWorker_LoggingContext(t *testing.T) {
 	w := setupTestWorker(t, nil)
 
+	has := func(attrs []slog.Attr, key, value string) bool {
+		for _, a := range attrs {
+			if a.Key == key && (value == "" || a.Value.String() == value) {
+				return true
+			}
+		}
+		return false
+	}
+
 	baseCtx := context.Background()
 	got := w.loggingContext(baseCtx)
-	for i := 0; i+1 < len(got); i += 2 {
-		if got[i] == string(scenarioNameContext) || got[i] == string(requestNameContext) {
-			t.Errorf("expected no scenario/request name keys for a bare context, got %v", got)
-		}
+	if has(got, string(scenarioNameContext), "") || has(got, string(requestNameContext), "") {
+		t.Errorf("expected no scenario/request name keys for a bare context, got %v", got)
 	}
 
 	withScenario := context.WithValue(baseCtx, scenarioNameContext, "myScenario")
 	got2 := w.loggingContext(withScenario)
-	found := false
-	for i := 0; i+1 < len(got2); i += 2 {
-		if got2[i] == string(scenarioNameContext) && got2[i+1] == "myScenario" {
-			found = true
-		}
-	}
-	if !found {
+	if !has(got2, string(scenarioNameContext), "myScenario") {
 		t.Errorf("expected scenarioName to be included when present in the context, got %v", got2)
 	}
 
 	withRequest := context.WithValue(baseCtx, requestNameContext, "myRequest")
 	got3 := w.loggingContext(withRequest)
-	found = false
-	for i := 0; i+1 < len(got3); i += 2 {
-		if got3[i] == string(requestNameContext) && got3[i+1] == "myRequest" {
-			found = true
-		}
-	}
+	found := has(got3, string(requestNameContext), "myRequest")
 	if !found {
 		t.Errorf("expected requestName to be included when present in the context, got %v", got3)
 	}
@@ -1056,34 +996,32 @@ func TestWorker_ProcessRequest_ClearsDumpWhenNoAssertionFailures(t *testing.T) {
 	defer srv.Close()
 
 	w := setupTestWorker(t, context.Background())
-	w.lc.SetupRequestEnvironment(0)
 	w.env.cfg.DumpOnFailure = true
+	obs := observe(t, w)
 
 	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET "+srv.URL+" HTTP/1.1\r\n\r\n"), "ok.sinq")
 	if err != nil {
 		t.Fatalf("failed to parse blueprint: %v", err)
 	}
 
-	scenarioBp := &scenario.ScenarioBlueprint{
+	w.processScenario(context.Background(), taskBundle{
 		Config: &scenario.ScenarioConfig{
-			Name:       "NoFailureScenario",
-			ReqTimeout: scenario.Duration{Duration: 2 * time.Second},
+			Name:          "NoFailureScenario",
+			ReqTimeout:    scenario.Duration{Duration: 2 * time.Second},
+			ScriptTimeout: scenario.Duration{Duration: 2 * time.Second},
+			MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
 		},
-		Requests: reqBp,
-	}
+		Requests:  reqBp,
+		workspace: &mockWorkspace{},
+		run:       true,
+	})
 
-	status := Success
-	result := &RequestResult{}
-
-	if _, err := w.processRequest(context.Background(), scenarioBp, 0, srv.Client(), &status, result); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	rr := obs.result().RequestResults[0]
+	if rr.Request != "" || rr.Response != "" {
+		t.Errorf("expected Request/Response dumps to be cleared when there are no assertion failures, got Request=%q Response=%q", rr.Request, rr.Response)
 	}
-
-	if result.Request != "" || result.Response != "" {
-		t.Errorf("expected Request/Response dumps to be cleared when there are no assertion failures, got Request=%q Response=%q", result.Request, result.Response)
-	}
-	if status == Failure || result.Status == Failure {
-		t.Errorf("expected no failure when assertionFailures is empty, got status=%v result.Status=%v", status, result.Status)
+	if rr.Status == event.Failure {
+		t.Errorf("expected no failure when assertionFailures is empty, got %v", rr.Status)
 	}
 }
 
@@ -1098,12 +1036,9 @@ func TestWorker_ProcessScenario_MaxRedirectsBoundary(t *testing.T) {
 	}))
 	defer redirectSrv.Close()
 
-	run := func(maxRedirects int) ResultStatus {
+	run := func(maxRedirects int) event.ResultStatus {
 		w := setupTestWorker(t, context.Background())
-		resCh := make(chan ScenarioResult, 1)
-		errorCh := make(chan error, 1)
-		w.resCh = resCh
-		w.errorCh = errorCh
+		resCh := observe(t, w).results
 
 		bp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET "+redirectSrv.URL+" HTTP/1.1\r\n\r\n"), "redirect.sinq")
 		if err != nil {
@@ -1111,14 +1046,12 @@ func TestWorker_ProcessScenario_MaxRedirectsBoundary(t *testing.T) {
 		}
 
 		bundle := taskBundle{
-			ScenarioBlueprint: scenario.ScenarioBlueprint{
-				Config: &scenario.ScenarioConfig{
-					Name:         "RedirectScenario",
-					ReqTimeout:   scenario.Duration{Duration: 2 * time.Second},
-					MaxRedirects: maxRedirects,
-				},
-				Requests: bp,
+			Config: &scenario.ScenarioConfig{
+				Name:         "RedirectScenario",
+				ReqTimeout:   scenario.Duration{Duration: 2 * time.Second},
+				MaxRedirects: maxRedirects,
 			},
+			Requests:  bp,
 			workspace: &mockWorkspace{},
 			env:       map[string]any{},
 			run:       true,
@@ -1132,13 +1065,13 @@ func TestWorker_ProcessScenario_MaxRedirectsBoundary(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("processScenario deadlocked")
 		}
-		return Unset
+		return event.Unset
 	}
 
-	if status := run(1); status != Error {
+	if status := run(1); status != event.Error {
 		t.Errorf("expected MaxRedirects=1 with exactly one redirect present to fail with Error, got %v", status)
 	}
-	if status := run(2); status != Success {
+	if status := run(2); status != event.Success {
 		t.Errorf("expected MaxRedirects=2 with exactly one redirect present to succeed, got %v", status)
 	}
 }
@@ -1167,34 +1100,27 @@ func TestWorker_ProcessRequest_PostScriptFailure(t *testing.T) {
 		Requests: reqBp,
 	}
 
-	status := Success
-	result := &RequestResult{}
-
-	shouldContinue, err := w.processRequest(context.Background(), scenarioBp, 0, srv.Client(), &status, result)
-	if shouldContinue {
+	obs := observe(t, w)
+	if w.processRequest(context.Background(), scenarioBp, 0, srv.Client(), scenarioBp.Config.ReqTimeout.Duration) {
 		t.Error("expected shouldContinue to be false when the post script fails")
 	}
-	if err == nil {
-		t.Fatal("expected an error from the failing post script")
+	ends := obs.ofKind(event.RequestEnd)
+	if len(ends) == 0 || ends[len(ends)-1].Status != event.Error || ends[len(ends)-1].ErrorString == "" {
+		t.Fatalf("expected the request to end with an Error from the failing post script, got %+v", ends)
 	}
 }
 
 func TestWorker_ProcessScenario_SetsMaxRequestIdx(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 	w.env.transport = mockRoundTripper{}
-	resCh := make(chan ScenarioResult, 1)
-	errorCh := make(chan error, 1)
-	w.resCh = resCh
-	w.errorCh = errorCh
+	resCh := observe(t, w).results
 
 	bp1, _ := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req.sinq")
 	bp2, _ := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req2.sinq")
 
 	bundle := taskBundle{
-		ScenarioBlueprint: scenario.ScenarioBlueprint{
-			Config:   &scenario.ScenarioConfig{Name: "TwoRequests"},
-			Requests: []*scenario.RequestBlueprint{bp1[0], bp2[0]},
-		},
+		Config:    &scenario.ScenarioConfig{Name: "TwoRequests"},
+		Requests:  []*scenario.RequestBlueprint{bp1[0], bp2[0]},
 		workspace: &mockWorkspace{},
 		env:       map[string]any{},
 		run:       true,
@@ -1215,16 +1141,11 @@ func TestWorker_ProcessScenario_SetsMaxRequestIdx(t *testing.T) {
 
 func TestWorker_ProcessScenario_ZeroRequests(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
-	resCh := make(chan ScenarioResult, 1)
-	errorCh := make(chan error, 1)
-	w.resCh = resCh
-	w.errorCh = errorCh
+	resCh := observe(t, w).results
 
 	bundle := taskBundle{
-		ScenarioBlueprint: scenario.ScenarioBlueprint{
-			Config:   &scenario.ScenarioConfig{Name: "ZeroRequestScenario"},
-			Requests: []*scenario.RequestBlueprint{},
-		},
+		Config:    &scenario.ScenarioConfig{Name: "ZeroRequestScenario"},
+		Requests:  []*scenario.RequestBlueprint{},
 		workspace: &mockWorkspace{},
 		env:       map[string]any{},
 		run:       true,
@@ -1234,7 +1155,7 @@ func TestWorker_ProcessScenario_ZeroRequests(t *testing.T) {
 
 	select {
 	case res := <-resCh:
-		if res.Status != Success {
+		if res.Status != event.Success {
 			t.Errorf("expected a scenario with zero requests to succeed trivially, got %v", res.Status)
 		}
 	case <-time.After(1 * time.Second):
@@ -1243,22 +1164,13 @@ func TestWorker_ProcessScenario_ZeroRequests(t *testing.T) {
 }
 
 func TestWorker_ProcessScenario_LogsRequestFailure(t *testing.T) {
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-
 	w := setupTestWorker(t, context.Background())
-	w.env.logger = logger
-
-	resCh := make(chan ScenarioResult, 1)
-	errorCh := make(chan error, 1)
-	w.resCh = resCh
-	w.errorCh = errorCh
+	obs := observe(t, w)
+	resCh := obs.results
 
 	bundle := taskBundle{
-		ScenarioBlueprint: scenario.ScenarioBlueprint{
-			Config:   &scenario.ScenarioConfig{Name: "FailLogScenario", ReqTimeout: scenario.Duration{Duration: time.Second}},
-			Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
-		},
+		Config:    &scenario.ScenarioConfig{Name: "FailLogScenario", ReqTimeout: scenario.Duration{Duration: time.Second}},
+		Requests:  []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
 		workspace: &mockWorkspace{FS: fstest.MapFS{}},
 		env:       map[string]any{},
 		run:       true,
@@ -1272,8 +1184,8 @@ func TestWorker_ProcessScenario_LogsRequestFailure(t *testing.T) {
 		t.Fatal("processScenario deadlocked")
 	}
 
-	if !strings.Contains(buf.String(), "Request failed") {
-		t.Errorf("expected a 'Request failed' debug log line when processRequest returns an error, got log: %q", buf.String())
+	if !obs.logged("Request failed") {
+		t.Errorf("expected a 'Request failed' debug log line when a request errors, got logs: %+v", obs.ofKind(event.Log))
 	}
 }
 

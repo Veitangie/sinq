@@ -15,6 +15,7 @@ import (
 )
 
 type ScenarioBlueprint struct {
+	SeqId    int
 	Config   *ScenarioConfig
 	Requests []*RequestBlueprint
 	Secrets  map[string]any

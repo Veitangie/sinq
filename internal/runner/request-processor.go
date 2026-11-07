@@ -17,46 +17,33 @@ import (
 	"strings"
 	"time"
 
+	"veitangie.dev/sinq/internal/event"
 	"veitangie.dev/sinq/internal/scenario"
+	"veitangie.dev/sinq/internal/sinqerror"
 	"veitangie.dev/sinq/internal/timer"
 )
 
 type RequestProcessor struct {
-	w                 *worker
-	ctx               context.Context
-	scenarioBp        *scenario.ScenarioBlueprint
-	requestBp         *scenario.RequestBlueprint
-	requestIdx        int
-	status            *ResultStatus
-	result            *RequestResult
-	requestTimer      timer.Timer
-	totalRequestTimer timer.Timer
-	materialized      []byte
-	httpRequest       *http.Request
-	requestBody       []byte
-	multipart         multipartData
-	retryIn           int64
-	retries           int
-	client            *http.Client
-	filenameFrom      string
-	filenameTo        string
-	cacheKey          string
-	cache             bool
-	skip              bool
-}
-
-func (p *RequestProcessor) handleError(err error) error {
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			*p.status = Aborted
-			p.result.Status = Aborted
-		} else {
-			*p.status = Error
-			p.result.Status = Error
-			p.result.ErrorMessage = err.Error()
-		}
-	}
-	return err
+	w            *worker
+	ctx          context.Context
+	scenarioBp   *scenario.ScenarioBlueprint
+	requestBp    *scenario.RequestBlueprint
+	requestIdx   int
+	requestTimer timer.Timer
+	materialized []byte
+	httpRequest  *http.Request
+	requestBody  []byte
+	multipart    multipartData
+	reqTimeout   time.Duration
+	retryIn      int64
+	retries      int
+	client       *http.Client
+	filenameFrom string
+	filenameTo   string
+	cacheKey     string
+	responseStr  string
+	cache        bool
+	skip         bool
 }
 
 func (p *RequestProcessor) runPre() error {
@@ -64,14 +51,15 @@ func (p *RequestProcessor) runPre() error {
 		return nil
 	}
 
-	p.w.env.logger.Debug("[Runner] Worker running pre script for request", p.w.loggingContext(p.ctx)...)
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running pre script for request"))
 	p.requestTimer.Start()
 	res, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
-	p.result.Pre = p.requestTimer.Time()
-	p.totalRequestTimer = p.requestTimer
+	stage := p.w.stageEnd(p.ctx, event.PreScript, p.requestTimer.Time())
 
 	if err != nil {
-		p.w.env.logger.Debug("[Runner] Pre script failed", p.w.loggingContextWithErr(p.ctx, err)...)
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Pre script failed", errAttr(err)))
+	} else {
+		p.w.send(stage)
 	}
 
 	p.filenameFrom = res.filenameIn
@@ -80,122 +68,176 @@ func (p *RequestProcessor) runPre() error {
 	p.cache = res.cache
 	p.skip = res.skip
 	p.multipart = res.multipart
-	return p.handleError(err)
+	return err
 }
 
 func (p *RequestProcessor) materialize() error {
-	p.w.env.logger.Debug("[Runner] Worker materializing request", p.w.loggingContext(p.ctx)...)
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker materializing request"))
 	p.requestTimer.Start()
 	materialized, err := p.w.materializeRequest(p.ctx, p.requestBp, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.materialized = materialized
-	p.result.Materialization = p.requestTimer.Time()
+	stage := p.w.stageEnd(p.ctx, event.Materialization, p.requestTimer.Time())
 
 	if err != nil {
-		p.w.env.logger.Debug("[Runner] Request materialization failed", p.w.loggingContextWithErr(p.ctx, err)...)
-	} else if p.w.env.logger.Enabled(p.ctx, slog.LevelDebug) {
-		p.w.env.logger.Debug("[Runner] Request materialized successfully", append(p.w.loggingContext(p.ctx), "raw", string(materialized))...)
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request materialization failed", errAttr(err)))
+	} else {
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request materialized successfully", slog.String("raw", string(materialized))))
 	}
 
-	if p.w.env.cfg.DumpOnFailure {
-		if len(materialized) != 0 && materialized[len(materialized)-1] != '\n' {
-			p.result.Request = string(append(materialized, '\n'))
-		} else {
-			p.result.Request = string(materialized)
-		}
-	}
-
-	return p.handleError(err)
+	return err
 }
 
 func (p *RequestProcessor) parse() error {
-	p.w.env.logger.Debug("[Runner] Worker parsing request", p.w.loggingContext(p.ctx)...)
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker parsing request"))
 	p.requestTimer.Start()
 	parser, err := newParser(p.materialized, p.ctx)
 	if err != nil {
-		p.w.env.logger.Warn("Failed to construct parser", p.w.loggingContextWithErr(p.ctx, err)...)
-		return p.handleError(err)
+		p.w.send(p.w.log(p.ctx, slog.LevelWarn, "[Runner] Failed to construct parser", errAttr(err)))
+		return err
 	}
 
 	httpReq, body, err := parser.parse()
-	p.result.Parsing = p.requestTimer.Time()
+	stage := p.w.stageEnd(p.ctx, event.Parsing, p.requestTimer.Time())
 
 	if err == nil && len(body) > 0 && p.filenameFrom != "" {
 		err = fmt.Errorf("Request has both body and a file source")
 	}
 
 	if err != nil {
-		p.w.env.logger.Debug("[Runner] Request parsing failed", p.w.loggingContextWithErr(p.ctx, err)...)
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request parsing failed", errAttr(err)))
+	} else {
+		p.w.send(stage)
 	}
 
 	p.httpRequest = &httpReq
 	p.requestBody = body
 
-	return p.handleError(err)
+	return err
+}
+
+func (p *RequestProcessor) processSendSuccess(result intermediate, execution event.Event) error {
+	p.w.send(
+		p.w.log(
+			p.ctx,
+			slog.LevelDebug,
+			"[Runner] Extracted response",
+			slog.Int("code", result.statusCode),
+			slog.Any("headers", result.headers),
+			slog.String("body", string(result.body)),
+		),
+		p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker capturing response"),
+	)
+
+	if len(result.body) > int(p.scenarioBp.Config.MaxBodySize.ByteAmount) {
+		result.body = result.body[:p.scenarioBp.Config.MaxBodySize.ByteAmount]
+		result.oversized = true
+	}
+	result.attempt = p.retries
+
+	responseStr, err := p.w.requestCompleted(result)
+	if p.w.env.cfg.DumpOnFailure {
+		p.responseStr = responseStr
+	}
+	execution.Size = len(result.body)
+
+	if p.cache {
+		execution.Flags = execution.Flags | event.CachedMask
+	}
+	if result.oversized {
+		execution.Flags = execution.Flags | event.OversizedMask
+	}
+	if result.fromCache {
+		execution.Flags = execution.Flags | event.CacheHitMask
+	}
+	if result.leader {
+		execution.Flags = execution.Flags | event.SingleflightLeaderMask
+	}
+
+	if err != nil {
+		p.w.send(execution, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to capture response", errAttr(err)))
+		return err
+	}
+	p.w.send(execution)
+	return nil
+}
+
+func (p *RequestProcessor) processSendError(attempt int, err error, execution event.Event) error {
+	if err == nil {
+		return nil
+	}
+	p.w.send(execution)
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+
+	if _, ok := errors.AsType[sinqerror.NetworkError](err); !ok {
+		return err
+	}
+
+	p.w.send(
+		p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker capturing response error"),
+	)
+	p.responseStr = ""
+	errSave := p.w.requestCompletedErr(attempt, err)
+	if errSave != nil {
+		p.w.send(
+			p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to capture error", errAttr(errSave), slog.Attr{
+				Key:   "requestError",
+				Value: slog.StringValue(err.Error()),
+			}),
+		)
+	}
+	return errSave
 }
 
 func (p *RequestProcessor) run() error {
-	p.w.env.logger.Debug("[Runner] Sending request", p.w.loggingContext(p.ctx)...)
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Sending request"))
 
 	var result intermediate
-	var err error
+	var sendErr error
 	for p.retryIn >= 0 {
 		if p.retries > p.scenarioBp.Config.MaxRetries {
-			err = errors.New("Too many retries")
-			p.w.env.logger.Debug("[Runner] Too many retries", p.w.loggingContext(p.ctx)...)
-			return p.handleError(err)
+			p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Too many retries"))
+			return errors.New("Too many retries")
 		}
-		p.result.Attempts++
 		p.retries++
+		p.requestTimer.Start()
 
 		if p.cache {
-			result, err = p.sendCached()
-			if err != nil {
-				return p.handleError(err)
-			}
+			result, sendErr = p.sendCached()
 		} else {
-			result, err = p.send()
-			if err != nil {
-				return p.handleError(err)
+			result, sendErr = p.send()
+		}
+
+		execution := p.w.stageEnd(p.ctx, event.Execution, p.requestTimer.Time())
+
+		if sendErr != nil {
+			if err := p.processSendError(p.retries, sendErr, execution); err != nil {
+				return err
 			}
-		}
-
-		result.attempt = p.retries
-
-		if p.w.env.logger.Enabled(p.ctx, slog.LevelDebug) {
-			p.w.env.logger.Debug("[Runner] Extracted response", append(p.w.loggingContext(p.ctx), "code", result.statusCode, "headers", result.headers, "body", string(result.body))...)
-		}
-
-		p.w.env.logger.Debug("[Runner] Worker capturing response", p.w.loggingContext(p.ctx)...)
-		if len(result.body) > int(p.scenarioBp.Config.MaxBodySize.ByteAmount) {
-			result.body = result.body[:p.scenarioBp.Config.MaxBodySize.ByteAmount]
-			result.oversized = true
-		}
-
-		responseStr, err := p.w.requestCompleted(result)
-		p.result.Response = responseStr
-		if err != nil {
-			p.w.env.logger.Debug("[Runner] Failed to capture response", p.w.loggingContextWithErr(p.ctx, err)...)
+		} else if err := p.processSendSuccess(result, execution); err != nil {
 			return err
 		}
 
-		if err = p.runRetry(); err != nil {
-			return p.handleError(err)
+		if err := p.runRetry(); err != nil {
+			return err
 		}
 
 		if p.retryIn > 0 {
 			timer := time.NewTimer(time.Duration(p.retryIn) * time.Millisecond)
-			p.w.env.logger.Debug("[Runner] Waiting for retry", append(p.w.loggingContext(p.ctx), "retryIn", p.retryIn)...)
+			p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Waiting for retry", slog.Int64("retryIn", p.retryIn)))
 			select {
 			case <-timer.C:
 				timer.Stop()
 				continue
 			case <-p.ctx.Done():
 				timer.Stop()
-				return p.handleError(p.ctx.Err())
+				return p.ctx.Err()
 			}
 		}
 	}
-	return nil
+	return sendErr
 }
 
 func (p *RequestProcessor) getCacheKey() string {
@@ -277,22 +319,22 @@ func (p *RequestProcessor) materializeMultipart() error {
 
 func (p *RequestProcessor) send() (intermediate, error) {
 	var result intermediate
-	p.w.env.logger.Debug("[Runner] Worker sending request", append(p.w.loggingContext(p.ctx), "attempt", p.retries)...)
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker sending request", slog.Int("attempt", p.retries)))
 
 	if err := p.validateBody(); err != nil {
-		return result, p.handleError(err)
+		return result, err
 	}
 
 	if err := p.materializeMultipart(); err != nil {
-		return result, p.handleError(err)
+		return result, err
 	}
 
 	if p.filenameFrom != "" {
 		file, err := p.w.env.workspace.Open(p.filenameFrom)
 
 		if err != nil {
-			p.w.env.logger.Debug("[Runner] Failed to open file for reading", append(p.w.loggingContextWithErr(p.ctx, err), "filename", p.filenameFrom)...)
-			return result, p.handleError(err)
+			p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to open file for reading", errAttr(err), slog.String("filename", p.filenameFrom)))
+			return result, err
 		}
 
 		p.httpRequest.ContentLength = -1
@@ -307,16 +349,24 @@ func (p *RequestProcessor) send() (intermediate, error) {
 		p.httpRequest.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(p.requestBody)), nil }
 	}
 
+	reqContext, cancel := context.WithTimeoutCause(p.ctx, p.reqTimeout, sinqerror.ErrRequestTimeout)
+	defer cancel()
+
 	p.requestTimer.Start()
-	resp, err := p.client.Do(p.httpRequest)
-	p.result.Execution += p.requestTimer.Time()
+	resp, err := p.client.Do(p.httpRequest.Clone(reqContext))
 
 	if err != nil {
-		p.w.env.logger.Debug("[Runner] Request execution failed", p.w.loggingContextWithErr(p.ctx, err)...)
-		return result, p.handleError(fixClientErr(err))
+		err = sinqerror.WrapContextTimeoutErr(reqContext, err)
+		p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request execution failed", errAttr(err)))
+		return result, fixClientErr(err)
 	}
 
-	return makeIntermediate(p.w.env.workspace, p.filenameTo, int64(p.scenarioBp.Config.MaxBodySize.ByteAmount), resp)
+	res, err := makeIntermediate(p.w.env.workspace, p.filenameTo, int64(p.scenarioBp.Config.MaxBodySize.ByteAmount), resp)
+	if err != nil {
+		err = sinqerror.SwapContextTimeoutErr(reqContext, err)
+		p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request body read failed", errAttr(err)))
+	}
+	return res, err
 }
 
 func (p *RequestProcessor) sendCached() (intermediate, error) {
@@ -345,7 +395,7 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 		}
 	}
 
-	actualKey := p.getCacheKey() + strconv.Itoa(p.retries)
+	actualKey := p.getCacheKey() + "#" + strconv.Itoa(p.retries)
 
 	if fromCache, err, ok := p.w.env.cachedProcessor.lookup(actualKey); ok {
 		if err != nil {
@@ -353,25 +403,26 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 		}
 		result = fromCache
 	} else {
+		willBeSent := p.httpRequest.Clone(p.ctx)
 		if p.client.Jar != nil {
-			for _, cookie := range p.client.Jar.Cookies(p.httpRequest.URL) {
-				p.httpRequest.AddCookie(cookie)
+			for _, cookie := range p.client.Jar.Cookies(willBeSent.URL) {
+				willBeSent.AddCookie(cookie)
 			}
 		}
 
 		p.requestTimer.Start()
+		resCh := p.w.env.cachedProcessor.process(actualKey, *willBeSent, p.filenameTo, getBody, p.w.env.workspace, p.w.id)
 		select {
-		case res := <-p.w.env.cachedProcessor.process(actualKey, *p.httpRequest, p.filenameTo, getBody, p.w.env.workspace):
+		case res := <-resCh:
 			if res.Err != nil {
-				return result, p.handleError(res.Err)
+				return result, res.Err
 			}
 			result = res.Val.(intermediate)
+			result.leader = result.leaderToken == p.w.id
 
 		case <-p.ctx.Done():
-			p.result.Execution += p.requestTimer.Time()
-			return result, p.handleError(p.ctx.Err())
+			return result, p.ctx.Err()
 		}
-		p.result.Execution += p.requestTimer.Time()
 	}
 
 	if p.client.Jar != nil {
@@ -381,7 +432,7 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 		for _, setCookie := range setCookies {
 			cookie, err := http.ParseSetCookie(setCookie)
 			if err != nil {
-				p.w.env.logger.Debug("[Runner] Failed to set cookies", p.w.loggingContextWithErr(p.ctx, err)...)
+				p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to set cookies", errAttr(err)))
 			} else {
 				cookies = append(cookies, cookie)
 			}
@@ -398,60 +449,84 @@ func (p *RequestProcessor) runRetry() error {
 		p.retryIn = -1
 		return nil
 	}
-	p.w.env.logger.Debug("[Runner] Worker running retry script for request", p.w.loggingContext(p.ctx)...)
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running retry script for request"))
 	p.requestTimer.Start()
 	retryIn, err := p.w.runRetryScript(p.requestBp.Retry, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
-	p.result.Retry += p.requestTimer.Time()
+	stage := p.w.stageEnd(p.ctx, event.RetryScript, p.requestTimer.Time())
 	p.retryIn = retryIn
 
 	if err != nil {
-		p.w.env.logger.Debug("[Runner] Retry script failed", p.w.loggingContextWithErr(p.ctx, err)...)
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Retry script failed", errAttr(err)))
+	} else {
+		p.w.send(stage)
 	}
 
-	return p.handleError(err)
+	return err
 }
 
 func (p *RequestProcessor) runAssert() error {
 	if p.requestBp.Assert.IsEmpty() {
 		return nil
 	}
-	p.w.env.logger.Debug("[Runner] Worker running assert script for request", p.w.loggingContext(p.ctx)...)
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running assert script for request"))
 	p.requestTimer.Start()
 	err := p.w.runAssertScript(p.requestBp.Assert, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration, p.filenameTo)
-	p.result.Assert = p.requestTimer.Time()
+	stage := p.w.stageEnd(p.ctx, event.AssertScript, p.requestTimer.Time())
 
 	if err != nil {
-		p.w.env.logger.Debug("[Runner] Assert script failed", p.w.loggingContextWithErr(p.ctx, err)...)
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Assert script failed", errAttr(err)))
+	} else {
+		p.w.send(stage)
 	}
-	return p.handleError(err)
+	return err
 }
 
 func (p *RequestProcessor) runPost() error {
 	if p.requestBp.Post.IsEmpty() {
 		return nil
 	}
-	p.w.env.logger.Debug("[Runner] Worker running post script for request", p.w.loggingContext(p.ctx)...)
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running post script for request"))
 	p.requestTimer.Start()
 	err := p.w.runEffectfulScript(p.requestBp.Post, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
-	p.result.Post = p.requestTimer.Time()
+	stage := p.w.stageEnd(p.ctx, event.PostScript, p.requestTimer.Time())
 
 	if err != nil {
-		p.w.env.logger.Debug("[Runner] Post script failed", p.w.loggingContextWithErr(p.ctx, err)...)
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Post script failed", errAttr(err)))
+	} else {
+		p.w.send(stage)
 	}
-	return p.handleError(err)
+	return err
 }
 
-func (p *RequestProcessor) finalize() {
-	if panicked := recover(); panicked != nil {
-		p.result.Status = Error
-		p.result.ErrorMessage = fmt.Sprintf("Caught a panic: %v", panicked)
+func (p *RequestProcessor) requestEnd(ctx context.Context, duration time.Duration) event.Event {
+	e := p.w.stageEnd(ctx, event.RequestEnd, duration)
+	if p.w.env.cfg.DumpOnFailure {
+		e.Request = string(p.materialized)
+		e.Response = p.responseStr
+	}
+	return e
+}
+
+func (p *RequestProcessor) processError(ctx context.Context, err error, duration time.Duration) {
+	if err == nil {
+		return
 	}
 
-	if p.result.Status == Unset {
-		p.result.Status = Success
+	status := event.Error
+	end := p.requestEnd(ctx, duration)
+	end.ErrorString = err.Error()
+	if errors.Is(err, context.Canceled) {
+		status = event.Aborted
+		end.ErrorString = ""
 	}
-
-	p.result.Total = p.totalRequestTimer.Time()
+	if len(p.w.assertionFailures) > 0 {
+		end.FailedAssertions = p.w.assertionFailures
+		p.w.assertionFailures = make([]string, 0)
+	}
+	end.Status = status
+	workerErr := p.w.newEvent(ctx, event.WorkerError)
+	workerErr.Error = err
+	p.w.send(end, workerErr, p.w.log(ctx, slog.LevelDebug, "[Runner] Request failed", errAttr(err)))
 }
 
 func fixClientErr(err error) error {

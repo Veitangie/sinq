@@ -5,7 +5,7 @@ How `sinq` compares to the API testing tools people bring up most, starting with
 | Tool | Tests written as | Scripting | Parallel by default | Built for |
 | --- | --- | --- | --- | --- |
 | **sinq** | Plain-text `.sinq` (raw HTTP) + directory tree | Embedded Lua | Yes | Stateful HTTP workflows in CI |
-| Hurl | Plain-text `.hurl` (raw HTTP) | Predicates and filters | No | Plain-text HTTP tests from the CLI |
+| Hurl | Plain-text `.hurl` (raw HTTP) | Predicates and filters | Yes, per file (`--test`) | Plain-text HTTP tests from the CLI |
 | Venom | YAML | Go templates and `govaluate` | Yes | Multi-protocol integration tests in CI |
 | Postman / Insomnia | GUI collections (JSON) | JavaScript | No | Interactive API exploration |
 | Bruno | Plain-text collections (`.bru`) | JavaScript (Node) | No | Git-friendly Postman-style client |
@@ -19,7 +19,7 @@ How `sinq` compares to the API testing tools people bring up most, starting with
 The differences:
 
 - **Scripting.** Hurl provides a fixed set of predicates and filters. For things outside that set (pulling one claim out of a JWT, generating a payload on the fly, retrying based on what came back in the body) you reach the limit of what they can express. `sinq` runs a full Lua VM, so those cases are just code.
-- **Concurrency.** `sinq` runs every leaf directory as its own scenario and fires them all at once. Hurl runs files one after another unless you parallelize it yourself.
+- **Unit of a flow.** Both run tests in parallel: Hurl runs `.hurl` files in parallel in `--test` mode, and `sinq` runs scenarios in parallel. A Hurl flow is one file, while a `sinq` scenario is a directory path whose files run in order.
 - **Reuse.** A `sinq` scenario inherits requests and config from the directories above it, so shared auth and setup live in one file at the root. With Hurl, that setup is usually repeated per file or passed along as state you manage yourself.
 
 If your assertions stay simple, Hurl is the lighter choice: no scripting language to learn and a longer track record.

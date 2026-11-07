@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"veitangie.dev/sinq/internal/event"
+	"veitangie.dev/sinq/internal/event/sink/aggregator"
 	"veitangie.dev/sinq/internal/reporter"
-	"veitangie.dev/sinq/internal/runner"
 )
 
 type JUnitReport struct {
@@ -75,7 +76,7 @@ func NewReporter(writer io.Writer) JUnitReporter {
 	return JUnitReporter{writer}
 }
 
-func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan time.Duration, size int) error {
+func (r JUnitReporter) Report(source <-chan aggregator.ScenarioResult, timer <-chan time.Duration, size int) error {
 	result := JUnitReport{
 		Suites: make([]JUnitTestSuite, 0, size),
 	}
@@ -84,16 +85,22 @@ func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 		result.Suites = append(result.Suites, JUnitTestSuite{})
 		suite := &result.Suites[len(result.Suites)-1]
 
-		suite.Name = scenarioResult.Name
+		suite.Name = suiteName(scenarioResult)
 		suite.Tests = len(scenarioResult.RequestResults)
 		result.Tests += suite.Tests
 		suite.Timestamp = scenarioResult.StartedAt.Format(time.RFC3339)
 		suite.Time = fmt.Sprintf("%.3f", scenarioResult.TotalDuration.Seconds())
 		suite.TestCases = make([]JUnitTestCase, 0, len(scenarioResult.RequestResults))
 
+		if len(scenarioResult.Tags) != 0 || len(scenarioResult.Labels) != 0 {
+			suite.Properties = &JUnitProperties{make([]JUnitProperty, 0, 2)}
+		}
 		if len(scenarioResult.Tags) != 0 {
-			suite.Properties = &JUnitProperties{make([]JUnitProperty, 0, 1)}
 			suite.Properties.Properties = append(suite.Properties.Properties, JUnitProperty{Name: "tags", Value: strings.Join(scenarioResult.Tags, ", ")})
+		}
+
+		if len(scenarioResult.Labels) != 0 {
+			suite.Properties.Properties = append(suite.Properties.Properties, JUnitProperty{Name: "labels", Value: strings.Join(scenarioResult.Labels, ", ")})
 		}
 		if scenarioResult.Output != nil && scenarioResult.Output.Len() != 0 {
 			suite.SystemOut = &JUnitSystemOut{Contents: scenarioResult.Output.String()}
@@ -112,21 +119,21 @@ func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 					Type:    "AssertionFailure",
 				}
 			}
-			if requestResult.Status == runner.Error {
+			if requestResult.Status == event.Error {
 				suite.Errors += 1
 				suite.TestCases[len(suite.TestCases)-1].Error = &JUnitFailure{
 					Message: requestResult.ErrorMessage,
 					Type:    "RuntimeError",
 				}
 			}
-			if requestResult.Status == runner.Aborted {
+			if requestResult.Status == event.Aborted {
 				suite.Errors += 1
 				suite.TestCases[len(suite.TestCases)-1].Error = &JUnitFailure{
 					Message: "Request was interrupted",
 					Type:    "RuntimeError",
 				}
 			}
-			if requestResult.Status == runner.Unset || requestResult.Status == runner.Skipped {
+			if requestResult.Status == event.Unset || requestResult.Status == event.Skipped {
 				suite.TestCases[len(suite.TestCases)-1].Skipped = &JUnitSkipped{}
 			}
 		}
@@ -146,4 +153,17 @@ func (r JUnitReporter) Report(source <-chan runner.ScenarioResult, timer <-chan 
 	}
 	_, err = r.writer.Write(toWrite)
 	return err
+}
+
+func suiteName(result aggregator.ScenarioResult) string {
+	var name strings.Builder
+	name.WriteString(result.Name)
+	for _, label := range result.Labels {
+		name.WriteByte('_')
+		name.WriteString(label)
+	}
+	if result.TotalRunCount > 1 {
+		fmt.Fprintf(&name, "#%d", result.CntId+1)
+	}
+	return name.String()
 }

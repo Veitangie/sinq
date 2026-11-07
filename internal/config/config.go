@@ -30,7 +30,7 @@ type Config struct {
 	Out          string
 	MaxCacheSize DataSize
 	CacheTimeout time.Duration
-	Count        uint
+	Count        int
 	LuaPaths     []string
 	Paths        []string
 	Treewalker   TreewalkerConfig

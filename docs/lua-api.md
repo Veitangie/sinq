@@ -29,7 +29,7 @@ Shorthands for the *current* request and response being processed.
 * **`sinq.finishScenario()`**: Alters execution flow. Tells `sinq` to finish the scenario once the current request completes its life cycle. Useful for gracefully finishing loops or conditional scenario shutdowns.
 
 ### Standard Output (`print` & `io.write`)
-`print` (and `io.write`, if `io` is enabled via `--unrestricted`) works in every script. Because scenarios run in parallel, printing straight to the terminal would interleave badly, so this output is discarded by default. Pass `-p` / `--print` to buffer it and attach it to the scenario result instead.
+`print` (and `io.write`, if `io` is enabled via `--unrestricted`) works in every script. Because scenarios run in parallel, printing straight to the terminal would interleave badly, so this output is discarded by default. Pass `-p` / `--print` to buffer it and attach it to the scenario result instead. Like in standard Lua, `print` converts values with `tostring`, so a table with a `__tostring` metamethod (such as `res.error`) prints as its text.
 
 ---
 
@@ -168,14 +168,14 @@ $ASSERT{ sinq.assert.code(201) }
 ```
 
 ### `$RETRY` (Polling Phase)
-Executes after receiving a response. The script **must** return a number indicating how many milliseconds to wait before retrying, or a negative number to stop.
+Executes after every attempt, including one that got no response (then `res.error` is set, see [Send Failures](#send-failures-reserror)). The script **must** return a number indicating how many milliseconds to wait before retrying, or a negative number to stop.
 
 * **`sinq.retry.stop`**: A constant (`-1`) indicating the retry loop should break immediately.
 * **`sinq.retry.when(condition boolean, delay number?)`**
     * Retries if `condition` is true. `delay` defaults to `500ms`.
 * **`sinq.retry.whenExponential(condition boolean, base number?, constant number?)`**
     * Retries if `condition` is true, using exponential backoff (`base ^ attempt * constant`).
-    * `base` defaults to `2` (Max `10`). `constant` defaults to `500ms`.
+    * `base` defaults to `2`; a `base` that isn't a number in `(0, 10]` falls back to `2`. `constant` defaults to `500ms`.
 * **`sinq.retry.withJitter(condition boolean, range number?, delegate function?, delegate_args any...)`**
     * Adds randomized jitter to a retry calculation to prevent thundering herd problems.
     * `range` defaults to `50` (±50ms jitter). `delegate` defaults to `sinq.retry.when`, delegate will be passed condition and delegate_args when called.
@@ -204,7 +204,7 @@ Executes after the retry loop finishes. Used to validate the final state of the 
 * **`sinq.assert.fileMatches(filepath string)`**: Fails if the response previously saved using `req.saveResponseTo()` does not exactly match the contents of `filepath`. Fails immediately if `req.saveResponseTo()` was not called.
 
 ### `$POST` (State Extraction Phase)
-Executes after a successful `$ASSERT` phase. Typically used to parse the final response payload and store relevant data in the global sandbox for subsequent requests. No special scoped APIs are injected here.
+Executes after `$ASSERT`, unless `$ASSERT` raised an error. After failed assertions it runs only if `fail_fast` is off (it's on by default). Typically used to parse the final response payload and store relevant data in the global sandbox for subsequent requests. No special scoped APIs are injected here.
 
 ---
 
@@ -216,9 +216,12 @@ When an HTTP request completes, `sinq` parses the response and injects it into t
     A response object only exists *after* the request has been executed. Accessing `sinq.responses[2]` or the alias `res` during the `$PRE` hook of the second request will return nil.
 
 ### Response Object Structure
-* `attempt` *(number)*: The current execution attempt (useful during `$RETRY`).
+* `attempt` *(number)*: The current execution attempt, counting from 1 (useful during `$RETRY`).
 * `code` *(number)*: The HTTP status code (e.g., `200`, `404`).
+* `headers` *(table)*: The response headers, see [below](#http-headers-translation).
 * `oversized` *(boolean | nil)*: `true` if the payload exceeded the scenario's `max_body` limit and was safely truncated.
+* `size` *(number | nil)*: Bytes written to disk, if `req.saveResponseTo()` was used.
+* `error` *(table | nil)*: Set when the attempt got no response at all; `nil` otherwise. See [Send Failures](#send-failures-reserror).
 
 ### Body Access Methods
 
@@ -231,6 +234,51 @@ When an HTTP request completes, `sinq` parses the response and injects it into t
 * `json()` *(function)*: An unsafe convenience wrapper around `extractBodyJson`. 
     * **Returns:** `table` directly. 
     * **Throws:** Calls a fatal `error()` if the body is not valid JSON, failing the scenario immediately.
+
+### Send Failures (`res.error`)
+When an attempt fails without a response (the connection is refused, DNS fails, TLS fails, `req_timeout` runs out, and so on), `res.error` describes it:
+
+* `res.error.kind` *(string)*: what went wrong, one of the kinds below.
+* `res.error.message` *(string)*: a human-readable description. Its wording comes from Go and may change between releases; don't match on it.
+
+`tostring(res.error)` and `print(res.error)` give `kind: message`, for example `refused: Get "http://localhost:8080/": dial tcp [::1]:8080: connect: connection refused`.
+
+For that attempt, the response fields (`code`, `headers`, `bodyRaw`, `size`, `oversized`) are `nil`, and so are `json` and `extractBodyJson`, so calling `res.json()` raises an error. `res.attempt` is still set. The next attempt starts clean: after a successful one, `res.error` is `nil` again.
+
+| `kind` | Meaning |
+| --- | --- |
+| `timeout` | `req_timeout` (or `--cache-timeout` for a cached request) ran out, or the connection or TLS handshake timed out. |
+| `dns` | The host name could not be resolved. |
+| `refused` | The server refused the connection. |
+| `reset` | The connection was closed or reset before or while the response arrived. |
+| `tls` | The TLS handshake failed: untrusted or expired certificate, wrong host name, a TLS alert, or a server that doesn't speak TLS (including `https://` to a plain HTTP server). |
+| `redirects` | The server redirected more than `max_redirects` times. |
+| `other` | Anything else. |
+
+The named kinds are stable within a major version. `other` is not: a minor release may move some of its errors into a new, more specific kind (see [Versioning](versioning.md)). Branch on the named kinds and treat `other` as "everything else", rather than checking `kind == "other"`.
+
+!!! warning "`res.error` is a table, not a string"
+    `res.error == "timeout"` is always `false`. Compare the kind instead: `res.error.kind == "timeout"`. Functions that take a string, such as `sinq.assert.fail`, need a string too: pass `res.error.kind`, `res.error.message` or `tostring(res.error)`.
+
+**What happens to the request.** `$RETRY` runs after a failed attempt like after any other, so it can retry. Policies written for status codes usually cover failures already, since `res.code` is `nil`: `sinq.retry.when(res.code ~= 200)` retries a refused connection as well. A policy that reads the body has to check `res.error` first:
+
+```lua
+$RETRY{
+    if res.error then
+        return sinq.retry.when(res.error.kind == "timeout" or res.error.kind == "refused")
+    end
+    return sinq.retry.when(res.json().status == "pending")
+}
+```
+
+If the last attempt still failed, the request ends as an **Error** with the failure's message, and its `$ASSERT` and `$POST` don't run. Retrying past `max_retries` ends it with `Too many retries` instead.
+
+Not every error reaches `res.error`. These end the request right away, without running `$RETRY`:
+
+* the scenario's own `timeout` running out (Error), or `Ctrl+C` (Aborted),
+* mistakes in the request itself, such as two bodies, a URL scheme other than `http` or `https`, an `req.attach` or `req.multipart` file that can't be opened, or a `req.saveResponseTo` file that can't be created.
+
+A cached request that joins another request's network call (see [`req.cache`](#pre-setup-phase)) gets that call's error, including a `timeout` from `--cache-timeout`.
 
 ### HTTP Headers Translation
 HTTP headers are complex because a single key can have multiple values. `sinq` handles this translation automatically.
@@ -394,7 +442,7 @@ Allows for generation, decoding, and validation of JSON Web Tokens natively with
 * **`sinq.jwt.decode(token string)`**: Decodes a JWT token without validating its signature. 
     * **Returns:** `(result table, error string)`
     * **Table Structure:** Contains `header`(table), `claims` (table), `signature` (string), and `method` (string).
-* **`sinq.jwt.verify(token string, key string, algo string?)`**: Verifies the token using the provided key and optional algorithm constraint.
+* **`sinq.jwt.verify(token string, key string, algo string?)`**: Verifies the token using the provided key. Without `algo`, the algorithm named in the token's own header is used; pass `algo` to require a specific one, so a token can't pick an algorithm that misreads your key.
     * **Returns:** `(result table, error string)`
     
     !!! note

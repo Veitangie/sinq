@@ -11,11 +11,15 @@ The compatibility promise covers:
 - CLI flag names, their semantics and defaults, and process exit codes.
 - The `.sinq` file format and the `.scenario` configuration schema.
 - The Lua API surface exposed to scripts (globals, the `sinq.*` namespace, and the lifecycle scopes).
+- The [`res.error.kind`](lua-api.md#send-failures-reserror) values. A named kind (`timeout`, `dns`, `refused`, `reset`, `tls`, `redirects`) keeps its meaning and is only removed or narrowed in a major release. The one exception is `other`: a minor release may split errors off it into a new named kind, so a check against `other` can change in a minor release.
 - The structure of the JUnit XML report.
 
 It does **not** cover, and any of the following may change in any release:
 
 - The exact text, layout, and colors of the human-readable `std` reporter.
 - Log message wording and formatting.
+- The wording of error messages, including `res.error.message` and `tostring(res.error)`.
 - Anything under `internal/` (this module exposes no importable Go API).
 - Performance characteristics.
+
+Changes in each release are listed in the [changelog](https://github.com/Veitangie/sinq/blob/main/CHANGELOG.md).
