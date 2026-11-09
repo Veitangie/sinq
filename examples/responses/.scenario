@@ -1,0 +1,8 @@
+{
+  "description": "Reading responses: raw bodies, size limits, redirects and earlier responses",
+  "max_body": "1KiB",
+  "max_redirects": 3,
+  "script_timeout": "1s",
+  "timeout": "30s",
+  "fail_fast": true
+}

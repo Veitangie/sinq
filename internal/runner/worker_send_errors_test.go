@@ -19,27 +19,27 @@ import (
 	"veitangie.dev/sinq/internal/scenario"
 )
 
-func TestWorker_ProcessRequest_FailedSendIsAnAttempt(t *testing.T) {
+func TestWorker_ProcessStage_FailedSendIsAnAttempt(t *testing.T) {
 	res, obs := runSource(t, "GET http://localhost/ HTTP/1.1\n", func(w *worker) { w.env.transport = refusingRoundTripper{} })
 
-	if rr := res.RequestResults[0]; rr.Status != event.Error {
+	if rr := res.StageResults[0]; rr.Status != event.Error {
 		t.Fatalf("Expected the request to error, got %v", rr.Status)
 	}
 	if ex := executions(obs); len(ex) != 1 {
 		t.Errorf("Expected one Execution event for the failed send, got %d", len(ex))
 	}
-	if rr := res.RequestResults[0]; rr.Attempts != 1 {
+	if rr := res.StageResults[0]; rr.Attempts != 1 {
 		t.Errorf("Expected the failed send to count as 1 attempt, got %d", rr.Attempts)
 	}
 }
 
-func TestWorker_ProcessRequest_TooManyRetries(t *testing.T) {
+func TestWorker_ProcessStage_TooManyRetries(t *testing.T) {
 	transport := &countingRoundTripper{}
 	res, _ := runSourceWith(t, "GET http://localhost/ HTTP/1.1\n\n$RETRY{ return 1 }\n",
 		func(cfg *scenario.ScenarioConfig) { cfg.MaxRetries = 2 },
 		viaTransport(transport))
 
-	rr := res.RequestResults[0]
+	rr := res.StageResults[0]
 	if rr.Status != event.Error || rr.ErrorMessage != "Too many retries" {
 		t.Errorf("Expected the request to end with \"Too many retries\", got %v %q", rr.Status, rr.ErrorMessage)
 	}
@@ -48,14 +48,12 @@ func TestWorker_ProcessRequest_TooManyRetries(t *testing.T) {
 	}
 }
 
-// An unsupported scheme is a mistake in the request, not a network failure, so it
-// must end the request instead of going through $RETRY.
-func TestWorker_ProcessRequest_UnsupportedSchemeIsNotRetried(t *testing.T) {
+func TestWorker_ProcessStage_UnsupportedSchemeIsNotRetried(t *testing.T) {
 	res, _ := runSourceWith(t, "GET ftp://localhost/x HTTP/1.1\n\n$RETRY{ return 1 }\n",
 		func(cfg *scenario.ScenarioConfig) { cfg.MaxRetries = 2 },
 		viaTransport(http.DefaultTransport))
 
-	rr := res.RequestResults[0]
+	rr := res.StageResults[0]
 	if rr.Status != event.Error || !strings.Contains(strings.ToLower(rr.ErrorMessage), "scheme") {
 		t.Errorf("Expected the request to error over its scheme, got %v %q", rr.Status, rr.ErrorMessage)
 	}
@@ -64,10 +62,10 @@ func TestWorker_ProcessRequest_UnsupportedSchemeIsNotRetried(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_SendErrorHidesURLCredentials(t *testing.T) {
+func TestWorker_ProcessStage_SendErrorHidesURLCredentials(t *testing.T) {
 	res, _ := runSource(t, "GET http://alice:hunter2@localhost/x?token=s3cret HTTP/1.1\n", viaTransport(refusingRoundTripper{}))
 
-	msg := res.RequestResults[0].ErrorMessage
+	msg := res.StageResults[0].ErrorMessage
 	if !strings.Contains(msg, "localhost/x") {
 		t.Fatalf("Expected the error to still name the URL, got %q", msg)
 	}
@@ -78,7 +76,7 @@ func TestWorker_ProcessRequest_SendErrorHidesURLCredentials(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_RetriesSendJarCookiesOnce(t *testing.T) {
+func TestWorker_ProcessStage_RetriesSendJarCookiesOnce(t *testing.T) {
 	tests := []struct {
 		name string
 		pre  string
@@ -118,14 +116,14 @@ func TestWorker_ProcessRequest_RetriesSendJarCookiesOnce(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_UntrustedCertificateErrors(t *testing.T) {
+func TestWorker_ProcessStage_UntrustedCertificateErrors(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer srv.Close()
 	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
 
 	res, _ := runSource(t, "GET "+srv.URL+"/path HTTP/1.1\n", viaTransport(http.DefaultTransport))
 
-	rr := res.RequestResults[0]
+	rr := res.StageResults[0]
 	if rr.Status != event.Error || !strings.Contains(rr.ErrorMessage, "certificate") {
 		t.Errorf("Expected a self-signed server to fail with a certificate error, got %v %q", rr.Status, rr.ErrorMessage)
 	}
@@ -155,7 +153,7 @@ func TestWorker_ProcessScenario_CancelDuringRetryWaitAborts(t *testing.T) {
 		t.Fatal("The retry wait ignored the cancellation")
 	}
 	res := obs.result()
-	if rr := res.RequestResults[0]; rr.Status != event.Aborted || rr.ErrorMessage != "" {
+	if rr := res.StageResults[0]; rr.Status != event.Aborted || rr.ErrorMessage != "" {
 		t.Errorf("Expected a request cancelled in its retry wait to be Aborted without a message, got %v %q", rr.Status, rr.ErrorMessage)
 	}
 	if res.Status != event.Aborted {
@@ -163,7 +161,7 @@ func TestWorker_ProcessScenario_CancelDuringRetryWaitAborts(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_FailedRetryAttemptClearsPreviousResponse(t *testing.T) {
+func TestWorker_ProcessStage_FailedRetryAttemptClearsPreviousResponse(t *testing.T) {
 	raw := "GET http://localhost/ HTTP/1.1\n\n" +
 		"$RETRY{\n" +
 		"  if res.attempt < 2 then return 0 end\n" +
@@ -187,7 +185,7 @@ func TestWorker_ProcessRequest_FailedRetryAttemptClearsPreviousResponse(t *testi
 	}
 }
 
-func TestWorker_ProcessRequest_ErrorTableToString(t *testing.T) {
+func TestWorker_ProcessStage_ErrorTableToString(t *testing.T) {
 	raw := "GET http://localhost/ HTTP/1.1\n\n" +
 		"$RETRY{\n" +
 		"  print(\"type=\" .. type(res.error))\n" +
@@ -216,7 +214,7 @@ func TestWorker_ProcessRequest_ErrorTableToString(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_SuccessfulRetryClearsError(t *testing.T) {
+func TestWorker_ProcessStage_SuccessfulRetryClearsError(t *testing.T) {
 	raw := "GET http://localhost/ HTTP/1.1\n\n" +
 		"$RETRY{\n" +
 		"  print(\"attempt=\" .. res.attempt .. \" error=\" .. tostring(res.error) .. \" code=\" .. tostring(res.code))\n" +
@@ -236,18 +234,18 @@ func TestWorker_ProcessRequest_SuccessfulRetryClearsError(t *testing.T) {
 	if !strings.Contains(out, "attempt=2 error=nil code=200") {
 		t.Errorf("Expected the successful second attempt to clear res.error, got %q", out)
 	}
-	if rr := res.RequestResults[0]; rr.Status != event.Success {
+	if rr := res.StageResults[0]; rr.Status != event.Success {
 		t.Errorf("Expected the request to succeed on its retry, got %v (%s)", rr.Status, rr.ErrorMessage)
 	}
 }
 
-func TestWorker_ProcessRequest_AuthoringErrorInSendStillErrors(t *testing.T) {
+func TestWorker_ProcessStage_AuthoringErrorInSendStillErrors(t *testing.T) {
 	raw := "$PRE{ req.multipart({ name = \"a\", data = \"b\" }) }\n" +
 		"POST http://localhost/ HTTP/1.1\n\nliteral body\n\n" +
 		"$ASSERT{ sinq.assert.isTrue(true) }\n"
 	res, _ := runSource(t, raw)
 
-	rr := res.RequestResults[0]
+	rr := res.StageResults[0]
 	if rr.Status != event.Error {
 		t.Errorf("Expected a request with two bodies to error, got %v", rr.Status)
 	}
@@ -256,7 +254,7 @@ func TestWorker_ProcessRequest_AuthoringErrorInSendStillErrors(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_RequestTimeoutReachesRetry(t *testing.T) {
+func TestWorker_ProcessStage_RequestTimeoutReachesRetry(t *testing.T) {
 	raw := "GET http://localhost/ HTTP/1.1\n\n$RETRY{ print(\"error=\" .. tostring(res.error.message) .. \" kind=\" .. tostring(res.error.kind)); return -1 }\n"
 	res, _ := runSourceWith(t, raw, func(cfg *scenario.ScenarioConfig) {
 		cfg.ReqTimeout = scenario.Duration{Duration: 20 * time.Millisecond}
@@ -272,14 +270,14 @@ func TestWorker_ProcessRequest_RequestTimeoutReachesRetry(t *testing.T) {
 		}
 		t.Errorf("Expected $RETRY to see the request timeout on res.error, got %q", got)
 	}
-	if rr := res.RequestResults[0]; rr.Status != event.Error {
+	if rr := res.StageResults[0]; rr.Status != event.Error {
 		t.Errorf("Expected a request whose last attempt timed out to error, got %v", rr.Status)
 	}
 }
 
 const printErrorKindRetry = "GET http://localhost/ HTTP/1.1\n\n$RETRY{ print(\"kind=\" .. tostring(res.error and res.error.kind)); return -1 }\n"
 
-func TestWorker_ProcessRequest_ResetWhileReadingBodyReachesRetry(t *testing.T) {
+func TestWorker_ProcessStage_ResetWhileReadingBodyReachesRetry(t *testing.T) {
 	res, _ := runSource(t, printErrorKindRetry, func(w *worker) {
 		w.env.transport = bodyFailingRoundTripper{failErr: io.ErrUnexpectedEOF}
 		w.env.cfg.Print = true
@@ -294,7 +292,7 @@ func TestWorker_ProcessRequest_ResetWhileReadingBodyReachesRetry(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_TimeoutWhileReadingBodyReachesRetry(t *testing.T) {
+func TestWorker_ProcessStage_TimeoutWhileReadingBodyReachesRetry(t *testing.T) {
 	res, _ := runSourceWith(t, printErrorKindRetry, func(cfg *scenario.ScenarioConfig) {
 		cfg.ReqTimeout = scenario.Duration{Duration: 20 * time.Millisecond}
 	}, func(w *worker) {
@@ -309,12 +307,12 @@ func TestWorker_ProcessRequest_TimeoutWhileReadingBodyReachesRetry(t *testing.T)
 		}
 		t.Errorf("Expected $RETRY to see a body read timeout as kind timeout, got %q", got)
 	}
-	if rr := res.RequestResults[0]; !strings.Contains(rr.ErrorMessage, "request timeout") {
+	if rr := res.StageResults[0]; !strings.Contains(rr.ErrorMessage, "request timeout") {
 		t.Errorf("Expected the request to end with the request timeout, got %v %q", rr.Status, rr.ErrorMessage)
 	}
 }
 
-func TestWorker_ProcessRequest_SaveToFileFailureIsNotANetworkError(t *testing.T) {
+func TestWorker_ProcessStage_SaveToFileFailureIsNotANetworkError(t *testing.T) {
 	raw := "$PRE{ req.saveResponseTo(\"out/report.bin\") }\n" +
 		"GET http://localhost/ HTTP/1.1\n\n" +
 		"$RETRY{ if res.error then return 0 end; return -1 }\n"
@@ -322,7 +320,7 @@ func TestWorker_ProcessRequest_SaveToFileFailureIsNotANetworkError(t *testing.T)
 	w.env.transport = bodyRoundTripper{body: "payload"}
 	obs := observe(t, w)
 
-	bps, err := scenario.ParseRequestBlueprints(strings.NewReader(raw), "events.sinq")
+	bps, err := scenario.ParseStageBlueprints(strings.NewReader(raw), "events.sinq", "")
 	if err != nil {
 		t.Fatalf("Failed to parse requests: %v", err)
 	}
@@ -334,11 +332,11 @@ func TestWorker_ProcessRequest_SaveToFileFailureIsNotANetworkError(t *testing.T)
 			MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
 			MaxRetries:    3,
 		},
-		Requests:  bps,
+		Stages:    bps,
 		workspace: &uncreatableWorkspace{mockWorkspace{FS: fstest.MapFS{"out": &fstest.MapFile{Mode: fs.ModeDir}}}},
 		run:       true,
 	})
-	rr := obs.result().RequestResults[0]
+	rr := obs.result().StageResults[0]
 
 	if rr.Status != event.Error {
 		t.Errorf("Expected the request to error, got %v", rr.Status)
@@ -351,13 +349,13 @@ func TestWorker_ProcessRequest_SaveToFileFailureIsNotANetworkError(t *testing.T)
 	}
 }
 
-func TestWorker_ProcessRequest_ScenarioTimeoutDoesNotReachRetry(t *testing.T) {
+func TestWorker_ProcessStage_ScenarioTimeoutDoesNotReachRetry(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.env.transport = hangingRoundTripper{}
 	w.env.cfg.Print = true
 	obs := observe(t, w)
 
-	bps, err := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\n\n$RETRY{ print(\"retry ran\"); return -1 }\n"), "events.sinq")
+	bps, err := scenario.ParseStageBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\n\n$RETRY{ print(\"retry ran\"); return -1 }\n"), "events.sinq", "")
 	if err != nil {
 		t.Fatalf("Failed to parse requests: %v", err)
 	}
@@ -370,7 +368,7 @@ func TestWorker_ProcessRequest_ScenarioTimeoutDoesNotReachRetry(t *testing.T) {
 			ScriptTimeout: scenario.Duration{Duration: time.Second},
 			MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
 		},
-		Requests:  bps,
+		Stages:    bps,
 		workspace: &mockWorkspace{},
 		run:       true,
 	})
@@ -379,7 +377,7 @@ func TestWorker_ProcessRequest_ScenarioTimeoutDoesNotReachRetry(t *testing.T) {
 	if res.Output != nil && strings.Contains(res.Output.String(), "retry ran") {
 		t.Errorf("Expected $RETRY not to run when the scenario timed out, got output %q", res.Output.String())
 	}
-	rr := res.RequestResults[0]
+	rr := res.StageResults[0]
 	if rr.Status != event.Error {
 		t.Errorf("Expected a request cut off by the scenario timeout to error, got %v", rr.Status)
 	}

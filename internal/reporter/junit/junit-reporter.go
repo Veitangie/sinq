@@ -51,6 +51,7 @@ type JUnitProperty struct {
 
 type JUnitTestCase struct {
 	Name      string        `xml:"name,attr"`
+	File      string        `xml:"file,attr"`
 	Classname string        `xml:"classname,attr"`
 	Time      string        `xml:"time,attr"`
 	Failure   *JUnitFailure `xml:"failure,omitempty"`
@@ -86,11 +87,11 @@ func (r JUnitReporter) Report(source <-chan aggregator.ScenarioResult, timer <-c
 		suite := &result.Suites[len(result.Suites)-1]
 
 		suite.Name = suiteName(scenarioResult)
-		suite.Tests = len(scenarioResult.RequestResults)
+		suite.Tests = len(scenarioResult.StageResults)
 		result.Tests += suite.Tests
 		suite.Timestamp = scenarioResult.StartedAt.Format(time.RFC3339)
 		suite.Time = fmt.Sprintf("%.3f", scenarioResult.TotalDuration.Seconds())
-		suite.TestCases = make([]JUnitTestCase, 0, len(scenarioResult.RequestResults))
+		suite.TestCases = make([]JUnitTestCase, 0, len(scenarioResult.StageResults))
 
 		if len(scenarioResult.Tags) != 0 || len(scenarioResult.Labels) != 0 {
 			suite.Properties = &JUnitProperties{make([]JUnitProperty, 0, 2)}
@@ -106,34 +107,35 @@ func (r JUnitReporter) Report(source <-chan aggregator.ScenarioResult, timer <-c
 			suite.SystemOut = &JUnitSystemOut{Contents: scenarioResult.Output.String()}
 		}
 
-		for _, requestResult := range scenarioResult.RequestResults {
+		for _, stageResult := range scenarioResult.StageResults {
 			suite.TestCases = append(suite.TestCases, JUnitTestCase{
-				Name:      requestResult.Name,
+				Name:      stageResult.Name,
+				File:      stageResult.Filename,
 				Classname: suite.Name,
-				Time:      fmt.Sprintf("%.3f", requestResult.Total.Seconds()),
+				Time:      fmt.Sprintf("%.3f", stageResult.Total.Seconds()),
 			})
-			if len(requestResult.FailedAssertions) > 0 {
+			if len(stageResult.FailedAssertions) > 0 {
 				suite.Failures += 1
 				suite.TestCases[len(suite.TestCases)-1].Failure = &JUnitFailure{
-					Message: strings.Join(requestResult.FailedAssertions, ", "),
+					Message: strings.Join(stageResult.FailedAssertions, ", "),
 					Type:    "AssertionFailure",
 				}
 			}
-			if requestResult.Status == event.Error {
+			if stageResult.Status == event.Error {
 				suite.Errors += 1
 				suite.TestCases[len(suite.TestCases)-1].Error = &JUnitFailure{
-					Message: requestResult.ErrorMessage,
+					Message: stageResult.ErrorMessage,
 					Type:    "RuntimeError",
 				}
 			}
-			if requestResult.Status == event.Aborted {
+			if stageResult.Status == event.Aborted {
 				suite.Errors += 1
 				suite.TestCases[len(suite.TestCases)-1].Error = &JUnitFailure{
-					Message: "Request was interrupted",
+					Message: "Stage was interrupted",
 					Type:    "RuntimeError",
 				}
 			}
-			if requestResult.Status == event.Unset || requestResult.Status == event.Skipped {
+			if stageResult.Status == event.Unset || stageResult.Status == event.Skipped {
 				suite.TestCases[len(suite.TestCases)-1].Skipped = &JUnitSkipped{}
 			}
 		}

@@ -257,10 +257,10 @@ func runMultipartPre(t *testing.T, w *worker, script string) (preScriptResult, e
 
 func runMultipartPreAt(t *testing.T, w *worker, sinqFile, script string) (preScriptResult, error) {
 	t.Helper()
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 	extract := func(scenario.Token) []byte { return []byte(script) }
 	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
-	return w.runPreScript(token, extract, sinqFile, time.Second)
+	return w.runPreScript(token, extract, sinqFile, time.Second, false)
 }
 
 func TestMultipartBuilder_SourcePathResolution(t *testing.T) {

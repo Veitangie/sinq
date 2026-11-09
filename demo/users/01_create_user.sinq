@@ -11,6 +11,11 @@ Content-Type: application/json
     "email": "${userEmail}"
 }
 
-$ASSERT{ sinq.assert.code(201, "Failed to create user") }
+$ASSERT{
+    sinq.assert.code(201, "Failed to create user")
+    sinq.assert.isTrue(res.headers["Location"] ~= nil, "No Location header")
+}
 
-$POST{ USER_ID = res.json().id }
+$POST{
+    USER_ID = sinq.regex.compile([[^/users/(?P<id>\w+)$]]).match(res.headers["Location"]).id
+}

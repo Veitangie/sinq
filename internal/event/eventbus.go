@@ -18,6 +18,29 @@ type Bus struct {
 	done     bool
 }
 
+func (e Event) logAttrs() []slog.Attr {
+	res := make([]slog.Attr, 0, len(e.Attrs)+3)
+	if !e.RunId.IsEmpty() {
+		res = append(res, slog.Attr{
+			Key:   "runId",
+			Value: e.RunId.LogValue(),
+		})
+	}
+	res = append(res, slog.Attr{
+		Key:   "system",
+		Value: slog.StringValue(e.Source.String()),
+	})
+	if e.WorkerId != 0 {
+		res = append(res, slog.Attr{
+			Key:   "workerId",
+			Value: slog.IntValue(e.WorkerId),
+		})
+	}
+
+	res = append(res, e.Attrs...)
+	return res
+}
+
 func NewBus(bufsize int, logger *slog.Logger) (*Bus, error) {
 	if logger == nil {
 		return nil, errors.New("Unable to construct event bus: logger is nil")
@@ -97,7 +120,7 @@ func (eb *Bus) Start() {
 					context.Background(),
 					event.Level,
 					event.Message,
-					event.Attrs...,
+					event.logAttrs()...,
 				)
 			}
 

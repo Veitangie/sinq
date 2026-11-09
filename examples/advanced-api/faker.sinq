@@ -2,18 +2,25 @@ POST ${env.BASE_URL}/advanced/faker
 Content-Type: application/json
 
 $PRE{
+    -- A fixed seed makes every value below the same on every run.
     sinq.fake.setSeed(42)
     userId = sinq.fake.uuid()
     userEmail = sinq.fake.email()
     userCompany = sinq.fake.company()
     luckyNumber = sinq.fake.int(1, 100)
+    role = sinq.fake.oneOf({ "warrior", "mage", "rogue" })
+    lastSeenIp = sinq.fake.ipv4()
+    online = sinq.fake.shakespeare()
 }
 
 {
     "id": "${userId}",
     "email": "${userEmail}",
     "company": "${userCompany}",
-    "lucky_number": ${luckyNumber}
+    "lucky_number": ${luckyNumber},
+    "role": "${role}",
+    "last_seen_ip": "${lastSeenIp}",
+    "online": ${online}
 }
 
 $ASSERT{

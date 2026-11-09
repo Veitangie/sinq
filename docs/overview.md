@@ -1,6 +1,6 @@
 # Architecture Overview
 
-`sinq` works in three stages: it discovers the tests on disk, runs them across a worker pool, and reports the results.
+`sinq` works in three phases: it discovers the tests on disk, runs them across a worker pool, and reports the results.
 
 ## 1. Treewalker
 

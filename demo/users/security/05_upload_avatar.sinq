@@ -1,0 +1,15 @@
+POST ${env.BASE_URL}/users/${USER_ID}/avatar
+Authorization: Bearer ${AUTH_TOKEN}
+
+$PRE{
+    -- The file part's Content-Type is sniffed from the extension.
+    req.multipart(
+        { name = "caption", data = userName },
+        { name = "avatar", source = "avatar.svg", filename = true }
+    )
+}
+
+$ASSERT{
+    sinq.assert.code(200, "Failed to upload avatar")
+    sinq.assert.equals(res.json(), { filename = "avatar.svg", content_type = "image/svg+xml" })
+}

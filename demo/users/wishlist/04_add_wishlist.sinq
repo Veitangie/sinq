@@ -1,12 +1,16 @@
 $PRE{
-    wishedProduct = sinq.fake.word()
+    -- Built in Lua, so mark it as an array: it would serialize as {} if it ended up empty.
+    WISHLIST = sinq.json.array()
+    for _ = 1, 2 do
+        table.insert(WISHLIST, sinq.fake.oneOf({ "arcane_staff", "silver_ring", "shadow_cloak", "hunting_bow" }))
+    end
 }
 POST ${env.BASE_URL}/users/${USER_ID}/wishlist
 Authorization: Bearer ${AUTH_TOKEN}
 Content-Type: application/json
 
 {
-    "product": "${wishedProduct}"
+    "products": ${ WISHLIST }
 }
 
-$ASSERT{ sinq.assert.code(200, "Failed to add wishlist item") }
+$ASSERT{ sinq.assert.code(200, "Failed to add wishlist items") }

@@ -186,6 +186,12 @@ func (lc *LuaContext) extractBodyJsonCore(ls *lua.LState) (lua.LValue, error) {
 		return bodyLua, nil
 	}
 
-	return lua.LNil, errors.New("Failed to extract body as json: no request table found")
+	return lua.LNil, errors.New("Failed to extract body as json: no response table found")
 
+}
+
+func stripSelf(ls *lua.LState) {
+	if ls.GetTop() >= 1 && ls.Get(1) == ls.Get(lua.UpvalueIndex(1)) {
+		ls.Remove(1)
+	}
 }

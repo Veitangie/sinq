@@ -4,7 +4,7 @@ A scenario is a directory of `.sinq` files. `sinq` runs the files in natural-sor
 
 ## A complete scenario
 
-Two leaf directories that share a setup file, four requests each.
+Two leaf directories that share a setup file, four stages each.
 
 ```
 api/
@@ -24,7 +24,7 @@ api/
 
 ### The shared setup file
 
-**`api/setup.sinq`** holds two requests, separated by `###`. The text after `###` names the request in `--list` output and in reports.
+**`api/setup.sinq`** holds two stages, separated by `###`. The text after `###` names the stage in `--list` output and in reports.
 
 ```text
 ### Health check
@@ -140,7 +140,7 @@ Content-Type: application/json
 $ASSERT{ sinq.assert.code(env.expect, "wrong status for " .. env.role) }
 ```
 
-Four runs: `admin`+`card`, `admin`+`crypto`, `guest`+`card`, `guest`+`crypto`. The console report lists each run's labels under the scenario name, and JUnit reports append them to the suite name (`checkout_admin_card`).
+Four runs: `admin`+`card`, `admin`+`crypto`, `guest`+`card`, `guest`+`crypto`. The console report shows each run's labels in parentheses after the scenario name (`checkout (admin, card)`), and JUnit reports append them to the suite name (`checkout_admin_card`).
 
 ### Upload a file
 
@@ -196,14 +196,14 @@ GET ${env.BASE_URL}/status
 
 $POST{
   if res.json().done then
-    sinq.finishScenario()      -- end the scenario after this request
+    sinq.finishScenario()      -- end the scenario after this stage
   else
-    sinq.setNextRequest(2)     -- jump back to the 2nd request
+    sinq.setNextStage(2)       -- jump back to the 2nd stage
   end
 }
 ```
 
-A request that runs several times shows up once in the report. It is marked failed if any of its runs failed, lists the failures of all runs, and adds up its attempts and timings. The summary's "requests sent" counts every run and retry, including ones answered from the response cache (`req.cache`) without reaching the server.
+A stage that runs several times shows up once in the report. It is marked failed if any of its runs failed, lists the failures of all runs, and adds up its attempts and timings. The summary's "requests sent" counts every run and retry, including ones answered from the response cache (`req.cache`) without reaching the server.
 
 ## Lua API cheat-sheet
 
@@ -215,8 +215,8 @@ secrets.KEY                  values from -s / --secret / --secrets-file
 res                          current response (see below)
 req                          current request (mutate only in $PRE)
 sinq.responses[n]            the nth response, 1-indexed
-sinq.setNextRequest(index)   jump execution to request `index` (1-indexed)
-sinq.finishScenario()        stop after the current request finishes
+sinq.setNextStage(index)     jump execution to stage `index` (1-indexed)
+sinq.finishScenario()        stop after the current stage finishes
 print(...)                   shown only with -p / --print, otherwise discarded
 ```
 
@@ -226,7 +226,7 @@ Response table:
 res.code                     status code
 res.headers["Name"]          string, or array of strings if the header repeats
 res.bodyRaw                  raw body string
-res.json()                   parse bodyRaw; fails the request on invalid JSON
+res.json()                   parse bodyRaw; fails the stage on invalid JSON
 res.extractBodyJson()        -> (table, err); does not throw
 res.attempt                  current attempt, from 1
 res.oversized                true if the body was truncated at max_body
@@ -240,7 +240,7 @@ res.error                    nil, or { kind, message } when the attempt got no r
 req.attach(path)             use a file's contents as the whole request body
 req.saveResponseTo(path)     stream the response to disk instead of buffering it
 req.cache(enable? | key)     opt in to the response cache; a string key is shared by every request using it
-req.skip(enable?)            do not send this request (enable defaults to true)
+req.skip(enable?)            skip this stage (enable defaults to true)
 req.multipart(entry, ...)    build a multipart/form-data body
 req.multipartBoundary(str)   pin the multipart boundary instead of a random one
 ```
@@ -277,6 +277,7 @@ sinq.encoding.urlEncode/urlDecode               query-string and form-body escap
 sinq.crypto.md5/sha1/sha256/sha512(s, enc?) | hmac(s, algo?, key?, enc?)
 sinq.jwt.decode(t) | verify(t, key, algo?) | sign(claims, key, method?)
 sinq.json.parse(s) | serialize(t, indent?) | array(t?) | sinq.json.null
+sinq.regex.compile(p) -> re; re.match(s) | re.matchAll(s)   RE2 syntax; m.full, m[1], m.name
 sinq.fake.uuid/email/name/int/oneOf/...          see the Lua API page for the full set
 ```
 
@@ -288,11 +289,12 @@ Full signatures and behaviour: [Lua API](lua-api.md).
 - **Multiple return values in an inline script.** Only the first one is inserted, so `${return sinq.json.serialize(t)}` works as is. A `nil` first value fails the request instead of inserting the text `nil`.
 - **Quoting a table.** An inline script that returns a table inserts JSON, so write `"address": ${env.pointA}`, not `"address": "${env.pointA}"`. Strings are the opposite: they're inserted raw, so they need the quotes (`"${env.NAME}"`).
 - **Empty arrays become `{}`.** Lua has no empty-array value, so an empty table serializes as an object. Arrays parsed from JSON keep their shape; for one built in Lua, use `sinq.json.array()` (or `sinq.json.array(t)` on a list that might end up empty).
+- **Comments outside Lua blocks.** `--` only starts a comment inside a `$...{ }` block. Anywhere else in a `.sinq` file it's request text, so a `--` line in a stage without a request line becomes that stage's request line.
 - **`local` on a value you need later.** State passed between files must be a global: `AUTH_TOKEN = ...`, not `local AUTH_TOKEN = ...`.
 - **Lua tables are 1-indexed.** The first element of a top-level JSON array is `res.json()[1]`.
-- **`res.json()` fails the request on non-JSON.** Use `res.extractBodyJson()` when the body might not be JSON.
-- **`$RETRY` must return a number.** Returning nothing, a boolean, or a table errors the request.
-- **`$PRE` cannot read the body.** It is not built yet. Read it in an inline script or in `$POST` of an earlier request.
+- **`res.json()` fails the stage on non-JSON.** Use `res.extractBodyJson()` when the body might not be JSON.
+- **`$RETRY` must return a number.** Returning nothing, a boolean, or a table errors the stage.
+- **`$PRE` cannot read the body.** It is not built yet. Read it in an inline script or in `$POST` of an earlier stage.
 - **One body source per request.** A literal body together with `req.attach` or `req.multipart` is an error.
 - **`$POST` is skipped after a failed assertion** when `fail_fast` is true (the default).
 
@@ -303,8 +305,8 @@ Reach for these flags, roughly in order:
 | Flag | Use |
 | --- | --- |
 | `--list` | Confirm which files make up the scenario and in what order. |
-| `-V` / `--verbose` | Per-stage timings, so you can see which stage is slow or hanging. |
-| `--dump-on-failure` | Print the full request and response of a request that failed, errored or was aborted. |
+| `-V` / `--verbose` | The duration of every lifecycle step in each stage, so you can see which stage, and which step of it, is slow or hanging. |
+| `--dump-on-failure` | Print the full request and response of a stage that failed, errored or was aborted. |
 | `-p` / `--print` | Attach your Lua `print` output to the report. |
 | `-L debug` | Everything, including request and response bodies. Avoid in CI with retained logs; it can expose secrets. |
 
@@ -315,16 +317,20 @@ Reach for these flags, roughly in order:
 
 ### Error messages
 
+Errors in `.sinq` and `.scenario` files are caught before anything runs. `sinq` lists all of them under `Error: Failed to parse scenarios:`, sends no requests and exits with `3`. Each line starts with the file, and with the line and column when they're known (`tests/login/01_login.sinq:4:1: ...`), a form most editors and terminals turn into a link to the spot.
+
 | Message | Cause |
 | --- | --- |
-| `Empty request (did you add ### ...)` | The file, or the part after a `###`, has no request line. |
+| `Empty stage (did you add ### ...)` | The file, or the part after a `###`, has neither a request line nor a lifecycle hook. |
+| `Invalid stage: $RETRY needs a request to retry` | A [script-only stage](scenario.md#script-only-stages) has a `$RETRY`, which needs a request to retry. |
+| `req.attach: invalid call for non-request stage` (or another `req` function) | A script-only stage called a `req` function other than `req.skip`. |
 | `<line>: URL is not absolute, unable to derive scheme` | The URL on the request line has no scheme (`/api/users` instead of `${env.BASE_URL}/api/users`). |
 | `<line>: Unsupported scheme: ...` | The URL's scheme is not `http` or `https`. |
 | `<line>: Empty host in URL` | The URL has a scheme but no host (`https:///path`). |
 | `<line>: Malformed header field, ...` | A header line has no `:` right after its name. |
-| `<file>:<line>:<col> Failed to parse lua script` | Lua syntax error in a hook or inline script. |
+| `Failed to parse lua script` | Lua syntax error in a hook or inline script. |
 | `Error occurred while executing lua script` | Lua runtime error: a nil index, an explicit `error(...)`, and so on. |
-| `Pre script is defined more than once` | Two `$PRE` (or `$ASSERT`, or `$POST`) blocks in one request. |
+| `Pre script is defined more than once` | Two `$PRE` (or `$RETRY`, `$ASSERT` or `$POST`) blocks in one stage. |
 | `Too many retries` | `$RETRY` kept returning a non-negative number past `max_retries`. |
 | `Request has both body and a file source` | A literal body plus `req.attach`. |
 | `Request has more than one body ...` | `req.multipart` together with a literal body or `req.attach`. |

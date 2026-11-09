@@ -29,14 +29,13 @@ The scenario runs once for every way of picking one label from each axis, with t
 3.  **`guest_card`**: `role`="guest", `auth_token`="guest-jwt-111", `method`="card", `expected_status`=200
 4.  **`guest_crypto`**: `role`="guest", `auth_token`="guest-jwt-111", `method`="crypto", `expected_status`=202
 
-In the console report, each generated scenario is listed under the base scenario name, with its labels on the lines below it:
+In the console report, each generated scenario shows the base scenario name with its labels in parentheses:
 
 ```text
- ✓ Scenario: checkout (1✓ in 12ms)
-   Labels:
-     admin
-     card
+ ✓ checkout (admin, card) (1✓ in 12ms)
 ```
+
+With `--count` above 1, the run number comes last: `checkout (admin, card) #2`.
 
 In JUnit reports, the labels are appended to the suite name (`checkout_admin_card`), so every variant is its own test suite, and they're also recorded in a `labels` property.
 

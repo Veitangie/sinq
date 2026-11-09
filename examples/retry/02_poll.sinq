@@ -1,0 +1,12 @@
+### Poll until the job is done
+GET ${env.BASE_URL}/retry/poll
+
+$RETRY{
+    -- Waits 10ms, give or take 5ms, between attempts.
+    return sinq.retry.withJitter(res.json().status == "pending", 5, sinq.retry.when, 10)
+}
+
+$ASSERT{
+    sinq.assert.contains(res.bodyRaw, '"done"', "Job never finished")
+    sinq.assert.equals(res.attempt, 3)
+}

@@ -1,4 +1,9 @@
 GET ${env.BASE_URL}/products?query=sword
 Authorization: Bearer ${AUTH_TOKEN}
 
+$PRE{
+    -- Five scenarios share this lookup; concurrent identical requests send it once.
+    req.cache(true)
+}
+
 $ASSERT{ sinq.assert.code(200, "Failed to browse products") }

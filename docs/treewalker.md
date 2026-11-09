@@ -6,10 +6,10 @@ The **Treewalker** discovers your tests and works out how to run them. API reque
 
 When you point `sinq` at a directory, the Treewalker scans it for `.sinq` and `.scenario` files.
 
-* **Parent folders** hold shared setup steps, such as a `01_login.sinq` script.
+* **Parent folders** hold shared setup stages, such as a `01_login.sinq` file.
 * **Leaf folders** (no subdirectories) are one scenario each, such as `create_user` or `delete_user`.
 
-A leaf folder inherits every script from its parent folders. Write the login once in a parent folder and every leaf scenario runs it before its own requests.
+A leaf folder inherits every script from its parent folders. Write the login once in a parent folder and every leaf scenario runs it before its own stages.
 
 ## Sharing Configuration
 
@@ -61,11 +61,13 @@ When a child and a parent set the same key, the child's value wins. This per-key
 
 1. **Sorting:** files within a directory are sorted in natural order, so `2_request.sinq` runs before `10_finalize.sinq`.
 2. **Inheritance:** each subdirectory appends its own sorted files to the ones inherited from its parents.
-3. **Emission:** a directory with no subdirectories and at least one `.sinq` or `.scenario` file becomes one scenario, built from everything accumulated along its path.
+3. **Emission:** a directory with no subdirectories and at least one `.sinq` or `.scenario` file of its own becomes one scenario, built from everything accumulated along its path. It needs at least one stage: a leaf with only `.scenario` files and no `.sinq` file anywhere along its path produces no scenario. An empty leaf directory produces none either, even if its parents hold `.sinq` files.
 
 Sibling scenarios share nothing and are handed to the worker pool to run concurrently.
 
 A single `.sinq` file passed as a path runs as its own scenario with the default configuration. It doesn't pick up `.scenario` files, not even ones in its own directory.
+
+If any `.sinq` or `.scenario` file fails to parse, in any of the paths given, nothing runs: `sinq` lists every parse error and exits with `3` (see [Error messages](authoring.md#error-messages)).
 
 ### Scenario Ordering
 

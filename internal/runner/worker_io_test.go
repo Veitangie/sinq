@@ -23,7 +23,7 @@ import (
 	"veitangie.dev/sinq/internal/scenario"
 )
 
-func TestWorker_ProcessRequest_MultipartOnTheWire(t *testing.T) {
+func TestWorker_ProcessStage_MultipartOnTheWire(t *testing.T) {
 	cases := []struct {
 		name        string
 		cache       bool
@@ -53,7 +53,7 @@ func TestWorker_ProcessRequest_MultipartOnTheWire(t *testing.T) {
 				w.env.transport = rec
 				cachedVia(w)
 			})
-			if rr := res.RequestResults[0]; rr.Status != event.Success {
+			if rr := res.StageResults[0]; rr.Status != event.Success {
 				t.Fatalf("Expected the request to succeed, got %v (%s)", rr.Status, rr.ErrorMessage)
 			}
 			if ex := executions(obs); len(ex) != 1 || hasFlag(ex[0], event.CachedMask) != tc.cache {
@@ -97,14 +97,14 @@ func (r *receivedRequest) server(t *testing.T) *httptest.Server {
 	return srv
 }
 
-func TestWorker_ProcessRequest_AttachedFileIsStreamedChunked(t *testing.T) {
+func TestWorker_ProcessStage_AttachedFileIsStreamedChunked(t *testing.T) {
 	got := &receivedRequest{}
 	srv := got.server(t)
 	ws := &mockWorkspace{FS: fstest.MapFS{"upload.txt": &fstest.MapFile{Data: []byte("hello chunked world")}}}
 
 	res, _ := runSourceIn(t, "$PRE{ req.attach(\"upload.txt\") }\nPOST "+srv.URL+"/upload HTTP/1.1\n", ws, nil, viaTransport(srv.Client().Transport))
 
-	if rr := res.RequestResults[0]; rr.Status != event.Success {
+	if rr := res.StageResults[0]; rr.Status != event.Success {
 		t.Fatalf("Expected the upload to succeed, got %v (%s)", rr.Status, rr.ErrorMessage)
 	}
 	got.mu.Lock()
@@ -117,13 +117,13 @@ func TestWorker_ProcessRequest_AttachedFileIsStreamedChunked(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_LiteralBodyIsSent(t *testing.T) {
+func TestWorker_ProcessStage_LiteralBodyIsSent(t *testing.T) {
 	got := &receivedRequest{}
 	srv := got.server(t)
 
 	res, _ := runSource(t, "POST "+srv.URL+"/ HTTP/1.1\n\nhello body", viaTransport(srv.Client().Transport))
 
-	if rr := res.RequestResults[0]; rr.Status != event.Success {
+	if rr := res.StageResults[0]; rr.Status != event.Success {
 		t.Fatalf("Expected the request to succeed, got %v (%s)", rr.Status, rr.ErrorMessage)
 	}
 	got.mu.Lock()
@@ -133,13 +133,13 @@ func TestWorker_ProcessRequest_LiteralBodyIsSent(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_GetWithoutBodyIsNotChunked(t *testing.T) {
+func TestWorker_ProcessStage_GetWithoutBodyIsNotChunked(t *testing.T) {
 	got := &receivedRequest{}
 	srv := got.server(t)
 
 	res, _ := runSource(t, "GET "+srv.URL+"/ HTTP/1.1\n\n", viaTransport(srv.Client().Transport))
 
-	if rr := res.RequestResults[0]; rr.Status != event.Success {
+	if rr := res.StageResults[0]; rr.Status != event.Success {
 		t.Fatalf("Expected the request to succeed, got %v (%s)", rr.Status, rr.ErrorMessage)
 	}
 	got.mu.Lock()
@@ -149,7 +149,7 @@ func TestWorker_ProcessRequest_GetWithoutBodyIsNotChunked(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_AttachAndLiteralBodyConflict(t *testing.T) {
+func TestWorker_ProcessStage_AttachAndLiteralBodyConflict(t *testing.T) {
 	ws := &mockWorkspace{FS: fstest.MapFS{"attached_file.txt": &fstest.MapFile{Data: []byte("file")}}}
 	cases := []struct {
 		name     string
@@ -163,7 +163,7 @@ func TestWorker_ProcessRequest_AttachAndLiteralBodyConflict(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			res, _ := runSourceIn(t, tc.raw, ws, nil)
 
-			rr := res.RequestResults[0]
+			rr := res.StageResults[0]
 			if tc.conflict && (rr.Status != event.Error || !strings.Contains(rr.ErrorMessage, "both body and a file source")) {
 				t.Errorf("Expected a body and an attached file to conflict, got %v %q", rr.Status, rr.ErrorMessage)
 			}
@@ -174,7 +174,7 @@ func TestWorker_ProcessRequest_AttachAndLiteralBodyConflict(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_BodyIsTruncatedAtMaxBody(t *testing.T) {
+func TestWorker_ProcessStage_BodyIsTruncatedAtMaxBody(t *testing.T) {
 	cases := []struct {
 		name      string
 		body      string
@@ -194,21 +194,21 @@ func TestWorker_ProcessRequest_BodyIsTruncatedAtMaxBody(t *testing.T) {
 				func(cfg *scenario.ScenarioConfig) { cfg.MaxBodySize.ByteAmount = 10 },
 				viaTransport(bodyRoundTripper{body: tc.body}))
 
-			if rr := res.RequestResults[0]; rr.Status != event.Success {
+			if rr := res.StageResults[0]; rr.Status != event.Success {
 				t.Errorf("Expected oversized=%v and bodyRaw=%q, got %v %v %s", tc.oversized, tc.want, rr.Status, rr.FailedAssertions, rr.ErrorMessage)
 			}
 		})
 	}
 }
 
-func TestWorker_ProcessRequest_SaveResponseToFile(t *testing.T) {
+func TestWorker_ProcessStage_SaveResponseToFile(t *testing.T) {
 	ws := &memWorkspace{files: fstest.MapFS{}}
 	raw := "$PRE{ req.saveResponseTo(\"output.txt\") }\nGET http://localhost/ HTTP/1.1\n\n" +
 		"$ASSERT{\n  sinq.assert.equals(res.size, 13, \"size\")\n  sinq.assert.equals(res.bodyRaw, nil, \"bodyRaw\")\n}\n"
 
 	res, _ := runSourceIn(t, raw, ws, nil, viaTransport(bodyRoundTripper{body: "saved payload"}))
 
-	if rr := res.RequestResults[0]; rr.Status != event.Success {
+	if rr := res.StageResults[0]; rr.Status != event.Success {
 		t.Fatalf("Expected res.size 13 and no buffered body, got %v %v %s", rr.Status, rr.FailedAssertions, rr.ErrorMessage)
 	}
 	ws.mu.Lock()
@@ -218,10 +218,25 @@ func TestWorker_ProcessRequest_SaveResponseToFile(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_InlineScriptWithoutValueErrors(t *testing.T) {
+func TestWorker_ProcessStage_ExecutionSizeOfSavedResponse(t *testing.T) {
+	ws := &memWorkspace{files: fstest.MapFS{}}
+	raw := "$PRE{ req.saveResponseTo(\"output.txt\") }\nGET http://localhost/ HTTP/1.1\n"
+
+	_, obs := runSourceIn(t, raw, ws, nil, viaTransport(bodyRoundTripper{body: "saved payload"}))
+
+	ex := executions(obs)
+	if len(ex) != 1 {
+		t.Fatalf("Expected one Execution event, got %d", len(ex))
+	}
+	if ex[0].Size != 13 {
+		t.Errorf("Expected Size to be the 13 bytes written to the file, got %d", ex[0].Size)
+	}
+}
+
+func TestWorker_ProcessStage_InlineScriptWithoutValueErrors(t *testing.T) {
 	res, _ := runSource(t, "GET http://localhost/ HTTP/1.1\nX-Empty: ${ }\n")
 
-	rr := res.RequestResults[0]
+	rr := res.StageResults[0]
 	if rr.Status != event.Error {
 		t.Errorf("Expected an inline script without a value to error, got %v", rr.Status)
 	}
@@ -230,7 +245,7 @@ func TestWorker_ProcessRequest_InlineScriptWithoutValueErrors(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_FileMatches(t *testing.T) {
+func TestWorker_ProcessStage_FileMatches(t *testing.T) {
 	const chunk = 32 << 10
 	big := strings.Repeat("0123456789abcdef", 5*chunk/16)
 
@@ -255,7 +270,7 @@ func TestWorker_ProcessRequest_FileMatches(t *testing.T) {
 			obs := observe(t, w)
 
 			raw := "$PRE{ req.saveResponseTo(\"out/got.bin\") }\nGET http://localhost/ HTTP/1.1\n\n$ASSERT{ sinq.assert.fileMatches(\"expected.bin\") }\n"
-			bps, err := scenario.ParseRequestBlueprints(strings.NewReader(raw), "events.sinq")
+			bps, err := scenario.ParseStageBlueprints(strings.NewReader(raw), "events.sinq", "")
 			if err != nil {
 				t.Fatalf("Failed to parse requests: %v", err)
 			}
@@ -266,11 +281,11 @@ func TestWorker_ProcessRequest_FileMatches(t *testing.T) {
 					ScriptTimeout: scenario.Duration{Duration: time.Second},
 					MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
 				},
-				Requests:  bps,
+				Stages:    bps,
 				workspace: &memWorkspace{files: fstest.MapFS{"expected.bin": &fstest.MapFile{Data: []byte(tc.expected)}}},
 				run:       true,
 			})
-			rr := obs.result().RequestResults[0]
+			rr := obs.result().StageResults[0]
 
 			if tc.match && rr.Status != event.Success {
 				t.Errorf("Expected matching files to pass, got %v (%s) %v", rr.Status, rr.ErrorMessage, rr.FailedAssertions)

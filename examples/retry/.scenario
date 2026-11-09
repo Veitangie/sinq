@@ -1,0 +1,5 @@
+{
+  "description": "Retry policies: network failures, exponential backoff and jitter",
+  "req_timeout": "50ms",
+  "max_retries": 5
+}

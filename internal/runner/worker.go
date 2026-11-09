@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
+	"path/filepath"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
@@ -58,8 +59,8 @@ type worker struct {
 	id                int
 	env               workerEnv
 	taskCh            <-chan taskBundle
-	requestIdx        int
-	maxRequestIdx     int
+	stageIdx          int
+	maxStageIdx       int
 	lc                *luapi.LuaContext
 	assertionFailures []string
 	reportCtx         context.Context
@@ -70,14 +71,13 @@ type workerContextKey string
 
 const (
 	scenarioNameContext workerContextKey = "scenarioName"
-	requestNameContext  workerContextKey = "requestName"
-	requestIdxContext   workerContextKey = "requestIdx"
+	stageNameContext    workerContextKey = "stageName"
+	stageIdxContext     workerContextKey = "stageIdx"
 	runIdContext        workerContextKey = "runId"
 )
 
 func (w *worker) loggingContext(ctx context.Context) []slog.Attr {
-	res := make([]slog.Attr, 0, 4)
-	res = append(res, slog.Attr{Key: "workerId", Value: slog.IntValue(w.id)})
+	res := make([]slog.Attr, 0, 2)
 	if scenarioName, ok := ctx.Value(scenarioNameContext).(string); ok {
 		res = append(
 			res,
@@ -87,38 +87,27 @@ func (w *worker) loggingContext(ctx context.Context) []slog.Attr {
 			},
 		)
 	}
-	if requestName, ok := ctx.Value(requestNameContext).(string); ok {
+	if stageName, ok := ctx.Value(stageNameContext).(string); ok {
 		res = append(
 			res,
 			slog.Attr{
-				Key:   string(requestNameContext),
-				Value: slog.StringValue(requestName),
+				Key:   string(stageNameContext),
+				Value: slog.StringValue(stageName),
 			},
-		)
-	}
-	if runId, ok := ctx.Value(runIdContext).(event.RunId); ok {
-		res = append(res,
-			slog.Int("seqId", runId.SeqId),
-			slog.Int("matId", runId.MatId),
-			slog.Int("cntId", runId.CntId),
 		)
 	}
 	return res
 }
 
-func errAttr(err error) slog.Attr {
-	return slog.Attr{Key: "error", Value: slog.StringValue(err.Error())}
-}
-
 func (w *worker) newEvent(ctx context.Context, kind event.EventType) event.Event {
 	runId, _ := ctx.Value(runIdContext).(event.RunId)
-	requestIdx, _ := ctx.Value(requestIdxContext).(int)
+	stageIdx, _ := ctx.Value(stageIdxContext).(int)
 	return event.Event{
-		Kind:       kind,
-		RunId:      runId,
-		RequestIdx: requestIdx,
-		WorkerId:   w.id,
-		Source:     event.Runner,
+		Kind:     kind,
+		RunId:    runId,
+		StageIdx: stageIdx,
+		WorkerId: w.id,
+		Source:   event.Runner,
 	}
 }
 
@@ -181,74 +170,76 @@ Scenarios:
 	}
 }
 
-func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.ScenarioBlueprint, requestIdx int, client *http.Client, timeout time.Duration) bool {
-	ctx = context.WithValue(ctx, requestIdxContext, requestIdx)
-	requestTimer := timer.NewTimer(w.env.clock)
+func (w *worker) processStage(ctx context.Context, scenarioBp *scenario.ScenarioBlueprint, stageIdx int, client *http.Client, timeout time.Duration) bool {
+	ctx = context.WithValue(ctx, stageIdxContext, stageIdx)
+	stageTimer := timer.NewTimer(w.env.clock)
 	processor := RequestProcessor{
-		w:            w,
-		ctx:          ctx,
-		scenarioBp:   scenarioBp,
-		requestBp:    scenarioBp.Requests[requestIdx],
-		requestIdx:   requestIdx,
-		requestTimer: requestTimer,
-		client:       client,
-		reqTimeout:   timeout,
+		w:          w,
+		ctx:        ctx,
+		scenarioBp: scenarioBp,
+		stageBp:    scenarioBp.Stages[stageIdx],
+		stageIdx:   stageIdx,
+		stageTimer: stageTimer,
+		client:     client,
+		reqTimeout: timeout,
 	}
 	if err := ctx.Err(); err != nil {
 		processor.processError(ctx, err, time.Duration(0))
 		return false
 	}
-	start := w.newEvent(ctx, event.RequestStart)
+	start := w.newEvent(ctx, event.StageStart)
 	start.StartedAt = w.env.clock.Now()
-	start.Filename = scenarioBp.Requests[requestIdx].Filename
+	start.Filename = scenarioBp.Stages[stageIdx].Filename
 	w.send(start)
 
-	w.lc.SetupRequestEnvironment(requestIdx)
+	w.lc.SetupStageEnvironment(stageIdx, !scenarioBp.Stages[stageIdx].IsNoRequest())
 
 	defer func() {
 		v := recover()
 		if v != nil {
-			e := processor.requestEnd(ctx, requestTimer.Time())
+			e := processor.stageEnd(ctx, stageTimer.Time())
 			e.Status = event.Error
-			e.ErrorString = fmt.Sprintf("Caught a panic while executing request: %v", v)
+			e.ErrorString = fmt.Sprintf("Caught a panic while executing stage: %v", v)
 			w.send(e)
 		}
 	}()
 
 	if err := processor.runPre(); err != nil {
-		processor.processError(ctx, err, requestTimer.Time())
+		processor.processError(ctx, err, stageTimer.Time())
 		return false
 	}
 
 	if processor.skip {
-		e := w.stageEnd(ctx, event.RequestEnd, requestTimer.Time())
+		e := w.stageEnd(ctx, event.StageEnd, stageTimer.Time())
 		e.Status = event.Skipped
 		w.send(e)
 		return true
 	}
 
-	if err := processor.materialize(); err != nil {
-		processor.processError(ctx, err, requestTimer.Time())
-		return false
-	}
+	if !scenarioBp.Stages[stageIdx].IsNoRequest() {
+		if err := processor.materialize(); err != nil {
+			processor.processError(ctx, err, stageTimer.Time())
+			return false
+		}
 
-	if err := processor.parse(); err != nil {
-		processor.processError(ctx, err, requestTimer.Time())
-		return false
-	}
+		if err := processor.parse(); err != nil {
+			processor.processError(ctx, err, stageTimer.Time())
+			return false
+		}
 
-	if err := processor.run(); err != nil {
-		processor.processError(ctx, err, requestTimer.Time())
-		return false
+		if err := processor.run(); err != nil {
+			processor.processError(ctx, err, stageTimer.Time())
+			return false
+		}
 	}
 
 	if err := processor.runAssert(); err != nil {
-		processor.processError(ctx, err, requestTimer.Time())
+		processor.processError(ctx, err, stageTimer.Time())
 		return false
 	}
 
 	if len(w.assertionFailures) > 0 && scenarioBp.Config.FailFast {
-		e := processor.requestEnd(ctx, requestTimer.Time())
+		e := processor.stageEnd(ctx, stageTimer.Time())
 		e.FailedAssertions = w.assertionFailures
 		e.Status = event.Failure
 		w.send(e)
@@ -257,11 +248,11 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 	}
 
 	if err := processor.runPost(); err != nil {
-		processor.processError(ctx, err, requestTimer.Time())
+		processor.processError(ctx, err, stageTimer.Time())
 		return false
 	}
 
-	e := processor.requestEnd(ctx, requestTimer.Time())
+	e := processor.stageEnd(ctx, stageTimer.Time())
 	e.Status = event.Success
 	if len(w.assertionFailures) > 0 {
 		e.FailedAssertions = w.assertionFailures
@@ -274,13 +265,13 @@ func (w *worker) processRequest(ctx context.Context, scenarioBp *scenario.Scenar
 
 func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	ctx = context.WithValue(ctx, runIdContext, bundle.runId)
-	requestNames := make([]string, 0, len(bundle.Requests))
-	for _, req := range bundle.Requests {
-		name := req.Name
+	stageNames := make([]event.StageName, 0, len(bundle.Stages))
+	for _, stage := range bundle.Stages {
+		name := stage.Name
 		if name == "" {
-			name = req.Filename
+			name = stage.Filename
 		}
-		requestNames = append(requestNames, name)
+		stageNames = append(stageNames, event.StageName{Name: name, Filename: filepath.Join(stage.Rootname, stage.Filename)})
 	}
 
 	scenarioTimer := timer.NewTimer(w.env.clock)
@@ -290,7 +281,7 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	start.Name = bundle.Config.Name
 	start.TotalRunCount = w.env.cfg.Count
 	start.StartedAt = scenarioTimer.StartedAt()
-	start.RequestNames = requestNames
+	start.StageNames = stageNames
 	if !bundle.run {
 		start.Flags = start.Flags | event.SkippedScenarioMask
 		start.TotalRunCount = 0
@@ -304,12 +295,12 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 
 	jar, err := cookiejar.New(nil)
 	if err != nil {
-		end := w.newEvent(ctx, event.RequestEnd)
+		end := w.newEvent(ctx, event.StageEnd)
 		end.ErrorString = "Failed to create cookie jar"
 		end.Status = event.Error
-		end.RequestIdx = 0
+		end.StageIdx = 0
 		w.send(
-			w.log(ctx, slog.LevelWarn, "[Runner] Failed to create cookiejar for scenario", errAttr(err)),
+			w.log(ctx, slog.LevelWarn, "[Runner] Failed to create cookiejar for scenario", event.ErrAttr(err)),
 			end,
 			w.scenarioEnd(ctx, scenarioTimer),
 		)
@@ -320,7 +311,7 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 		Transport: w.env.transport,
 		Jar:       jar,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= bundle.Config.MaxRedirects {
+			if len(via) > bundle.Config.MaxRedirects {
 				return sinqerror.ErrTooManyRedirects
 			}
 			return nil
@@ -345,20 +336,20 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 		}
 	}()
 
-	w.requestIdx = 0
-	w.maxRequestIdx = len(bundle.Requests) - 1
+	w.stageIdx = 0
+	w.maxStageIdx = len(bundle.Stages) - 1
 	w.assertionFailures = make([]string, 0)
 	err = w.setupScenarioEnvironment(ctx, bundle.env)
 	if err != nil {
 		workerErr := w.newEvent(ctx, event.WorkerError)
 		workerErr.Error = err
-		end := w.newEvent(ctx, event.RequestEnd)
+		end := w.newEvent(ctx, event.StageEnd)
 		end.ErrorString = "Failed to set up lua for scenario"
 		end.Status = event.Error
-		end.RequestIdx = 0
+		end.StageIdx = 0
 		w.send(
 			workerErr,
-			w.log(ctx, slog.LevelWarn, "[Runner] Failed to set up lua environment for scenario", errAttr(err)),
+			w.log(ctx, slog.LevelWarn, "[Runner] Failed to set up lua environment for scenario", event.ErrAttr(err)),
 			end,
 			w.scenarioEnd(ctx, scenarioTimer),
 		)
@@ -366,21 +357,21 @@ func (w *worker) processScenario(ctx context.Context, bundle taskBundle) {
 	}
 	defer w.teardownScenarioEnvironment()
 
-	shouldContinue := w.requestIdx >= 0 && w.requestIdx < len(bundle.Requests)
+	shouldContinue := w.stageIdx >= 0 && w.stageIdx < len(bundle.Stages)
 	for shouldContinue {
-		oldRequestIdx := w.requestIdx
+		oldStageIdx := w.stageIdx
 
-		w.requestIdx++
+		w.stageIdx++
 
-		shouldContinue = w.processRequest(
-			context.WithValue(ctx, requestNameContext, bundle.Requests[oldRequestIdx].Filename),
+		shouldContinue = w.processStage(
+			context.WithValue(ctx, stageNameContext, bundle.Stages[oldStageIdx].Filename),
 			&bundle.ScenarioBlueprint,
-			oldRequestIdx,
+			oldStageIdx,
 			&client,
 			bundle.Config.ReqTimeout.Duration,
 		)
 
-		shouldContinue = shouldContinue && w.requestIdx < len(bundle.Requests)
+		shouldContinue = shouldContinue && w.stageIdx < len(bundle.Stages)
 	}
 
 	w.send(w.scenarioEnd(ctx, scenarioTimer))
@@ -402,7 +393,7 @@ func (w *worker) materializeLValue(value lua.LValue) (string, error) {
 	return "", fmt.Errorf("unexpected type %s returned from inline script", value.Type().String())
 }
 
-func (w *worker) materializeRequest(ctx context.Context, req *scenario.RequestBlueprint, executionTimeout time.Duration) ([]byte, error) {
+func (w *worker) materializeRequest(ctx context.Context, req *scenario.StageBlueprint, executionTimeout time.Duration) ([]byte, error) {
 	if req == nil || len(req.Content) == 0 {
 		return []byte{}, nil
 	}

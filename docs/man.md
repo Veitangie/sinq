@@ -13,11 +13,14 @@ sinq - The Spanish Inquisition
 **sinq** is a concurrent HTTP functional and integration testing tool. It treats your filesystem as a workflow definition, executing sequences of requests to walk through different workflow scenarios. Every leaf directory becomes an isolated execution scenario with its own state, configuration, and request chain. The environment matrix mechanism allows for combinatorial/matrix/parametrized testing, reusing the same workflow for different datasets.
 
 ## CONCEPTS
+### Scenarios, Stages and Steps
+A scenario is made of stages, and a stage is made of steps. A stage is usually one HTTP request with its lifecycle scripts; a stage with scripts but no request runs only its scripts. Its steps are `$PRE`, materializing and parsing the request, sending it, `$RETRY`, `$ASSERT` and `$POST`.
+
 ### Scenarios and Treewalker
 The unit of execution is a scenario. Each directory inherits the naturally sorted `.scenario` and `.sinq` files of its parents and appends its own. A leaf directory (no subdirectories, at least one `.sinq` or `.scenario` file) becomes one scenario.
 
 ### Concurrency
-Requests within a scenario run in order. Scenarios run concurrently in a pool of `--workers` workers.
+Stages within a scenario run in order. Scenarios run concurrently in a pool of `--workers` workers.
 
 ## FILE FORMAT
 
@@ -36,9 +39,11 @@ $ASSERT{
 ```
 Every `$NAME?{ ... }` block is treated as Lua script. Scripts with non-reserved names are executed before sending the request. Their return values get substituted into the final request. Only the first returned value is used; `nil`, functions, channels and coroutines fail the request. Strings are inserted as is (no quoting or escaping), numbers and booleans as text, tables as compact JSON (same rules as **sinq.json.serialize**), and **sinq.json.null** as `null`.
 
-Multiple requests can be defined in a single file by separating them with a `###` delimiter on its own line. Text after `###` on the same line names the request that follows it (shown in `--list` output and in reports); a leading `###` before any request content names the file's first request the same way.
+Multiple stages can be defined in a single file by separating them with a `###` delimiter on its own line. Text after `###` on the same line names the stage that follows it (shown in `--list` output and in reports); a leading `###` before any other content names the file's first stage the same way.
 
-Lifecycle scripts have reserved names, and are executed at different times during the request lifecycle:
+A stage with lifecycle scripts but no request runs only its scripts. Only `$PRE`, `$ASSERT` and `$POST` are allowed there, reading or writing `res` raises an error, and `req.skip()` is the only `req` function allowed; the others raise an error.
+
+Lifecycle scripts have reserved names, and are executed at different times during the stage lifecycle:
 
 * `$PRE`: Executes immediately when a worker picks up the request, before it is materialized.
 
@@ -66,7 +71,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Disable SSL/TLS certificate verification.
 
 **-V**, **--verbose**
-: Enable verbose reporting (reports each stage duration, only affects "std" format).
+: Enable verbose reporting (reports each lifecycle step duration, only affects "std" format).
 
 **-l**, **--list**
 : Parse and list scenarios at specified directories.
@@ -81,7 +86,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Number of concurrent workers (default 10).
 
 **-c**, **--count** *int*
-: Number of launches for every scenario (default 1). Must be positive. With more than one launch, each is reported with its run number, counting from 1, after the scenario name (for example *checkout#2*).
+: Number of launches for every scenario (default 1). Must be positive. With more than one launch, each is reported with its run number, counting from 1, after the scenario name and any matrix labels (for example *checkout (admin, card) #2*; JUnit suite names use *checkout_admin_card#2*).
 
 **-s**, **--secret** *string*
 : Key=value pair overrides for scenario secrets.
@@ -114,7 +119,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Disable spinner animation.
 
 **--dump-on-failure**
-: Print full request and response data of a request that failed, errored or was aborted.
+: Print full request and response data of a stage that failed, errored or was aborted.
 
 **--secrets-file** *path*
 : Path to JSON-formatted secrets file.
@@ -176,11 +181,11 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 
 ### Flow Control
 
-**sinq.setNextRequest(index)**
-: Execute request with the 1-indexed number in the scenario next (doesn't stop current request's lifecycle). Can be called from any hook, including `$PRE`. A request that runs more than once is reported once. Its status is the most severe across its runs (error, then failure, then aborted, then success, then skipped). It keeps the assertion failures of every run, its timings and attempt counts add up, and `--dump-on-failure` shows the first failing run.
+**sinq.setNextStage(index)**
+: Execute the stage with the 1-indexed number in the scenario next (doesn't stop the current stage's lifecycle). Can be called from any hook, including `$PRE`. A stage that runs more than once is reported once. Its status is the most severe across its runs (error, then failure, then aborted, then success, then skipped). It keeps the assertion failures of every run, its timings and attempt counts add up, and `--dump-on-failure` shows the first failing run.
 
 **sinq.finishScenario()**
-: Finish the scenario after the current request (doesn't stop current request's lifecycle).
+: Finish the scenario after the current stage (doesn't stop the current stage's lifecycle).
 
 ### Time API
 
@@ -191,10 +196,10 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Returns current UNIX timestamp in milliseconds.
 
 **sinq.time.fromString(str, format?)**
-: Parses a time string into a UNIX timestamp (milliseconds).
+: Parses a time string into a UNIX timestamp (milliseconds). A string with no time zone is read as UTC.
 
 **sinq.time.toString(ms, format?)**
-: Formats a UNIX timestamp (milliseconds) into a time string.
+: Formats a UNIX timestamp (milliseconds) into a time string, in UTC.
 
 **sinq.time.sleep(ms)**
 : Blocks the current script for `ms` milliseconds (an unconditional delay before the request fires). Interrupted by `Ctrl+C` / the scenario `timeout`, counts against `script_timeout`, and keeps the worker busy like a `$RETRY` backoff. Non-numeric argument is an error; a negative or zero `ms` returns immediately. Prefer a `$RETRY` policy when the endpoint signals readiness.
@@ -264,6 +269,14 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 **sinq.fake.setSeed(int64)**
 : Seeds the fake data generator for deterministic output.
 
+### Regex API
+
+**sinq.regex.compile(pattern)**
+: Compiles a regular expression in Go's RE2 syntax (no lookarounds or backreferences; matching is linear-time). Returns `(regex, error)`. A group named `full` or two groups with the same name are an error.
+
+**regex.match(string)**, **regex.matchAll(string)**
+: `match` returns the first match or nil; `matchAll` returns an array of all non-overlapping matches, empty if there are none. Both raise an error for a non-string argument, and both work with `.` and `:`. A match has `full` (the whole match), `[1]`, `[2]`, ... for the groups, and named groups by name. A group that didn't take part in the match is `false`.
+
 ### $PRE Scope API
 
 **req.attach(filepath)**
@@ -276,7 +289,7 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Turns on/off client-side response caching. Without a key, the cache key is derived from the data sent over the wire, the cookies sent with it, attached filenames and the scenario directory; the parameter defaults to `true`. With a string, that string is the key as is, and every request using it shares one cached response (prefix keys yourself to keep requests apart). Other argument types raise an error. Each retry attempt is cached separately. The first request to fill a key decides what is stored: if it used `req.saveResponseTo`, later requests with that key get an empty body. Cached errors stay cached for the whole run.
 
 **req.skip(bool?)**
-: If `true` (default), marks the request to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is reported as skipped, without a test failure.
+: If `true` (default), marks the stage to be skipped. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The stage is reported as skipped, without a test failure.
 
 **req.multipart(entry, ...)**
 : Builds a `multipart/form-data` body from one or more part tables, passed positionally or as one array table; repeated calls accumulate. Entry keys: `name` (required unless `contentDisposition` is set), `data` or `source` (mutually exclusive; `source` is a file path relative to the current `.sinq` file, absolute paths rejected), `filename` (string, or `true` for `basename(source)`), `contentType` (sniffed from the filename/source extension when omitted for file parts), `contentDisposition` (raw override), `headers` (per-part header table). Sets the request `Content-Type` only if one is not already set. Mutually exclusive with `req.attach` and a literal body.
@@ -348,11 +361,22 @@ Available keys include `name`, `description`, `env`, `req_timeout`, `script_time
 : Boolean flag set if the response body size was bigger than the configured size for the scenario.
 
 ## EXIT STATUS
+When several of these apply, the most severe wins: **3**, then **2**, then **1**, then **130**.
+
 **0**
-: Success. All discovered scenarios executed successfully, all network calls completed, and no `$ASSERT` blocks triggered a failure.
+: Success. Every selected scenario ran, all network calls completed, and no `$ASSERT` block triggered a failure.
 
 **1**
-: Failure. One or more scenarios failed an assertion, errored (including a request that still got no response after `$RETRY`) or were aborted, or the CLI received invalid arguments. Also returned when no scenario is selected to run: none were found, or the **--tag**/**--name** filters excluded all of them.
+: Failure. At least one assertion failed, and nothing worse happened. This includes a cancelled run that had already failed an assertion.
+
+**2**
+: Error. At least one stage errored: a request still got no response after `$RETRY`, a scenario hit its `timeout`, a script raised an error, or a response couldn't be parsed.
+
+**3**
+: Setup error. The run couldn't be set up: invalid arguments, a path that doesn't exist or fails to parse, a secrets file that can't be read, a **--out** file that can't be written, or no scenario selected to run (none were found, or the **--tag**/**--name** filters excluded all of them).
+
+**130**
+: Cancelled. The run was interrupted (`SIGINT`/`SIGTERM`) before any assertion failed or any stage errored.
 
 ## AUTO-COMPLETION
 To load completions dynamically in your current session:

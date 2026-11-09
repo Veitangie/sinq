@@ -1,10 +1,16 @@
+### Sign the payment
+$PRE{
+    PAYLOAD = sinq.json.serialize({ order_id = ORDER_ID, method = env.method })
+    SIGNATURE = sinq.crypto.hmac(PAYLOAD, "sha256", env.WEBHOOK_SECRET)
+}
+
+### Check out
 POST ${env.BASE_URL}/orders/${ORDER_ID}/checkout
 Authorization: Bearer ${AUTH_TOKEN}
 Content-Type: application/json
+X-Signature: ${SIGNATURE}
 
-{
-    "method": "${env.method}"
-}
+${PAYLOAD}
 
 $ASSERT{
     sinq.assert.code(env.expected_status, "Checkout failed for method " .. env.method)

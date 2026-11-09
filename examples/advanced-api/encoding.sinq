@@ -1,0 +1,17 @@
+POST ${env.BASE_URL}/advanced/encoding
+Content-Type: application/x-www-form-urlencoded
+X-Hex: ${ return sinq.encoding.hexEncode("sinq?>>") }
+X-Base64-Url: ${ return sinq.encoding.base64UrlEncode("sinq?>>") }
+
+name=${ return sinq.encoding.urlEncode("Scyth & co") }&motto=${ return sinq.encoding.urlEncode("50% luck, 50/50 skill") }
+
+$ASSERT{
+    sinq.assert.code(200)
+    local echo = res.json()
+
+    -- The decoders return (result, error); only the result reaches equals here.
+    sinq.assert.equals(sinq.encoding.base64Decode(echo.base64), "sinq?>>")
+    sinq.assert.equals(sinq.encoding.base64UrlDecode(echo.base64url), "sinq?>>")
+    sinq.assert.equals(sinq.encoding.hexDecode(echo.hex), "sinq?>>")
+    sinq.assert.equals(sinq.encoding.urlDecode(echo.query), "a+b c")
+}

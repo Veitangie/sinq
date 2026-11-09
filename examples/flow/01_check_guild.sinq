@@ -4,6 +4,6 @@ $ASSERT { sinq.assert.code(200, "Unexpected status code when checking guild") }
 
 $POST{
     if res.code == 200 then
-        sinq.setNextRequest(3)
+        sinq.setNextStage(3)
     end
 }

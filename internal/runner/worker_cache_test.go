@@ -19,7 +19,7 @@ import (
 	"veitangie.dev/sinq/internal/scenario"
 )
 
-func TestWorker_ProcessRequest_ExecutionCarriesCacheFlags(t *testing.T) {
+func TestWorker_ProcessStage_ExecutionCarriesCacheFlags(t *testing.T) {
 	raw := `### First
 GET http://localhost/same HTTP/1.1
 
@@ -50,7 +50,7 @@ GET http://localhost/other HTTP/1.1
 	}
 }
 
-func TestWorker_ProcessRequest_CacheFlagsPerRetryAttempt(t *testing.T) {
+func TestWorker_ProcessStage_CacheFlagsPerRetryAttempt(t *testing.T) {
 	raw := `### First
 GET http://localhost/poll HTTP/1.1
 
@@ -71,15 +71,15 @@ $RETRY{ if res.attempt < 2 then return 0 end; return -1 }
 	}
 	for _, e := range ex {
 		if !hasFlag(e, event.CachedMask) {
-			t.Errorf("Request %d: expected every attempt of a cached request to be flagged Cached, got %b", e.RequestIdx, e.Flags)
+			t.Errorf("Request %d: expected every attempt of a cached request to be flagged Cached, got %b", e.StageIdx, e.Flags)
 		}
-		if hit := hasFlag(e, event.CacheHitMask); hit != (e.RequestIdx == 1) {
-			t.Errorf("Request %d: expected CacheHit only on the second request's attempts, got %b", e.RequestIdx, e.Flags)
+		if hit := hasFlag(e, event.CacheHitMask); hit != (e.StageIdx == 1) {
+			t.Errorf("Request %d: expected CacheHit only on the second request's attempts, got %b", e.StageIdx, e.Flags)
 		}
 	}
 }
 
-func TestWorker_ProcessRequest_ExecutionFlagsOversized(t *testing.T) {
+func TestWorker_ProcessStage_ExecutionFlagsOversized(t *testing.T) {
 	cases := []struct {
 		name  string
 		limit uint64
@@ -101,6 +101,9 @@ func TestWorker_ProcessRequest_ExecutionFlagsOversized(t *testing.T) {
 			if got := hasFlag(ex[0], event.OversizedMask); got != tc.want {
 				t.Errorf("Expected Oversized flag %v for a 5 byte body with limit %d, got flags %b", tc.want, tc.limit, ex[0].Flags)
 			}
+			if wantSize := min(5, int(tc.limit)); ex[0].Size != wantSize {
+				t.Errorf("Expected Size to be the %d bytes kept, got %d", wantSize, ex[0].Size)
+			}
 			if hasFlag(ex[0], event.CachedMask) || hasFlag(ex[0], event.CacheHitMask) {
 				t.Errorf("Expected no cache flags on an uncached request, got %b", ex[0].Flags)
 			}
@@ -108,12 +111,12 @@ func TestWorker_ProcessRequest_ExecutionFlagsOversized(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_SameWorkerRepeatIsHitNotLeader(t *testing.T) {
+func TestWorker_ProcessStage_SameWorkerRepeatIsHitNotLeader(t *testing.T) {
 	raw := `### Loop
 GET http://localhost/same HTTP/1.1
 
 $PRE{ req.cache("same") }
-$POST{ passes = (passes or 0) + 1; if passes < 3 then sinq.setNextRequest(1) end }
+$POST{ passes = (passes or 0) + 1; if passes < 3 then sinq.setNextStage(1) end }
 `
 	w := setupTestWorker(t, nil)
 	transport := &countingRoundTripper{}
@@ -122,7 +125,7 @@ $POST{ passes = (passes or 0) + 1; if passes < 3 then sinq.setNextRequest(1) end
 	obs := observe(t, w)
 
 	run := func() {
-		bps, err := scenario.ParseRequestBlueprints(strings.NewReader(raw), "same.sinq")
+		bps, err := scenario.ParseStageBlueprints(strings.NewReader(raw), "same.sinq", "")
 		if err != nil {
 			t.Fatalf("Failed to parse requests: %v", err)
 		}
@@ -133,7 +136,7 @@ $POST{ passes = (passes or 0) + 1; if passes < 3 then sinq.setNextRequest(1) end
 				ScriptTimeout: scenario.Duration{Duration: time.Second},
 				MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
 			},
-			Requests:  bps,
+			Stages:    bps,
 			workspace: &mockWorkspace{},
 			run:       true,
 		})
@@ -160,7 +163,7 @@ $POST{ passes = (passes or 0) + 1; if passes < 3 then sinq.setNextRequest(1) end
 	}
 }
 
-func TestWorker_ProcessRequest_InFlightFollowerFlags(t *testing.T) {
+func TestWorker_ProcessStage_InFlightFollowerFlags(t *testing.T) {
 	transport := &heldRoundTripper{arrived: make(chan struct{}), release: make(chan struct{})}
 	raw := "GET http://localhost/shared HTTP/1.1\n\n$PRE{ req.cache(\"shared\") }\n"
 
@@ -171,7 +174,7 @@ func TestWorker_ProcessRequest_InFlightFollowerFlags(t *testing.T) {
 	leaderObs, followerObs := observe(t, leader), observe(t, follower)
 
 	bundle := func() taskBundle {
-		bps, err := scenario.ParseRequestBlueprints(strings.NewReader(raw), "shared.sinq")
+		bps, err := scenario.ParseStageBlueprints(strings.NewReader(raw), "shared.sinq", "")
 		if err != nil {
 			t.Fatalf("Failed to parse requests: %v", err)
 		}
@@ -182,7 +185,7 @@ func TestWorker_ProcessRequest_InFlightFollowerFlags(t *testing.T) {
 				ScriptTimeout: scenario.Duration{Duration: time.Second},
 				MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
 			},
-			Requests:  bps,
+			Stages:    bps,
 			workspace: &mockWorkspace{},
 			run:       true,
 		}
@@ -246,7 +249,7 @@ func countingServer(t *testing.T, delay time.Duration) (*httptest.Server, *atomi
 	return srv, &count
 }
 
-func TestWorker_ProcessRequest_SingleFlight(t *testing.T) {
+func TestWorker_ProcessStage_SingleFlight(t *testing.T) {
 	cases := []struct {
 		name  string
 		raw   func(srv string, i int) string
@@ -282,7 +285,7 @@ func TestWorker_ProcessRequest_SingleFlight(t *testing.T) {
 				t.Errorf("Expected the server to be hit %d times, got %d", tc.sends, n)
 			}
 			for i, obs := range observers {
-				if rr := obs.result().RequestResults[0]; rr.Status != event.Success {
+				if rr := obs.result().StageResults[0]; rr.Status != event.Success {
 					t.Errorf("Worker %d: expected Success, got %v (%s)", i+1, rr.Status, rr.ErrorMessage)
 				}
 			}
@@ -290,7 +293,7 @@ func TestWorker_ProcessRequest_SingleFlight(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_SingleFlightFollowerKeepsItsOwnDeadline(t *testing.T) {
+func TestWorker_ProcessStage_SingleFlightFollowerKeepsItsOwnDeadline(t *testing.T) {
 	srv, _ := countingServer(t, 150*time.Millisecond)
 	workers := sharedCacheWorkers(t, 2, srv.Client().Transport)
 	short, long := observe(t, workers[0]), observe(t, workers[1])
@@ -307,15 +310,15 @@ func TestWorker_ProcessRequest_SingleFlightFollowerKeepsItsOwnDeadline(t *testin
 	})
 	wg.Wait()
 
-	if rr := short.result().RequestResults[0]; rr.Status != event.Error || !strings.Contains(rr.ErrorMessage, "deadline exceeded") {
+	if rr := short.result().StageResults[0]; rr.Status != event.Error || !strings.Contains(rr.ErrorMessage, "deadline exceeded") {
 		t.Errorf("Expected the worker whose scenario timed out to error, got %v %q", rr.Status, rr.ErrorMessage)
 	}
-	if rr := long.result().RequestResults[0]; rr.Status != event.Success {
+	if rr := long.result().StageResults[0]; rr.Status != event.Success {
 		t.Errorf("Expected the other worker to still get the shared response, got %v %v %s", rr.Status, rr.FailedAssertions, rr.ErrorMessage)
 	}
 }
 
-func TestWorker_ProcessRequest_CacheHitStillSetsCookies(t *testing.T) {
+func TestWorker_ProcessStage_CacheHitStillSetsCookies(t *testing.T) {
 	var logins atomic.Int32
 	var mu sync.Mutex
 	var cookieHeaders []string
@@ -361,9 +364,7 @@ func TestWorker_ProcessRequest_CacheHitStillSetsCookies(t *testing.T) {
 	}
 }
 
-// The attempt number is appended to the cache key, so key "k1" on attempt 1 and
-// key "k" on attempt 11 must still be different entries.
-func TestWorker_ProcessRequest_CacheKeyAndAttemptDontCollide(t *testing.T) {
+func TestWorker_ProcessStage_CacheKeyAndAttemptDontCollide(t *testing.T) {
 	raw := `### First
 GET http://localhost/first HTTP/1.1
 
@@ -386,7 +387,7 @@ $RETRY{ if res.attempt < 11 then return 0 end; return -1 }
 	}
 }
 
-func TestWorker_ProcessRequest_ExecutionCarriesSize(t *testing.T) {
+func TestWorker_ProcessStage_ExecutionCarriesSize(t *testing.T) {
 	_, obs := runSource(t, "GET http://localhost/ HTTP/1.1\n", func(w *worker) { w.env.transport = bodyRoundTripper{body: "hello"} })
 
 	ex := executions(obs)

@@ -33,38 +33,59 @@ func (p *parser) match(expected byte) error {
 	return nil
 }
 
+type PositionError struct {
+	Err    error
+	Line   int
+	Offset int
+}
+
+func (e PositionError) Error() string {
+	return fmt.Sprintf("%d:%d: %s", e.Line, e.Offset, e.Err)
+}
+
+func (e PositionError) Unwrap() error {
+	return e.Err
+}
+
+func (p *parser) positionError(line, offset int, message string) error {
+	return PositionError{Line: line, Offset: offset, Err: errors.New(message)}
+}
+
 func (p *parser) scriptError(message string) error {
 	maybeScriptName := ""
 	if p.currentScriptName != "" {
 		maybeScriptName = fmt.Sprintf(" \"%s\"", p.currentScriptName)
 	}
-	return fmt.Errorf("%d:%d Failed to parse lua script%s: %s", p.LineNumber, p.OffsetNumber, maybeScriptName, message)
+	return p.positionError(p.LineNumber, p.OffsetNumber, fmt.Sprintf("Failed to parse lua script%s: %s", maybeScriptName, message))
 }
 
 func (p *parser) unexpectedEOF() error {
 	return p.scriptError("Unexpected EOF")
 }
 
-func (bp *RequestBlueprint) setScript(t Token) error {
+func (bp *StageBlueprint) setScript(t Token) error {
+	duplicate := func(name string) error {
+		return PositionError{Line: t.Line, Offset: t.Offset, Err: fmt.Errorf("%s script is defined more than once", name)}
+	}
 	switch t.Name {
 	case "PRE":
 		if bp.Pre.Type != IncompleteToken {
-			return errors.New("Pre script is defined more than once")
+			return duplicate("Pre")
 		}
 		bp.Pre = t
 	case "RETRY":
 		if bp.Retry.Type != IncompleteToken {
-			return errors.New("Retry script is defined more than once")
+			return duplicate("Retry")
 		}
 		bp.Retry = t
 	case "ASSERT":
 		if bp.Assert.Type != IncompleteToken {
-			return errors.New("Assert script is defined more than once")
+			return duplicate("Assert")
 		}
 		bp.Assert = t
 	case "POST":
 		if bp.Post.Type != IncompleteToken {
-			return errors.New("Post script is defined more than once")
+			return duplicate("Post")
 		}
 		bp.Post = t
 	default:
@@ -110,7 +131,7 @@ func (p *parser) parseText() (Token, error) {
 			res.PayloadEnd = p.Current
 			res.HasEscapes = hasEscapes
 			if isEscaped {
-				err = fmt.Errorf("%d:%d Unexpected EOF after escape character", p.LineNumber, p.OffsetNumber)
+				err = p.positionError(p.LineNumber, p.OffsetNumber, "Unexpected EOF after escape character")
 			} else {
 				err = nil
 			}
@@ -274,7 +295,7 @@ func (p *parser) parseScriptName() (string, error) {
 		}
 
 		if b == '\n' {
-			return string(p.Slice(start, p.Current)), fmt.Errorf("%d:%d: Expected start of lua script with {, got newline instead", startLine, startOffset)
+			return string(p.Slice(start, p.Current)), p.positionError(startLine, startOffset, "Expected start of lua script with {, got newline instead")
 		}
 
 		// Script names can consist of any characters apart from {

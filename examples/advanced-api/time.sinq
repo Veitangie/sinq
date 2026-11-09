@@ -2,10 +2,21 @@ GET ${env.BASE_URL}/advanced/time
 
 $PRE{
     env.t1 = sinq.time.now()
+    -- An unconditional pause. Prefer $RETRY when the API can say it's ready.
+    sinq.time.sleep(5 * sinq.time.ms)
 }
 
 $ASSERT{
     sinq.assert.code(200)
     local t2 = sinq.time.now()
     assert(t2 > env.t1, "Time should move forward")
+
+    -- Parse the server's Date header with a Go time layout.
+    local served, err = sinq.time.fromString(res.headers["Date"], "Mon, 02 Jan 2006 15:04:05 GMT")
+    sinq.assert.isTrue(served ~= nil, "Date header didn't parse: " .. tostring(err))
+    sinq.assert.isTrue(served ~= nil and math.abs(t2 - served) < sinq.time.minute, "Server clock is more than a minute off")
+
+    -- toString formats in UTC. Without a layout it uses ISO8601.
+    sinq.assert.equals(sinq.time.toString(0), "1970-01-01T00:00:00.000Z")
+    sinq.assert.equals(sinq.time.toString(sinq.time.hour + 30 * sinq.time.minute, "15:04"), "01:30")
 }

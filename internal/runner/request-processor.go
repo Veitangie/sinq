@@ -27,9 +27,9 @@ type RequestProcessor struct {
 	w            *worker
 	ctx          context.Context
 	scenarioBp   *scenario.ScenarioBlueprint
-	requestBp    *scenario.RequestBlueprint
-	requestIdx   int
-	requestTimer timer.Timer
+	stageBp      *scenario.StageBlueprint
+	stageIdx     int
+	stageTimer   timer.Timer
 	materialized []byte
 	httpRequest  *http.Request
 	requestBody  []byte
@@ -47,17 +47,23 @@ type RequestProcessor struct {
 }
 
 func (p *RequestProcessor) runPre() error {
-	if p.requestBp.Pre.IsEmpty() {
+	if p.stageBp.Pre.IsEmpty() {
 		return nil
 	}
 
-	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running pre script for request"))
-	p.requestTimer.Start()
-	res, err := p.w.runPreScript(p.requestBp.Pre, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
-	stage := p.w.stageEnd(p.ctx, event.PreScript, p.requestTimer.Time())
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running pre script for stage"))
+	p.stageTimer.Start()
+	res, err := p.w.runPreScript(
+		p.stageBp.Pre,
+		p.stageBp.ExtractPayload,
+		p.stageBp.Filename,
+		p.scenarioBp.Config.ScriptTimeout.Duration,
+		p.stageBp.IsNoRequest(),
+	)
+	stage := p.w.stageEnd(p.ctx, event.PreScript, p.stageTimer.Time())
 
 	if err != nil {
-		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Pre script failed", errAttr(err)))
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Pre script failed", event.ErrAttr(err)))
 	} else {
 		p.w.send(stage)
 	}
@@ -73,13 +79,13 @@ func (p *RequestProcessor) runPre() error {
 
 func (p *RequestProcessor) materialize() error {
 	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker materializing request"))
-	p.requestTimer.Start()
-	materialized, err := p.w.materializeRequest(p.ctx, p.requestBp, p.scenarioBp.Config.ScriptTimeout.Duration)
+	p.stageTimer.Start()
+	materialized, err := p.w.materializeRequest(p.ctx, p.stageBp, p.scenarioBp.Config.ScriptTimeout.Duration)
 	p.materialized = materialized
-	stage := p.w.stageEnd(p.ctx, event.Materialization, p.requestTimer.Time())
+	stage := p.w.stageEnd(p.ctx, event.Materialization, p.stageTimer.Time())
 
 	if err != nil {
-		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request materialization failed", errAttr(err)))
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request materialization failed", event.ErrAttr(err)))
 	} else {
 		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request materialized successfully", slog.String("raw", string(materialized))))
 	}
@@ -89,22 +95,22 @@ func (p *RequestProcessor) materialize() error {
 
 func (p *RequestProcessor) parse() error {
 	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker parsing request"))
-	p.requestTimer.Start()
+	p.stageTimer.Start()
 	parser, err := newParser(p.materialized, p.ctx)
 	if err != nil {
-		p.w.send(p.w.log(p.ctx, slog.LevelWarn, "[Runner] Failed to construct parser", errAttr(err)))
+		p.w.send(p.w.log(p.ctx, slog.LevelWarn, "[Runner] Failed to construct parser", event.ErrAttr(err)))
 		return err
 	}
 
 	httpReq, body, err := parser.parse()
-	stage := p.w.stageEnd(p.ctx, event.Parsing, p.requestTimer.Time())
+	stage := p.w.stageEnd(p.ctx, event.Parsing, p.stageTimer.Time())
 
 	if err == nil && len(body) > 0 && p.filenameFrom != "" {
 		err = fmt.Errorf("Request has both body and a file source")
 	}
 
 	if err != nil {
-		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request parsing failed", errAttr(err)))
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request parsing failed", event.ErrAttr(err)))
 	} else {
 		p.w.send(stage)
 	}
@@ -138,7 +144,7 @@ func (p *RequestProcessor) processSendSuccess(result intermediate, execution eve
 	if p.w.env.cfg.DumpOnFailure {
 		p.responseStr = responseStr
 	}
-	execution.Size = len(result.body)
+	execution.Size = int(result.size)
 
 	if p.cache {
 		execution.Flags = execution.Flags | event.CachedMask
@@ -154,7 +160,7 @@ func (p *RequestProcessor) processSendSuccess(result intermediate, execution eve
 	}
 
 	if err != nil {
-		p.w.send(execution, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to capture response", errAttr(err)))
+		p.w.send(execution, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to capture response", event.ErrAttr(err)))
 		return err
 	}
 	p.w.send(execution)
@@ -182,7 +188,7 @@ func (p *RequestProcessor) processSendError(attempt int, err error, execution ev
 	errSave := p.w.requestCompletedErr(attempt, err)
 	if errSave != nil {
 		p.w.send(
-			p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to capture error", errAttr(errSave), slog.Attr{
+			p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to capture error", event.ErrAttr(errSave), slog.Attr{
 				Key:   "requestError",
 				Value: slog.StringValue(err.Error()),
 			}),
@@ -202,7 +208,7 @@ func (p *RequestProcessor) run() error {
 			return errors.New("Too many retries")
 		}
 		p.retries++
-		p.requestTimer.Start()
+		p.stageTimer.Start()
 
 		if p.cache {
 			result, sendErr = p.sendCached()
@@ -210,7 +216,7 @@ func (p *RequestProcessor) run() error {
 			result, sendErr = p.send()
 		}
 
-		execution := p.w.stageEnd(p.ctx, event.Execution, p.requestTimer.Time())
+		execution := p.w.stageEnd(p.ctx, event.Execution, p.stageTimer.Time())
 
 		if sendErr != nil {
 			if err := p.processSendError(p.retries, sendErr, execution); err != nil {
@@ -333,7 +339,7 @@ func (p *RequestProcessor) send() (intermediate, error) {
 		file, err := p.w.env.workspace.Open(p.filenameFrom)
 
 		if err != nil {
-			p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to open file for reading", errAttr(err), slog.String("filename", p.filenameFrom)))
+			p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to open file for reading", event.ErrAttr(err), slog.String("filename", p.filenameFrom)))
 			return result, err
 		}
 
@@ -352,19 +358,19 @@ func (p *RequestProcessor) send() (intermediate, error) {
 	reqContext, cancel := context.WithTimeoutCause(p.ctx, p.reqTimeout, sinqerror.ErrRequestTimeout)
 	defer cancel()
 
-	p.requestTimer.Start()
+	p.stageTimer.Start()
 	resp, err := p.client.Do(p.httpRequest.Clone(reqContext))
 
 	if err != nil {
 		err = sinqerror.WrapContextTimeoutErr(reqContext, err)
-		p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request execution failed", errAttr(err)))
+		p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request execution failed", event.ErrAttr(err)))
 		return result, fixClientErr(err)
 	}
 
 	res, err := makeIntermediate(p.w.env.workspace, p.filenameTo, int64(p.scenarioBp.Config.MaxBodySize.ByteAmount), resp)
 	if err != nil {
 		err = sinqerror.SwapContextTimeoutErr(reqContext, err)
-		p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request body read failed", errAttr(err)))
+		p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Request body read failed", event.ErrAttr(err)))
 	}
 	return res, err
 }
@@ -410,7 +416,7 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 			}
 		}
 
-		p.requestTimer.Start()
+		p.stageTimer.Start()
 		resCh := p.w.env.cachedProcessor.process(actualKey, *willBeSent, p.filenameTo, getBody, p.w.env.workspace, p.w.id)
 		select {
 		case res := <-resCh:
@@ -432,7 +438,7 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 		for _, setCookie := range setCookies {
 			cookie, err := http.ParseSetCookie(setCookie)
 			if err != nil {
-				p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to set cookies", errAttr(err)))
+				p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Failed to set cookies", event.ErrAttr(err)))
 			} else {
 				cookies = append(cookies, cookie)
 			}
@@ -445,18 +451,18 @@ func (p *RequestProcessor) sendCached() (intermediate, error) {
 }
 
 func (p *RequestProcessor) runRetry() error {
-	if p.requestBp.Retry.IsEmpty() {
+	if p.stageBp.Retry.IsEmpty() {
 		p.retryIn = -1
 		return nil
 	}
-	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running retry script for request"))
-	p.requestTimer.Start()
-	retryIn, err := p.w.runRetryScript(p.requestBp.Retry, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
-	stage := p.w.stageEnd(p.ctx, event.RetryScript, p.requestTimer.Time())
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running retry script for stage"))
+	p.stageTimer.Start()
+	retryIn, err := p.w.runRetryScript(p.stageBp.Retry, p.stageBp.ExtractPayload, p.stageBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
+	stage := p.w.stageEnd(p.ctx, event.RetryScript, p.stageTimer.Time())
 	p.retryIn = retryIn
 
 	if err != nil {
-		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Retry script failed", errAttr(err)))
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Retry script failed", event.ErrAttr(err)))
 	} else {
 		p.w.send(stage)
 	}
@@ -465,16 +471,16 @@ func (p *RequestProcessor) runRetry() error {
 }
 
 func (p *RequestProcessor) runAssert() error {
-	if p.requestBp.Assert.IsEmpty() {
+	if p.stageBp.Assert.IsEmpty() {
 		return nil
 	}
-	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running assert script for request"))
-	p.requestTimer.Start()
-	err := p.w.runAssertScript(p.requestBp.Assert, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration, p.filenameTo)
-	stage := p.w.stageEnd(p.ctx, event.AssertScript, p.requestTimer.Time())
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running assert script for stage"))
+	p.stageTimer.Start()
+	err := p.w.runAssertScript(p.stageBp.Assert, p.stageBp.ExtractPayload, p.stageBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration, p.filenameTo)
+	stage := p.w.stageEnd(p.ctx, event.AssertScript, p.stageTimer.Time())
 
 	if err != nil {
-		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Assert script failed", errAttr(err)))
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Assert script failed", event.ErrAttr(err)))
 	} else {
 		p.w.send(stage)
 	}
@@ -482,24 +488,24 @@ func (p *RequestProcessor) runAssert() error {
 }
 
 func (p *RequestProcessor) runPost() error {
-	if p.requestBp.Post.IsEmpty() {
+	if p.stageBp.Post.IsEmpty() {
 		return nil
 	}
-	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running post script for request"))
-	p.requestTimer.Start()
-	err := p.w.runEffectfulScript(p.requestBp.Post, p.requestBp.ExtractPayload, p.requestBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
-	stage := p.w.stageEnd(p.ctx, event.PostScript, p.requestTimer.Time())
+	p.w.send(p.w.log(p.ctx, slog.LevelDebug, "[Runner] Worker running post script for stage"))
+	p.stageTimer.Start()
+	err := p.w.runEffectfulScript(p.stageBp.Post, p.stageBp.ExtractPayload, p.stageBp.Filename, p.scenarioBp.Config.ScriptTimeout.Duration)
+	stage := p.w.stageEnd(p.ctx, event.PostScript, p.stageTimer.Time())
 
 	if err != nil {
-		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Post script failed", errAttr(err)))
+		p.w.send(stage, p.w.log(p.ctx, slog.LevelDebug, "[Runner] Post script failed", event.ErrAttr(err)))
 	} else {
 		p.w.send(stage)
 	}
 	return err
 }
 
-func (p *RequestProcessor) requestEnd(ctx context.Context, duration time.Duration) event.Event {
-	e := p.w.stageEnd(ctx, event.RequestEnd, duration)
+func (p *RequestProcessor) stageEnd(ctx context.Context, duration time.Duration) event.Event {
+	e := p.w.stageEnd(ctx, event.StageEnd, duration)
 	if p.w.env.cfg.DumpOnFailure {
 		e.Request = string(p.materialized)
 		e.Response = p.responseStr
@@ -513,7 +519,7 @@ func (p *RequestProcessor) processError(ctx context.Context, err error, duration
 	}
 
 	status := event.Error
-	end := p.requestEnd(ctx, duration)
+	end := p.stageEnd(ctx, duration)
 	end.ErrorString = err.Error()
 	if errors.Is(err, context.Canceled) {
 		status = event.Aborted
@@ -526,7 +532,7 @@ func (p *RequestProcessor) processError(ctx context.Context, err error, duration
 	end.Status = status
 	workerErr := p.w.newEvent(ctx, event.WorkerError)
 	workerErr.Error = err
-	p.w.send(end, workerErr, p.w.log(ctx, slog.LevelDebug, "[Runner] Request failed", errAttr(err)))
+	p.w.send(end, workerErr, p.w.log(ctx, slog.LevelDebug, "[Runner] Stage failed", event.ErrAttr(err)))
 }
 
 func fixClientErr(err error) error {

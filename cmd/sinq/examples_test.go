@@ -6,18 +6,25 @@ package main
 import (
 	"bytes"
 	"crypto/hmac"
+	"crypto/md5"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +38,8 @@ func Test_ExamplesDirectory(t *testing.T) {
 	pollCount := 0
 	cache := 0
 	optOutCount := 0
+	slowStartCalls := 0
+	retryPolls := 0
 
 	uploadBytes := make([]byte, 1024)
 	rand.Read(uploadBytes)
@@ -224,6 +233,9 @@ func Test_ExamplesDirectory(t *testing.T) {
 				Email       string `json:"email"`
 				Company     string `json:"company"`
 				LuckyNumber int    `json:"lucky_number"`
+				Role        string `json:"role"`
+				LastSeenIP  string `json:"last_seen_ip"`
+				Online      *bool  `json:"online"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -234,7 +246,10 @@ func Test_ExamplesDirectory(t *testing.T) {
 			if body.ID != "2f6279af-b981-416f-b728-036314a9c57a" ||
 				body.Email != "acceptable+spirit@icloud.com" ||
 				body.Company != "Singapore Afraid, LLC" ||
-				body.LuckyNumber != 37 {
+				body.LuckyNumber != 37 ||
+				!slices.Contains([]string{"warrior", "mage", "rogue"}, body.Role) ||
+				net.ParseIP(body.LastSeenIP).To4() == nil ||
+				body.Online == nil {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
@@ -242,7 +257,7 @@ func Test_ExamplesDirectory(t *testing.T) {
 
 		case r.URL.Path == "/advanced/json/loadout" && r.Method == "GET":
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"class": "Spellsword", "items": [{"id": 1, "rarity": "common"}, {"id": 2, "rarity": "rare"}], "stats": {}}`)
+			fmt.Fprint(w, `{"class": "Spellsword", "items": [{"id": 1, "rarity": "common"}, {"id": 2, "rarity": "rare"}], "stats": {}, "meta": "{\"version\": 3}"}`)
 
 		case r.URL.Path == "/advanced/json/loadout" && r.Method == "PUT":
 			var body struct {
@@ -285,6 +300,137 @@ func Test_ExamplesDirectory(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 
+		case r.URL.Path == "/advanced/regex/latest" && r.Method == "GET":
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Location", "/orders/1337")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "warn E42\nerror E77\ninfo boot\nerror E91\n")
+
+		case r.URL.Path == "/advanced/regex/orders/1337" && r.Method == "POST":
+			var body struct {
+				Errors []string `json:"errors"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Logf("regex report is not valid JSON: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if want := []string{"E77", "E91"}; !slices.Equal(body.Errors, want) {
+				t.Logf("regex report errors: got %q, want %q", body.Errors, want)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+
+		case r.URL.Path == "/advanced/encoding" && r.Method == "POST":
+			if err := r.ParseForm(); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			name, motto := r.PostForm.Get("name"), strings.TrimSpace(r.PostForm.Get("motto"))
+			hexed, _ := hex.DecodeString(r.Header.Get("X-Hex"))
+			b64url, _ := base64.URLEncoding.DecodeString(r.Header.Get("X-Base64-Url"))
+			if name != "Scyth & co" || motto != "50% luck, 50/50 skill" || string(hexed) != "sinq?>>" || string(b64url) != "sinq?>>" {
+				t.Logf("encoding: name=%q motto=%q hex=%q base64url=%q", name, motto, hexed, b64url)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"base64":    base64.StdEncoding.EncodeToString([]byte("sinq?>>")),
+				"base64url": base64.URLEncoding.EncodeToString([]byte("sinq?>>")),
+				"hex":       hex.EncodeToString([]byte("sinq?>>")),
+				"query":     url.QueryEscape("a+b c"),
+			})
+
+		case r.URL.Path == "/advanced/crypto/blob" && r.Method == "GET":
+			blob := []byte("Scyth's save file, slot 3\n")
+			md5Sum, sha1Sum := md5.Sum(blob), sha1.Sum(blob)
+			sha256Sum, sha512Sum := sha256.Sum256(blob), sha512.Sum512(blob)
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-MD5", base64.StdEncoding.EncodeToString(md5Sum[:]))
+			w.Header().Set("X-Checksum-Sha1", hex.EncodeToString(sha1Sum[:]))
+			w.Header().Set("X-Checksum-Sha256", hex.EncodeToString(sha256Sum[:]))
+			w.Header().Set("X-Checksum-Sha512", base64.URLEncoding.EncodeToString(sha512Sum[:]))
+			_, _ = w.Write(blob)
+
+		case r.URL.Path == "/advanced/json/archive" && r.Method == "POST":
+			raw, _ := io.ReadAll(r.Body)
+			var body struct {
+				Version int    `json:"version"`
+				Class   string `json:"class"`
+			}
+			if err := json.Unmarshal(raw, &body); err != nil || body.Version != 3 || body.Class != "Spellsword" || !strings.Contains(string(raw), "\n  \"") {
+				t.Logf("archive body: %q", raw)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+
+		case r.URL.Path == "/upload/multipart" && r.Method == "POST":
+			_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil || params["boundary"] != "sinq-example-boundary" {
+				t.Logf("multipart content type: %q", r.Header.Get("Content-Type"))
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Logf("multipart body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			file, header, err := r.FormFile("image")
+			if err != nil {
+				t.Logf("multipart image part: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			got, _ := io.ReadAll(file)
+			if r.FormValue("caption") != "Scyth, level 40" || header.Filename != "portrait.bin" || !bytes.Equal(got, uploadBytes) {
+				t.Logf("multipart: caption=%q filename=%q image matches=%v", r.FormValue("caption"), header.Filename, bytes.Equal(got, uploadBytes))
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+
+		case r.URL.Path == "/retry/slow-start" && r.Method == "GET":
+			mu.Lock()
+			slowStartCalls++
+			calls := slowStartCalls
+			mu.Unlock()
+			if calls == 1 {
+				time.Sleep(150 * time.Millisecond)
+			}
+			fmt.Fprint(w, `{"status": "up"}`)
+
+		case r.URL.Path == "/retry/poll" && r.Method == "GET":
+			mu.Lock()
+			retryPolls++
+			polls := retryPolls
+			mu.Unlock()
+			if polls < 3 {
+				fmt.Fprint(w, `{"status": "pending"}`)
+				return
+			}
+			fmt.Fprint(w, `{"status": "done"}`)
+
+		case r.URL.Path == "/responses/text" && r.Method == "GET":
+			w.Header().Set("Content-Type", "text/plain")
+			fmt.Fprint(w, "pong\n")
+
+		case r.URL.Path == "/responses/large" && r.Method == "GET":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write(bytes.Repeat([]byte("x"), 4096))
+
+		case strings.HasPrefix(r.URL.Path, "/responses/hop/") && r.Method == "GET":
+			hops, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/responses/hop/"))
+			if hops == 0 {
+				w.Header().Set("Content-Type", "text/plain")
+				fmt.Fprint(w, "landed")
+				return
+			}
+			http.Redirect(w, r, "/responses/hop/"+strconv.Itoa(hops-1), http.StatusFound)
+
 		case r.URL.Path == "/unreachable":
 			t.Errorf("The /unreachable endpoint was hit! sinq.finishScenario() failed to abort the sequence.")
 			w.WriteHeader(http.StatusBadRequest)
@@ -306,6 +452,9 @@ func Test_ExamplesDirectory(t *testing.T) {
 		t.Fatalf("Failed to create assets directory: %v", err)
 	}
 	defer os.Remove(assetsDir)
+	// Written by examples/file-io; removed even when the run fails part-way.
+	receivedFilePath := filepath.Join(assetsDir, "received_file")
+	defer os.Remove(receivedFilePath)
 
 	uploadFilePath := filepath.Join(assetsDir, "file")
 	err = os.WriteFile(uploadFilePath, uploadBytes, 0644)
@@ -367,12 +516,10 @@ func Test_ExamplesDirectory(t *testing.T) {
 		t.Fatalf("Example test failed. Expected sinq to exit with 0, got %d:\n%s", exitCode, out)
 	}
 
-	receivedFilePath := filepath.Join(assetsDir, "received_file")
 	receivedData, err := os.ReadFile(receivedFilePath)
 	if err != nil {
 		t.Fatalf("Failed to read received file: %v", err)
 	}
-	defer os.Remove(receivedFilePath)
 
 	if !bytes.Equal(receivedData, downloadBytes) {
 		t.Fatalf("Received file content does not match the download bytes")

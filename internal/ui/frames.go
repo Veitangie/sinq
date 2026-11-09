@@ -8,6 +8,8 @@ import (
 	"veitangie.dev/spinq"
 )
 
+const LightGray = "\033[38;5;244m"
+
 var ColorStates []string = []string{spinq.Red, spinq.Yellow, spinq.Green, spinq.Cyan, spinq.Blue, spinq.Magenta}
 
 func GetSimpleFrame(color bool, clock timer.Clock, label string) spinq.FrameFunc {

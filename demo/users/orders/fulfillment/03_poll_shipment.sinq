@@ -1,6 +1,14 @@
 GET ${env.BASE_URL}/orders/${ORDER_ID}/shipment
 Authorization: Bearer ${AUTH_TOKEN}
 
-$RETRY{ return sinq.retry.when(res.json().status ~= "delivered", 200) }
+$RETRY{ return sinq.retry.whenExponential(res.json().status ~= "delivered", 2, 100) }
 
-$ASSERT{ sinq.assert.equals(res.json(), {status = "delivered"}) }
+$ASSERT{
+    sinq.assert.equals(res.json(), {status = "delivered"})
+
+    local eta, err = sinq.time.fromString(res.json().eta, "2006-01-02T15:04:05Z07:00")
+    sinq.assert.isTrue(eta ~= nil, "ETA didn't parse: " .. tostring(err))
+    if eta then
+        sinq.assert.isTrue(eta > sinq.time.now(), "Delivered with an ETA in the past")
+    end
+}

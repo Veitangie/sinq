@@ -1,3 +1,8 @@
+$PRE{
+    -- Earlier responses stay available by request number: 2 is the stock check.
+    local stock = sinq.responses[2].json().stock
+    req.skip(stock < 2)
+}
 POST ${env.BASE_URL}/inventory/reserve
 Authorization: Bearer ${AUTH_TOKEN}
 Content-Type: application/json

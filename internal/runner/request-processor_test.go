@@ -36,9 +36,9 @@ func TestWorker_ProcessError_StatusFromError(t *testing.T) {
 		w := setupTestWorker(t, nil)
 		obs := observe(t, w)
 		(&RequestProcessor{w: w}).processError(context.Background(), tc.err, 0)
-		ends := obs.ofKind(event.RequestEnd)
+		ends := obs.ofKind(event.StageEnd)
 		if len(ends) != 1 || ends[0].Status != tc.want {
-			t.Errorf("%v: expected one RequestEnd with status %v, got %+v", tc.err, tc.want, ends)
+			t.Errorf("%v: expected one StageEnd with status %v, got %+v", tc.err, tc.want, ends)
 		}
 	}
 }
@@ -47,20 +47,20 @@ func TestWorker_ProcessError_CancelHasNoErrorMessage(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	obs := observe(t, w)
 	(&RequestProcessor{w: w}).processError(context.Background(), context.Canceled, 0)
-	if ends := obs.ofKind(event.RequestEnd); len(ends) != 1 || ends[0].ErrorString != "" {
-		t.Errorf("Expected an aborted RequestEnd without an error message, got %+v", ends)
+	if ends := obs.ofKind(event.StageEnd); len(ends) != 1 || ends[0].ErrorString != "" {
+		t.Errorf("Expected an aborted StageEnd without an error message, got %+v", ends)
 	}
 }
 
 func TestWorker_AttachInvalidFileFastFails(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	script := []byte(`req.attach("missing.txt")`)
 	extract := func(scenario.Token) []byte { return script }
 	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
 
-	_, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+	_, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second, false)
 
 	if err == nil {
 		t.Fatal("Expected runPreScript to fail on missing file, but it succeeded")
@@ -70,15 +70,15 @@ func TestWorker_AttachInvalidFileFastFails(t *testing.T) {
 	}
 }
 
-func TestWorker_SkipRequest(t *testing.T) {
+func TestWorker_SkipStage(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	script := []byte(`req.skip()`)
 	extract := func(scenario.Token) []byte { return script }
 	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
 
-	res, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+	res, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second, false)
 
 	if err != nil {
 		t.Fatalf("Expected runPreScript to succeed, but got error: %v", err)
@@ -130,9 +130,9 @@ func TestCachedRequestProcessor_UsesBody(t *testing.T) {
 func TestRequestProcessor_IsEmptyShortCircuit(t *testing.T) {
 	ctx := context.Background()
 	w := setupTestWorker(t, ctx)
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
-	reqBp := &scenario.RequestBlueprint{
+	reqBp := &scenario.StageBlueprint{
 		Pre:    scenario.Token{PayloadStart: 10, PayloadEnd: 11},
 		Assert: scenario.Token{PayloadStart: 20, PayloadEnd: 21},
 		Post:   scenario.Token{PayloadStart: 30, PayloadEnd: 31},
@@ -146,7 +146,7 @@ func TestRequestProcessor_IsEmptyShortCircuit(t *testing.T) {
 	processor := newTestProcessor(w)
 	processor.ctx = ctx
 	processor.scenarioBp = scenarioBp
-	processor.requestBp = reqBp
+	processor.stageBp = reqBp
 
 	if err := processor.runPre(); err != nil {
 		t.Errorf("Expected nil error for empty Pre block, got %v", err)
@@ -168,16 +168,16 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 	t.Run("runPre logs failure", func(t *testing.T) {
 		w := setupTestWorker(t, nil)
 		obs := observe(t, w)
-		w.lc.SetupRequestEnvironment(0)
+		w.lc.SetupStageEnvironment(0, true)
 
-		reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/\n$PRE{\nif then\n}"), "pre_fail.sinq")
+		reqBp, err := scenario.ParseStageBlueprints(strings.NewReader("GET http://localhost/\n$PRE{\nif then\n}"), "pre_fail.sinq", "")
 		if err != nil {
 			t.Fatalf("failed to parse blueprint: %v", err)
 		}
 
 		p := newTestProcessor(w)
 		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
-		p.requestBp = reqBp[0]
+		p.stageBp = reqBp[0]
 
 		_ = p.runPre()
 		if !obs.logged("Pre script failed") {
@@ -192,7 +192,7 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		reqBp := &scenario.RequestBlueprint{
+		reqBp := &scenario.StageBlueprint{
 			Source: []byte("x"),
 			Content: []scenario.Token{
 				{Type: scenario.Text, PayloadStart: 0, PayloadEnd: 1},
@@ -202,7 +202,7 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 		p := newTestProcessor(w)
 		p.ctx = ctx
 		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
-		p.requestBp = reqBp
+		p.stageBp = reqBp
 
 		_ = p.materialize()
 		if !obs.logged("Request materialization failed") {
@@ -213,7 +213,7 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 	t.Run("parse logs failure", func(t *testing.T) {
 		w := setupTestWorker(t, nil)
 		obs := observe(t, w)
-		w.lc.SetupRequestEnvironment(0)
+		w.lc.SetupStageEnvironment(0, true)
 
 		p := newTestProcessor(w)
 		p.materialized = []byte("POST http://localhost\n\nthis is a body")
@@ -228,16 +228,16 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 	t.Run("runRetry logs failure", func(t *testing.T) {
 		w := setupTestWorker(t, nil)
 		obs := observe(t, w)
-		w.lc.SetupRequestEnvironment(0)
+		w.lc.SetupStageEnvironment(0, true)
 
-		reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/\n$RETRY{\nreturn \"not a number\"\n}"), "retry_fail.sinq")
+		reqBp, err := scenario.ParseStageBlueprints(strings.NewReader("GET http://localhost/\n$RETRY{\nreturn \"not a number\"\n}"), "retry_fail.sinq", "")
 		if err != nil {
 			t.Fatalf("failed to parse blueprint: %v", err)
 		}
 
 		p := newTestProcessor(w)
 		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
-		p.requestBp = reqBp[0]
+		p.stageBp = reqBp[0]
 
 		_ = p.runRetry()
 		if !obs.logged("Retry script failed") {
@@ -248,16 +248,16 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 	t.Run("runAssert logs failure", func(t *testing.T) {
 		w := setupTestWorker(t, nil)
 		obs := observe(t, w)
-		w.lc.SetupRequestEnvironment(0)
+		w.lc.SetupStageEnvironment(0, true)
 
-		reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/\n$ASSERT{\nif then\n}"), "assert_fail.sinq")
+		reqBp, err := scenario.ParseStageBlueprints(strings.NewReader("GET http://localhost/\n$ASSERT{\nif then\n}"), "assert_fail.sinq", "")
 		if err != nil {
 			t.Fatalf("failed to parse blueprint: %v", err)
 		}
 
 		p := newTestProcessor(w)
 		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
-		p.requestBp = reqBp[0]
+		p.stageBp = reqBp[0]
 
 		_ = p.runAssert()
 		if !obs.logged("Assert script failed") {
@@ -268,16 +268,16 @@ func TestRequestProcessor_LogsFailuresAtEachStage(t *testing.T) {
 	t.Run("runPost logs failure", func(t *testing.T) {
 		w := setupTestWorker(t, nil)
 		obs := observe(t, w)
-		w.lc.SetupRequestEnvironment(0)
+		w.lc.SetupStageEnvironment(0, true)
 
-		reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/\n$POST{\nerror(\"boom\")\n}"), "post_fail.sinq")
+		reqBp, err := scenario.ParseStageBlueprints(strings.NewReader("GET http://localhost/\n$POST{\nerror(\"boom\")\n}"), "post_fail.sinq", "")
 		if err != nil {
 			t.Fatalf("failed to parse blueprint: %v", err)
 		}
 
 		p := newTestProcessor(w)
 		p.scenarioBp = &scenario.ScenarioBlueprint{Config: scriptTimeoutCfg}
-		p.requestBp = reqBp[0]
+		p.stageBp = reqBp[0]
 
 		_ = p.runPost()
 		if !obs.logged("Post script failed") {
@@ -326,7 +326,7 @@ func TestRequestProcessor_GetHash_IncludesMultipartHeaders(t *testing.T) {
 
 func TestRequestProcessor_Send_ConflictingBodyAndFile(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	req, _ := http.NewRequest("POST", "http://example.invalid/", strings.NewReader("body content"))
 	req.ContentLength = 12
@@ -344,7 +344,7 @@ func TestRequestProcessor_Send_ConflictingBodyAndFile(t *testing.T) {
 
 func TestRequestProcessor_SendCached_ConflictingBodyAndFile(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	req, _ := http.NewRequest("POST", "http://example.invalid/", nil)
 	req.ContentLength = 12
@@ -370,7 +370,7 @@ func TestRequestProcessor_SendCached_FileAttachment_SetsUnknownContentLength(t *
 	mockFS := fstest.MapFS{"upload.txt": &fstest.MapFile{Data: []byte("cached file body")}}
 	w := setupTestWorker(t, nil)
 	w.env.workspace = &mockWorkspace{FS: mockFS}
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	req, _ := http.NewRequest("POST", srv.URL, nil)
 

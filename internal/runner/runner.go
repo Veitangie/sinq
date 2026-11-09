@@ -137,7 +137,7 @@ func (r *Runner) RunScenarios(ctx context.Context, scenarios []ScenarioBundle, s
 
 		for idx := range r.cfg.Workers {
 			w := worker{
-				id:        idx,
+				id:        idx + 1,
 				taskCh:    taskCh,
 				env:       env,
 				reportCtx: reportContext,

@@ -1,0 +1,13 @@
+### Upload with a caption
+POST ${env.BASE_URL}/upload/multipart
+
+$PRE{
+    req.multipart(
+        { name = "caption", data = "Scyth, level 40" },
+        { name = "image", source = "../assets/file", filename = "portrait.bin" }
+    )
+    -- Random by default; pinned here so the server can check it.
+    req.multipartBoundary("sinq-example-boundary")
+}
+
+$ASSERT{ sinq.assert.code(204, "Multipart upload was not received intact") }

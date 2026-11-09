@@ -37,7 +37,7 @@ func TestJUnitReporter_EscapingAndControlCharacters(t *testing.T) {
 		StartedAt:     time.Now(),
 		TotalDuration: 1 * time.Second,
 		Status:        event.Failure,
-		RequestResults: []aggregator.RequestResult{
+		StageResults: []aggregator.StageResult{
 			{
 				Name:             "NastyRequest",
 				Status:           event.Failure,
@@ -82,7 +82,7 @@ func TestJUnitReporter_Comprehensive(t *testing.T) {
 		TotalDuration: 1 * time.Second,
 		Status:        event.Failure,
 		Output:        outputBuf,
-		RequestResults: []aggregator.RequestResult{
+		StageResults: []aggregator.StageResult{
 			{Name: "SuccessReq", Status: event.Success},
 			{Name: "ErrorReq", Status: event.Error, ErrorMessage: "runtime err"},
 			{Name: "FailReq", Status: event.Failure, FailedAssertions: []string{"bad body"}},
@@ -138,7 +138,7 @@ func TestJUnitReporter_Comprehensive(t *testing.T) {
 	if suite.TestCases[3].Skipped == nil {
 		t.Errorf("Expected SkippedReq to be skipped")
 	}
-	if suite.TestCases[4].Error == nil || suite.TestCases[4].Error.Message != "Request was interrupted" {
+	if suite.TestCases[4].Error == nil || suite.TestCases[4].Error.Message != "Stage was interrupted" {
 		t.Errorf("Expected AbortReq to report an interruption error, got %v", suite.TestCases[4].Error)
 	}
 }
@@ -174,7 +174,7 @@ func TestJUnitReporter_RunsOfOneScenarioHaveDistinctNames(t *testing.T) {
 		r.Status = event.Success
 		r.StartedAt = time.Now()
 		r.TotalDuration = time.Millisecond
-		r.RequestResults = []aggregator.RequestResult{{Name: "Pay", Status: event.Success}}
+		r.StageResults = []aggregator.StageResult{{Name: "Pay", Status: event.Success}}
 		sourceCh <- r
 	}
 	close(sourceCh)
@@ -240,6 +240,48 @@ func TestJUnitReporter_SingleRunHasNoRunNumber(t *testing.T) {
 	}
 }
 
+func TestJUnitReporter_TestCaseCarriesItsFile(t *testing.T) {
+	buf := &bytes.Buffer{}
+	rep := NewReporter(buf)
+
+	sourceCh := make(chan aggregator.ScenarioResult, 1)
+	sourceCh <- aggregator.ScenarioResult{Name: "Checkout", Status: event.Success, StartedAt: time.Now(), TotalRunCount: 1,
+		StageResults: []aggregator.StageResult{
+			{Name: "Check out", Filename: "orders/03_checkout.sinq", Status: event.Success, Attempts: 1},
+			{Name: "a.sinq", Filename: "a.sinq", Status: event.Success, Attempts: 1},
+		}}
+	close(sourceCh)
+	timerCh := make(chan time.Duration, 1)
+	timerCh <- time.Millisecond
+	close(timerCh)
+
+	if err := rep.Report(sourceCh, timerCh, 1); err != nil {
+		t.Fatalf("Failed to execute Report(): %v", err)
+	}
+
+	var parsed struct {
+		Suites []struct {
+			Cases []struct {
+				Name string `xml:"name,attr"`
+				File string `xml:"file,attr"`
+			} `xml:"testcase"`
+		} `xml:"testsuite"`
+	}
+	if err := xml.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Expected valid XML, got %v\n%s", err, buf.String())
+	}
+	if len(parsed.Suites) != 1 || len(parsed.Suites[0].Cases) != 2 {
+		t.Fatalf("Expected one suite with two test cases, got\n%s", buf.String())
+	}
+	cases := parsed.Suites[0].Cases
+	if cases[0].Name != "Check out" || cases[0].File != "orders/03_checkout.sinq" {
+		t.Errorf("Expected the named stage to name its file, got %+v", cases[0])
+	}
+	if cases[1].File != "a.sinq" {
+		t.Errorf("Expected an unnamed stage to carry its file too, got %+v", cases[1])
+	}
+}
+
 func TestJUnitReporter_TagsUseStandardPropertiesMarkup(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rep := NewReporter(buf)
@@ -248,12 +290,12 @@ func TestJUnitReporter_TagsUseStandardPropertiesMarkup(t *testing.T) {
 	timerCh := make(chan time.Duration, 1)
 
 	sourceCh <- aggregator.ScenarioResult{
-		Name:           "Tagged",
-		Tags:           []string{"api", "fast"},
-		StartedAt:      time.Now(),
-		TotalDuration:  1 * time.Second,
-		Status:         event.Success,
-		RequestResults: []aggregator.RequestResult{{Name: "Req", Status: event.Success}},
+		Name:          "Tagged",
+		Tags:          []string{"api", "fast"},
+		StartedAt:     time.Now(),
+		TotalDuration: 1 * time.Second,
+		Status:        event.Success,
+		StageResults:  []aggregator.StageResult{{Name: "Req", Status: event.Success}},
 	}
 	close(sourceCh)
 	timerCh <- 1 * time.Second
@@ -330,13 +372,13 @@ func TestJUnitReporter_LabelsProperty(t *testing.T) {
 			sourceCh := make(chan aggregator.ScenarioResult, 1)
 			timerCh := make(chan time.Duration, 1)
 			sourceCh <- aggregator.ScenarioResult{
-				Name:           "Checkout",
-				Tags:           tt.tags,
-				Labels:         tt.labels,
-				StartedAt:      time.Now(),
-				TotalDuration:  time.Second,
-				Status:         event.Success,
-				RequestResults: []aggregator.RequestResult{{Name: "Req", Status: event.Success}},
+				Name:          "Checkout",
+				Tags:          tt.tags,
+				Labels:        tt.labels,
+				StartedAt:     time.Now(),
+				TotalDuration: time.Second,
+				Status:        event.Success,
+				StageResults:  []aggregator.StageResult{{Name: "Req", Status: event.Success}},
 			}
 			close(sourceCh)
 			timerCh <- time.Second
@@ -397,12 +439,12 @@ func TestJUnitReporter_NoTagsOmitsProperties(t *testing.T) {
 			timerCh := make(chan time.Duration, 1)
 
 			sourceCh <- aggregator.ScenarioResult{
-				Name:           "Untagged",
-				Tags:           tt.tags,
-				StartedAt:      time.Now(),
-				TotalDuration:  1 * time.Second,
-				Status:         event.Success,
-				RequestResults: []aggregator.RequestResult{{Name: "Req", Status: event.Success}},
+				Name:          "Untagged",
+				Tags:          tt.tags,
+				StartedAt:     time.Now(),
+				TotalDuration: 1 * time.Second,
+				Status:        event.Success,
+				StageResults:  []aggregator.StageResult{{Name: "Req", Status: event.Success}},
 			}
 			close(sourceCh)
 			timerCh <- 1 * time.Second

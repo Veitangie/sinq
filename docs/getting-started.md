@@ -67,13 +67,13 @@ To get syntax highlighting and better editor support, check out the community ex
 
 ## Your First Test
 
-Let's test a real login flow against [DummyJSON](https://dummyjson.com), a free public API made for practice. It needs no sign-up and comes with a demo user. The flow has three steps:
+Let's test a real login flow against [DummyJSON](https://dummyjson.com), a free public API made for practice. It needs no sign-up and comes with a demo user. The flow has three stages:
 
 1. log in and receive a token,
 2. use the token to read your own profile,
 3. create a product.
 
-In `sinq`, a flow like this is a folder, and each step is one file in it. Files run in name order, which is why they start with numbers.
+In `sinq`, a flow like this is a folder, and each stage is one file in it. Files run in name order, which is why they start with numbers.
 
 1. Make a folder for the flow:
    ```bash
@@ -81,7 +81,7 @@ In `sinq`, a flow like this is a folder, and each step is one file in it. Files 
    cd my-tests/login-flow
    ```
 
-2. Create `01_login.sinq`. The top half is the HTTP request exactly as it goes over the wire. The `$ASSERT` block checks the response, and the `$POST` block saves what later steps need:
+2. Create `01_login.sinq`. The top half is the HTTP request exactly as it goes over the wire. The `$ASSERT` block checks the response, and the `$POST` block saves what later stages need:
    ```http
    ### Log in
    POST https://dummyjson.com/auth/login
@@ -162,7 +162,7 @@ The process exits with code `0`, which is what CI looks at.
 Change the password in `01_login.sinq` to `"wrong"` and run `sinq ./my-tests` again:
 
 ```text
- ✗ Scenario: login-flow (1✗ 2- in 463ms)
+ ✗ login-flow (1✗ 2- in 463ms)
    ✗ Log in (463ms)
      ✗ Failed assertions: Login failed, No token in the response
    - Read your own profile (0ns)
@@ -171,7 +171,7 @@ Change the password in `01_login.sinq` to `"wrong"` and run `sinq ./my-tests` ag
  ✗ FAILED in 464ms | Scenarios: 1✗ | 1 request sent
 ```
 
-The login fails with both of your messages, and the two later steps don't run (`-`): by default (`fail_fast`), a scenario stops at its first failed request. The exit code is now `1`, so a CI pipeline would stop here. Put the password back and everything passes again.
+The login fails with both of your messages, and the two later stages don't run (`-`): by default (`fail_fast`), a scenario stops at its first failed stage. The exit code is now `1`, so a CI pipeline would stop here. Put the password back and everything passes again.
 
 From here, every new folder you add under `my-tests` becomes another scenario, and `sinq` runs them all at the same time.
 
@@ -179,4 +179,4 @@ From here, every new folder you add under `my-tests` becomes another scenario, a
 
 - **[CLI Reference](cli.md)**: flags, scenario filters, environment variables.
 - **[Scenarios & Config](scenario.md)**: chaining requests, passing values between them, `.scenario` files.
-- **[Lua API](lua-api.md)**: assertions, JSON, request lifecycle control.
+- **[Lua API](lua-api.md)**: assertions, JSON, stage lifecycle control.

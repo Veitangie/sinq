@@ -227,20 +227,20 @@ func TestWorker_LuaInfiniteLoop_AbortsOnTimeout(t *testing.T) {
 func TestWorker_LuaBuiltinFailures(t *testing.T) {
 	w := setupTestWorker(t, nil)
 
-	t.Run("setRequestIdx without args", func(t *testing.T) {
-		w.lc.Push(w.lc.NewClosure(w.setRequestIdx))
+	t.Run("setStageIdx without args", func(t *testing.T) {
+		w.lc.Push(w.lc.NewClosure(w.setStageIdx))
 		err := w.lc.PCall(0, 0, nil)
 		if err == nil {
-			t.Error("Expected setRequestIdx to fail when missing arguments")
+			t.Error("Expected setStageIdx to fail when missing arguments")
 		}
 	})
 
-	t.Run("setRequestIdx with string", func(t *testing.T) {
-		w.lc.Push(w.lc.NewClosure(w.setRequestIdx))
+	t.Run("setStageIdx with string", func(t *testing.T) {
+		w.lc.Push(w.lc.NewClosure(w.setStageIdx))
 		w.lc.Push(lua.LString("not_a_number"))
 		err := w.lc.PCall(1, 0, nil)
 		if err == nil {
-			t.Error("Expected setRequestIdx to fail when receiving a string")
+			t.Error("Expected setStageIdx to fail when receiving a string")
 		}
 	})
 
@@ -349,8 +349,8 @@ func TestWorker_ExecuteAndExtractValue_RuntimeError(t *testing.T) {
 
 func TestWorker_FinishScenario(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.maxRequestIdx = 5
-	w.requestIdx = 1
+	w.maxStageIdx = 5
+	w.stageIdx = 1
 
 	w.lc.Push(w.lc.NewClosure(w.finishScenario))
 	err := w.lc.PCall(0, 0, nil)
@@ -358,8 +358,8 @@ func TestWorker_FinishScenario(t *testing.T) {
 		t.Fatalf("finishScenario failed: %v", err)
 	}
 
-	if w.requestIdx != 6 {
-		t.Errorf("Expected requestIdx to be maxRequestIdx + 1, got %d", w.requestIdx)
+	if w.stageIdx != 6 {
+		t.Errorf("Expected stageIdx to be maxStageIdx + 1, got %d", w.stageIdx)
 	}
 }
 
@@ -413,7 +413,7 @@ func TestWorker_CompareFiles(t *testing.T) {
 
 func TestWorker_RequestCompleted(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	resp := intermediate{
 		statusCode: 400,
@@ -469,15 +469,15 @@ func TestWorker_SaveResponseTo_Mkdir(t *testing.T) {
 	mockFS := fstest.MapFS{
 		"test.sinq": &fstest.MapFile{Data: []byte("request")},
 	}
-	trackFS := &trackMkdirWorkspace{mockWorkspace: mockWorkspace{FS: mockFS}}
+	trackFS := &trackMkdirWorkspace{FS: mockFS}
 	w.env.workspace = trackFS
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	script := `req.saveResponseTo('newdir/out.txt')`
 	extract := func(scenario.Token) []byte { return []byte(script) }
 	token := scenario.Token{Type: scenario.Script, Name: "PRE"}
 
-	res, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second)
+	res, err := w.runPreScript(token, extract, "test.sinq", 1*time.Second, false)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestWorker_SaveResponseTo_Mkdir(t *testing.T) {
 	scriptFail := `req.saveResponseTo('faildir/out.txt')`
 	extractFail := func(scenario.Token) []byte { return []byte(scriptFail) }
 
-	_, errFail := w.runPreScript(token, extractFail, "test.sinq", 1*time.Second)
+	_, errFail := w.runPreScript(token, extractFail, "test.sinq", 1*time.Second, false)
 	if errFail == nil {
 		t.Fatal("Expected error on mkdir failure, got nil")
 	}
@@ -501,46 +501,46 @@ func TestWorker_SaveResponseTo_Mkdir(t *testing.T) {
 	}
 }
 
-func TestWorker_SetRequestIdx(t *testing.T) {
+func TestWorker_SetStageIdx(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.maxRequestIdx = 3
+	w.maxStageIdx = 3
 
 	call := func(n float64) {
-		w.lc.Push(w.lc.NewClosure(w.setRequestIdx))
+		w.lc.Push(w.lc.NewClosure(w.setStageIdx))
 		w.lc.Push(lua.LNumber(n))
 		if err := w.lc.PCall(1, 0, nil); err != nil {
 			t.Fatalf("PCall failed: %v", err)
 		}
 	}
 
-	w.requestIdx = 0
+	w.stageIdx = 0
 	call(2)
-	if w.requestIdx != 1 {
-		t.Errorf("expected requestIdx 1 for a valid in-range index, got %d", w.requestIdx)
+	if w.stageIdx != 1 {
+		t.Errorf("expected stageIdx 1 for a valid in-range index, got %d", w.stageIdx)
 	}
 
-	w.requestIdx = 1
+	w.stageIdx = 1
 	call(0)
-	if w.requestIdx != 1 {
-		t.Errorf("expected requestIdx to stay unchanged at 1 for an out-of-range negative index, got %d", w.requestIdx)
+	if w.stageIdx != 1 {
+		t.Errorf("expected stageIdx to stay unchanged at 1 for an out-of-range negative index, got %d", w.stageIdx)
 	}
 
-	w.requestIdx = 1
+	w.stageIdx = 1
 	call(100)
-	if w.requestIdx != 1 {
-		t.Errorf("expected requestIdx to stay unchanged at 1 for an out-of-range index, got %d", w.requestIdx)
+	if w.stageIdx != 1 {
+		t.Errorf("expected stageIdx to stay unchanged at 1 for an out-of-range index, got %d", w.stageIdx)
 	}
 
-	w.requestIdx = 1
+	w.stageIdx = 1
 	call(4)
-	if w.requestIdx != 3 {
-		t.Errorf("expected requestIdx 3 at the upper boundary, got %d", w.requestIdx)
+	if w.stageIdx != 3 {
+		t.Errorf("expected stageIdx 3 at the upper boundary, got %d", w.stageIdx)
 	}
 
-	w.requestIdx = 1
+	w.stageIdx = 1
 	call(1)
-	if w.requestIdx != 0 {
-		t.Errorf("expected requestIdx 0 at the lower boundary, got %d", w.requestIdx)
+	if w.stageIdx != 0 {
+		t.Errorf("expected stageIdx 0 at the lower boundary, got %d", w.stageIdx)
 	}
 }
 
@@ -576,9 +576,9 @@ func TestWorker_CompareFiles_ReadErrors(t *testing.T) {
 
 	t.Run("saved response read error", func(t *testing.T) {
 		w.env.workspace = &erroringOpenWorkspace{
-			mockWorkspace: mockWorkspace{FS: baseFS},
-			target:        "req.txt",
-			err:           errors.New("disk read failure"),
+			FS:     baseFS,
+			target: "req.txt",
+			err:    errors.New("disk read failure"),
 		}
 
 		fn := w.compareFiles("script.sinq", "req.txt")
@@ -592,9 +592,9 @@ func TestWorker_CompareFiles_ReadErrors(t *testing.T) {
 
 	t.Run("comparison file read error", func(t *testing.T) {
 		w.env.workspace = &erroringOpenWorkspace{
-			mockWorkspace: mockWorkspace{FS: baseFS},
-			target:        "other.txt",
-			err:           errors.New("disk read failure"),
+			FS:     baseFS,
+			target: "other.txt",
+			err:    errors.New("disk read failure"),
 		}
 
 		fn := w.compareFiles("script.sinq", "req.txt")
@@ -666,7 +666,7 @@ func TestWorker_ExecuteAndExtractValue_DiffCalculatedFromCorrectBase(t *testing.
 
 func TestWorker_RequestCompleted_MultiValueHeaderCommaJoin(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 	w.env.cfg.DumpOnFailure = true
 
 	resp := intermediate{
@@ -690,7 +690,7 @@ func TestWorker_RequestCompleted_TrailingNewlineHandling(t *testing.T) {
 	run := func(t *testing.T, body []byte) string {
 		t.Helper()
 		w := setupTestWorker(t, nil)
-		w.lc.SetupRequestEnvironment(0)
+		w.lc.SetupStageEnvironment(0, true)
 		w.env.cfg.DumpOnFailure = true
 
 		resp := intermediate{

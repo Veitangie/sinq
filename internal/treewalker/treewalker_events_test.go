@@ -8,6 +8,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -81,7 +83,7 @@ var eventsFS = fstest.MapFS{
 func walkEvents(t *testing.T, workers int) ([]scenario.ScenarioBlueprint, []event.Event) {
 	t.Helper()
 	bus, events := recordingBus(t)
-	walker, err := treewalker.NewTreewalker(config.Config{Workers: workers}, bus, mockParseRequest, mockParseConfig)
+	walker, err := treewalker.NewTreewalker(config.Config{Workers: workers}, bus, mockParseStages, mockParseConfig, "")
 	if err != nil {
 		t.Fatalf("Failed to create walker: %v", err)
 	}
@@ -142,8 +144,11 @@ func TestTreewalkerEvents_WorkerLogsCarryWorkerAndSeqId(t *testing.T) {
 		t.Fatalf("Expected one 'Worker got task' per scenario (%d), got %d", len(bps), len(tasks))
 	}
 	for _, e := range tasks {
-		if v, ok := attr(e, "workerId"); !ok || v.Int64() != int64(e.WorkerId) {
-			t.Errorf("Expected a workerId attr matching WorkerId %d, got %v", e.WorkerId, v)
+		if e.WorkerId < 1 {
+			t.Errorf("Expected a worker's WorkerId on %q, got %d", e.Message, e.WorkerId)
+		}
+		if v, ok := attr(e, "workerId"); ok {
+			t.Errorf("Expected workerId only on the event field, got it as an attr too (%v)", v)
 		}
 		if v, ok := attr(e, "seqId"); !ok || !seqIds[v.Int64()] {
 			t.Errorf("Expected a seqId attr naming one of the scenarios, got %v", v)
@@ -168,11 +173,11 @@ func TestTreewalkerEvents_DiscoveryTotal(t *testing.T) {
 
 func TestTreewalkerEvents_ParseErrorIsLogged(t *testing.T) {
 	bus, events := recordingBus(t)
-	failing := func(r io.Reader, filename string) ([]*scenario.RequestBlueprint, error) {
+	failing := func(r io.Reader, filename, rootName string) ([]*scenario.StageBlueprint, error) {
 		return nil, errors.New("unparseable")
 	}
-	walker, _ := treewalker.NewTreewalker(config.Config{Workers: 1}, bus, failing, mockParseConfig)
-	if _, err := walker.ParseFiletree(context.Background(), fstest.MapFS{"root/A/a.sinq": {Data: []byte("A")}}, "root"); err == nil {
+	walker, _ := treewalker.NewTreewalker(config.Config{Workers: 1}, bus, failing, mockParseConfig, "")
+	if _, err := walker.ParseFiletree(context.Background(), fstest.MapFS{"A/a.sinq": {Data: []byte("A")}}, "root"); err == nil {
 		t.Fatal("Expected the parse error to be returned")
 	}
 
@@ -181,8 +186,8 @@ func TestTreewalkerEvents_ParseErrorIsLogged(t *testing.T) {
 		t.Fatalf("Expected one parse error log, got %d", len(logged))
 	}
 	e := logged[0]
-	if e.Level != slog.LevelError {
-		t.Errorf("Expected Error level, got %v", e.Level)
+	if e.Level != slog.LevelDebug {
+		t.Errorf("Expected Debug level, got %v", e.Level)
 	}
 	if v, ok := attr(e, "filePath"); !ok || v.String() != "root/A/a.sinq" {
 		t.Errorf("Expected the failing file as filePath, got %v", v)
@@ -194,12 +199,12 @@ func TestTreewalkerEvents_ParseErrorIsLogged(t *testing.T) {
 
 func TestTreewalkerEvents_SingleFileDurationCoversTheParse(t *testing.T) {
 	bus, events := recordingBus(t)
-	slow := func(r io.Reader, filename string) ([]*scenario.RequestBlueprint, error) {
+	slow := func(r io.Reader, filename, rootName string) ([]*scenario.StageBlueprint, error) {
 		time.Sleep(20 * time.Millisecond)
-		return mockParseRequest(r, filename)
+		return mockParseStages(r, filename, rootName)
 	}
-	walker, _ := treewalker.NewTreewalker(config.Config{Workers: 1}, bus, slow, mockParseConfig)
-	if _, err := walker.ParseSingleFile(fstest.MapFS{"single.sinq": {Data: []byte("X")}}, "single.sinq"); err != nil {
+	walker, _ := treewalker.NewTreewalker(config.Config{Workers: 1}, bus, slow, mockParseConfig, "")
+	if _, err := walker.ParseSingleFile(fstest.MapFS{"single.sinq": {Data: []byte("X")}}, "single.sinq", "."); err != nil {
 		t.Fatalf("ParseSingleFile failed: %v", err)
 	}
 
@@ -209,5 +214,26 @@ func TestTreewalkerEvents_SingleFileDurationCoversTheParse(t *testing.T) {
 	}
 	if v, ok := attr(finished[0], "duration"); !ok || v.Duration() < 20*time.Millisecond {
 		t.Errorf("Expected the duration to cover the 20ms parse, got %v", v)
+	}
+}
+
+func TestTreewalker_ParseErrorsNameTheirFile(t *testing.T) {
+	failing := func(r io.Reader, filename, rootName string) ([]*scenario.StageBlueprint, error) {
+		return nil, errors.Join(
+			scenario.PositionError{Line: 3, Offset: 7, Err: errors.New("bad script")},
+			errors.New("no position"),
+		)
+	}
+	walker, _ := treewalker.NewTreewalker(config.Config{Workers: 1}, newBus(t), failing, mockParseConfig, "")
+	_, err := walker.ParseFiletree(context.Background(), fstest.MapFS{"A/a.sinq": {Data: []byte("A")}}, "root")
+	if err == nil {
+		t.Fatal("Expected the parse error to be returned")
+	}
+
+	file := filepath.Join("root", "A", "a.sinq")
+	for _, want := range []string{file + ":3:7: bad script", file + ": no position"} {
+		if !slices.Contains(strings.Split(err.Error(), "\n"), want) {
+			t.Errorf("Expected the line %q, got:\n%s", want, err)
+		}
 	}
 }

@@ -110,19 +110,23 @@ func (p InfoPrinter) PrintScenarios(allScenarios []runner.ScenarioBundle, cfg co
 			}
 		}
 
-		for idx, rqBp := range scBp.Requests {
-			maybeName := rqBp.Filename
-			if rqBp.Name != "" {
-				maybeName = rqBp.Name
+		for idx, stBp := range scBp.Stages {
+			maybeName := stBp.Filename
+			if stBp.Name != "" {
+				maybeName = stBp.Name
 			}
-			if idx == len(scBp.Requests)-1 {
-				_, err = fmt.Fprintf(p.writer, " %s%s\n", endHighlight, maybeName)
+			scriptOnlyTackOn := ""
+			if stBp.IsNoRequest() {
+				scriptOnlyTackOn = " (Lua only)"
+			}
+			if idx == len(scBp.Stages)-1 {
+				_, err = fmt.Fprintf(p.writer, " %s%s%s\n", endHighlight, maybeName, scriptOnlyTackOn)
 				if err != nil {
 					return err
 				}
 				continue
 			}
-			_, err = fmt.Fprintf(p.writer, " %s%s\n", middleHighlight, maybeName)
+			_, err = fmt.Fprintf(p.writer, " %s%s%s\n", middleHighlight, maybeName, scriptOnlyTackOn)
 			if err != nil {
 				return err
 			}
@@ -146,7 +150,7 @@ Flags:
   -v, --version           Print the current sinq version and exit
   -h, --help              Print this help message and exit
   -i, --insecure          Disable SSL/TLS certificate verification
-  -V, --verbose           Enable verbose reporting (reports each stage duration, only affects "std" format)
+  -V, --verbose           Enable verbose reporting (reports each lifecycle step duration, only affects "std" format)
   -l, --list              Parse and list scenarios at specified directories
   -u, --unrestricted      Load Lua os/io modules - disables the script sandbox
   -p, --print             Capture lua output and show it in the report
@@ -162,7 +166,7 @@ Flags:
   -t, --tag string        Execute only scenarios that have at least one of passed tags
   -n, --name string       Execute only scenarios which names match at least one of passed regular expressions
   --no-spinner            Disable spinner animation
-  --dump-on-failure       Print full request and response data of failed, errored or aborted requests
+  --dump-on-failure       Print full request and response data of failed, errored or aborted stages
   --secrets-file string   Path to JSON-formatted secrets file
   --no-tag string         Do not execute scenarios that have the tag
   --no-name string        Do not execute scenarios which names match the regular expression

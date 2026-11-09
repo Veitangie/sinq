@@ -20,7 +20,7 @@ func dummyFunc(L *lua.LState) int { return 0 }
 func TestLuaContext_PreScript_Lifecycle(t *testing.T) {
 	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
-	lc.SetupRequestEnvironment(0)
+	lc.SetupStageEnvironment(0, true)
 
 	if lc.RequestTable.RawGetString("attach") != lua.LNil {
 		t.Error("Expected req.attach to be nil before setup")
@@ -52,7 +52,7 @@ func TestLuaContext_PreScript_Lifecycle(t *testing.T) {
 func TestBug_SaveToLeak(t *testing.T) {
 	lc := NewLuaContext(timer.DefaultClock{}, false, nil, nil)
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
-	lc.SetupRequestEnvironment(0)
+	lc.SetupStageEnvironment(0, true)
 
 	lc.SetupPreScript(dummyFunc, dummyFunc, dummyFunc, dummyFunc, dummyFunc, dummyFunc)
 	lc.TearDownPreScript()
@@ -103,7 +103,7 @@ func TestLuaContext_RecordResponse(t *testing.T) {
 	defer lc.Close()
 
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
-	lc.SetupRequestEnvironment(0)
+	lc.SetupStageEnvironment(0, true)
 
 	lc.RecordResponseMeta(1, 200, nil)
 	if lc.ResponseTable.RawGetString("attempt") != lua.LNumber(1) {
@@ -259,12 +259,12 @@ func TestLuaContext_SetupRequestEnvironment_ResponseIndex(t *testing.T) {
 	defer lc.Close()
 	lc.SetupScenarioEnvironment(dummyFunc, dummyFunc, dummyFunc, nil, nil)
 
-	lc.SetupRequestEnvironment(2)
+	lc.SetupStageEnvironment(2, true)
 
 	if got := lc.allResponsesTable.RawGetInt(3); got != lc.ResponseTable {
-		t.Errorf("expected response table to be recorded at index requestIdx+1=3, got %v", got)
+		t.Errorf("expected response table to be recorded at index stageIdx+1=3, got %v", got)
 	}
 	if got := lc.allResponsesTable.RawGetInt(2); got == lc.ResponseTable {
-		t.Errorf("did not expect the response table at index requestIdx=2")
+		t.Errorf("did not expect the response table at index stageIdx=2")
 	}
 }

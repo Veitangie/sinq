@@ -4,6 +4,7 @@
 package scenario
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,11 +20,11 @@ type configHelper struct {
 	Tags      []string         `json:"tags"`
 }
 
-func parseAdditionalData(target *ScenarioConfig, bytes []byte) error {
+func parseAdditionalData(target *ScenarioConfig, data []byte) error {
 	helper := configHelper{}
-	err := json.Unmarshal(bytes, &helper)
+	err := json.Unmarshal(data, &helper)
 	if err != nil {
-		return fmt.Errorf("Failed to parse scenario config: %w", err)
+		return jsonError(data, fmt.Errorf("Failed to parse scenario config: %w", err))
 	}
 
 	if len(helper.EnvMatrix) > 0 {
@@ -66,16 +67,36 @@ func parseAdditionalData(target *ScenarioConfig, bytes []byte) error {
 	return nil
 }
 
+func jsonError(source []byte, err error) error {
+	offset := int64(-1)
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &syntaxErr):
+		offset = syntaxErr.Offset
+	case errors.As(err, &typeErr):
+		offset = typeErr.Offset
+	}
+	if offset < 0 || offset > int64(len(source)) {
+		return err
+	}
+
+	before := source[:offset]
+	line := bytes.Count(before, []byte{'\n'}) + 1
+	column := len(before) - (bytes.LastIndexByte(before, '\n') + 1)
+	return PositionError{Line: line, Offset: max(column, 1), Err: err}
+}
+
 func ParseConfig(target *ScenarioConfig, source io.Reader) error {
-	bytes, err := io.ReadAll(source)
+	data, err := io.ReadAll(source)
 	if err != nil {
-		return fmt.Errorf("An error occurred when reading scenario config: %w", err)
+		return fmt.Errorf("Failed to read scenario config: %w", err)
 	}
 
 	oldSize := target.MaxBody
-	err = json.Unmarshal(bytes, target)
+	err = json.Unmarshal(data, target)
 	if err != nil {
-		return fmt.Errorf("An error occurred when parsing scenario config: %w", err)
+		return jsonError(data, fmt.Errorf("Failed to parse scenario config: %w", err))
 	}
 
 	if target.MaxBody != oldSize {
@@ -107,7 +128,7 @@ func ParseConfig(target *ScenarioConfig, source io.Reader) error {
 		err = errors.Join(err, errors.New("Negative redirects"))
 	}
 
-	err = errors.Join(err, parseAdditionalData(target, bytes))
+	err = errors.Join(err, parseAdditionalData(target, data))
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,7 @@ However, at this time, **the project operates on a closed contribution model for
 
 Documentation is the exception: pull requests that improve the docs are welcome, under the same GPLv3 license. See [Community](community.md) for how to report bugs, ask questions and contribute.
 
-## How do I pass variables between requests?
+## How do I pass variables between stages?
 
 You can extract data from a response in the `$POST` hook and assign it to a global variable (by omitting the `local` keyword in Lua).
 
@@ -20,7 +20,7 @@ $POST{
 }
 ```
 
-In subsequent requests, you can inject it using inline scripts:
+In subsequent stages, you can inject it using inline scripts:
 
 ```http
 GET ${env.BASE_URL}/protected-route
@@ -29,11 +29,11 @@ Authorization: Bearer ${AUTH_TOKEN}
 
 ## How does concurrency work in `sinq`?
 
-Every leaf directory (a folder with no subfolders) is one scenario. Scenarios run concurrently, up to `-w/--workers` at a time (default 10), and requests within a scenario run in order. Each scenario run gets a fresh Lua state and cookie jar, so there is no shared state to race on.
+Every leaf directory (a folder with no subfolders) is one scenario. Scenarios run concurrently, up to `-w/--workers` at a time (default 10), and stages within a scenario run in order. Each scenario run gets a fresh Lua state and cookie jar, so there is no shared state to race on.
 
 ## Can I share state between different scenarios?
 
-**No.** Every scenario runs in isolation, which is what makes running them in parallel safe. If you need a shared setup step (like fetching an authentication token or creating a base database record), place that `.sinq` file in a parent directory. Every child scenario will inherit that file and execute the setup independently before running its own specific tests.
+**No.** Every scenario runs in isolation, which is what makes running them in parallel safe. If you need a shared setup stage (like fetching an authentication token or creating a base database record), place that `.sinq` file in a parent directory. Every child scenario will inherit that file and execute the setup independently before running its own specific tests.
 
 ## How do I do Data-Driven / Parameterized Testing?
 
@@ -112,9 +112,9 @@ $PRE{ req.cache("auth:" .. env.phoneNumber) }
 
 Every request that uses the same key gets the same cached response, even with a different method, URL or body, so include whatever must keep requests apart (here the phone number) in the key. The first request to fill a key decides what is stored. If it streamed its body to disk with `req.saveResponseTo`, later requests with the same key get an empty body.
 
-## Can I skip a request conditionally?
+## Can I skip a stage conditionally?
 
-Yes. If you determine during the `$PRE` hook that a request is not needed (e.g., you already have the data or an environment variable disables it), you can mark it to be skipped.
+Yes. If you determine during the `$PRE` hook that a stage is not needed (e.g., you already have the data or an environment variable disables it), you can mark it to be skipped.
 
 ```http
 POST ${env.BASE_URL}/optional-step
@@ -125,7 +125,7 @@ $PRE{
     end
 }
 ```
-Skipped requests bypass the actual network call and all subsequent hooks (`$RETRY`, `$ASSERT`, `$POST`), but are not marked as failures.
+Skipped stages bypass the actual network call and all subsequent hooks (`$RETRY`, `$ASSERT`, `$POST`), but are not marked as failures.
 
 ## What happens if an API returns a massive payload?
 
@@ -173,7 +173,7 @@ $RETRY{
 }
 ```
 
-If the last attempt still got no response, the request is reported as an error. See [Send Failures](lua-api.md#send-failures-reserror) for the full list of kinds.
+If the last attempt still got no response, the stage is reported as an error. See [Send Failures](lua-api.md#send-failures-reserror) for the full list of kinds.
 
 ## How do I override a deeply nested env/secret key or value?
 

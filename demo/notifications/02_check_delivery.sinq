@@ -1,6 +1,9 @@
 GET ${env.BASE_URL}/notifications/${NOTIFICATION_ID}
 Authorization: Bearer ${AUTH_TOKEN}
 
-$RETRY{ return sinq.retry.when(res.json().status ~= "delivered", 300) }
+$RETRY{
+    -- Poll every 300ms, give or take 50ms.
+    return sinq.retry.withJitter(res.json().status ~= "delivered", 50, sinq.retry.when, 300)
+}
 
 $ASSERT{ sinq.assert.equals(res.json(), {status = "delivered"}) }

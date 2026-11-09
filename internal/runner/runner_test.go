@@ -349,3 +349,49 @@ func TestRunner_StartDataSource_NoMatrix(t *testing.T) {
 		t.Errorf("Env map was corrupted in standard execution")
 	}
 }
+
+// Worker ids count from 1: the bus leaves workerId out of log lines when it's
+// 0, which is reserved for events that no worker sent.
+func TestRunner_WorkerIdsCountFromOne(t *testing.T) {
+	bus, err := event.NewBus(64, discardLogger())
+	if err != nil {
+		t.Fatalf("Failed to construct event bus: %v", err)
+	}
+	sink := bus.RegisterMC(256)
+	bus.Start()
+	defer bus.Close()
+
+	cfg := config.SaneDefaults()
+	cfg.Workers = 2
+	ctx := context.Background()
+	runner, _ := NewRunner(cfg, ctx, noopRoundTripper{}, bus, nil, &mockWorkspace{})
+	scenarios := make([]ScenarioBundle, 6)
+	for i := range scenarios {
+		scenarios[i] = ScenarioBundle{scenario.ScenarioBlueprint{SeqId: i + 1, Config: &scenario.ScenarioConfig{Name: "ids"}}, nil, 1}
+	}
+	totalTimer := timer.NewTimer(timer.DefaultClock{})
+	runner.RunScenarios(ctx, scenarios, nil, &totalTimer)
+
+	starts := 0
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-sink:
+			if e.Kind == event.ScenarioStart {
+				starts++
+				if e.WorkerId < 1 || e.WorkerId > cfg.Workers {
+					t.Errorf("Expected a worker id in 1..%d, got %d", cfg.Workers, e.WorkerId)
+				}
+			}
+			if e.Kind != event.RunnerDone {
+				continue
+			}
+		case <-timeout:
+			t.Fatal("Timed out waiting for RunnerDone")
+		}
+		break
+	}
+	if starts != len(scenarios) {
+		t.Errorf("Expected %d scenario starts, got %d", len(scenarios), starts)
+	}
+}

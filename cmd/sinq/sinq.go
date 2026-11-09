@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -19,7 +20,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -40,17 +40,30 @@ import (
 	"veitangie.dev/spinq"
 )
 
+const (
+	codeSuccess int = iota
+	codeRunFailure
+	codeRunError
+	codeSetupError
+	codeAborted int = 130
+)
+
 const sinqLuaPath = "SINQ_LUA_PATH"
 
 var stdout io.Writer = os.Stdout
 var stderr spinq.Writer = spinq.WriterPassthrough{Writer: os.Stderr}
 var isInCi = os.Getenv("NO_COLOR") != "" || os.Getenv("SINQ_NO_COLOR") != "" || os.Getenv("CI") != ""
 
-func populateConfigInRuntime(cfg *config.Config) error {
+func populateConfigInRuntime(cfg *config.Config) (string, error) {
 	if len(cfg.LuaPaths) == 0 {
 		if path, ok := os.LookupEnv(sinqLuaPath); ok {
 			cfg.LuaPaths = filepath.SplitList(path)
 		}
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
 
 	needToAddCwd := true
@@ -62,7 +75,7 @@ func populateConfigInRuntime(cfg *config.Config) error {
 	for idx := range cfg.LuaPaths {
 		abs, err := filepath.Abs(cfg.LuaPaths[idx])
 		if err != nil {
-			return err
+			return wd, err
 		}
 
 		cfg.LuaPaths[idx] = abs
@@ -71,21 +84,16 @@ func populateConfigInRuntime(cfg *config.Config) error {
 	for _, path := range cfg.Paths {
 		abs, err := filepath.Abs(path)
 		if err != nil {
-			return err
+			return wd, err
 		}
 
 		cfg.LuaPaths = append(cfg.LuaPaths, abs)
 	}
 
 	if needToAddCwd {
-		wd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-
 		cfg.LuaPaths = append(cfg.LuaPaths, wd)
 	}
-	return nil
+	return wd, nil
 }
 
 func setupSpinner(color bool, ctx context.Context) (context.CancelFunc, func(*slog.Logger)) {
@@ -133,11 +141,22 @@ func setupSpinner(color bool, ctx context.Context) (context.CancelFunc, func(*sl
 	return func() {}, func(*slog.Logger) {}
 }
 
-func parseFilePath(ctx context.Context, path string, walker *treewalker.Treewalker) ([]scenario.ScenarioBlueprint, OSRootWorkspace, error) {
+func indentedError(err error) string {
+	lines := strings.Split(strings.TrimRight(err.Error(), "\n"), "\n")
+	for i := range lines {
+		lines[i] = "  " + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func parseFilePath(ctx context.Context, cwd, path string, walker *treewalker.Treewalker) ([]scenario.ScenarioBlueprint, OSRootWorkspace, error) {
 	fs := OSRootWorkspace{}
 	stat, err := os.Stat(path)
 	if err != nil {
-		return nil, fs, fmt.Errorf("Failed to stat %s: %w\n", path, err)
+		if pathErr, ok := errors.AsType[*iofs.PathError](err); ok {
+			err = pathErr.Err
+		}
+		return nil, fs, fmt.Errorf("%s: %w", path, err)
 	}
 
 	wsPath := path
@@ -145,29 +164,34 @@ func parseFilePath(ctx context.Context, path string, walker *treewalker.Treewalk
 		wsPath = filepath.Dir(path)
 	}
 
+	absWsPath, err := filepath.Abs(wsPath)
+	if err != nil {
+		return nil, fs, fmt.Errorf("%s: Failed to get the absolute path: %w", wsPath, err)
+	}
+
+	rootName, err := filepath.Rel(cwd, absWsPath)
+	if err != nil {
+		rootName = wsPath
+	}
+
 	fs, err = NewOSRootWorkspace(wsPath)
 	if err != nil {
-		return nil, fs, fmt.Errorf("Failed to open filetree at %s: %s\n", wsPath, err)
+		return nil, fs, fmt.Errorf("%s: Failed to open the folder: %w", wsPath, err)
 	}
 
 	var res []scenario.ScenarioBlueprint
-	rootName := wsPath
-
-	if abs, err := filepath.Abs(rootName); err == nil {
-		rootName = filepath.Base(abs)
-	}
 
 	if stat.IsDir() {
 		var err error
 		newCtx := context.WithValue(ctx, treewalker.PathCtxKey, path)
 		res, err = walker.ParseFiletree(newCtx, fs, rootName)
 		if err != nil {
-			return nil, fs, fmt.Errorf("Error: Failed to parse filetree from %s: %s\n", path, err)
+			return nil, fs, err
 		}
 	} else {
-		resOne, err := walker.ParseSingleFile(fs, path)
+		resOne, err := walker.ParseSingleFile(fs, path, rootName)
 		if err != nil {
-			return nil, fs, fmt.Errorf("Error: Failed to parse %s: %s\n", path, err)
+			return nil, fs, err
 		}
 
 		res = []scenario.ScenarioBlueprint{resOne}
@@ -190,38 +214,38 @@ func sinq(args []string) int {
 	cfgParser := config.NewParser(stderr)
 	err := cfgParser.Parse(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: Failed to parse flags: %s\n", err.Error())
-		return 1
+		fmt.Fprintf(stderr, "Error: Failed to parse flags:\n%s\n", err.Error())
+		return codeSetupError
 	}
 	cfg := cfgParser.Result()
 
 	if cfg.Completion {
 		if handleCompletion() {
-			return 0
+			return codeSuccess
 		}
 
-		return 1
+		return codeSetupError
 	}
 
 	infoPrinter, err := standard.NewInfoPrinter(stdout, version)
 	if err != nil {
-		return 1
+		return codeSetupError
 	}
 
 	if cfg.Help {
 		err = infoPrinter.PrintHelp()
 		if err != nil {
-			return 1
+			return codeSetupError
 		}
-		return 0
+		return codeSuccess
 	}
 
 	if cfg.Version {
 		err = infoPrinter.PrintVersion()
 		if err != nil {
-			return 1
+			return codeSetupError
 		}
-		return 0
+		return codeSuccess
 	}
 
 	wantColorOut := wantColor(os.Stdout, cfg)
@@ -235,14 +259,19 @@ func sinq(args []string) int {
 	}
 	err = infoPrinter.SetWriter(stdout)
 	if err != nil {
-		return 1
+		return codeSetupError
 	}
 
-	err = populateConfigInRuntime(&cfg)
+	cwd, err := populateConfigInRuntime(&cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: Failed to enrich configuration in runtime: %s\n", err.Error())
+		fmt.Fprintf(stderr, "Error: Failed to enrich configuration in runtime:\n%s\n", err.Error())
 		fmt.Fprint(stderr, "Will proceed without runtime configuration\n")
 		cfg.LuaPaths = []string{}
+	}
+
+	if cwd == "" {
+		fmt.Fprint(stderr, "Error: Failed to find current working directory\n")
+		fmt.Fprint(stderr, "Will proceed without current working directory\n")
 	}
 
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
@@ -250,33 +279,34 @@ func sinq(args []string) int {
 
 	eb, err := event.NewBus(cfg.Workers*2, logger)
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: Failed to construct event bus: %s\n", err.Error())
-		return 1
+		fmt.Fprintf(stderr, "Error: Failed to construct event bus:\n%s\n", err.Error())
+		return codeSetupError
 	}
 	eb.Start()
 	defer eb.Close()
 	logger.Debug("[sinq] Initialization complete", "duration", mainTimer.Time())
 
-	walker, err := treewalker.NewTreewalker(cfg, eb, scenario.ParseRequestBlueprints, scenario.ParseConfig)
+	walker, err := treewalker.NewTreewalker(cfg, eb, scenario.ParseStageBlueprints, scenario.ParseConfig, cwd)
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: Failed to construct treewalker: %s\n", err.Error())
-		return 1
+		fmt.Fprintf(stderr, "Error: Failed to construct treewalker:\n%s\n", err.Error())
+		return codeSetupError
 	}
 	discoveryTimer := timer.NewTimer(timer.DefaultClock{})
 
 	secrets, err := walker.ParseSecrets()
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: %s\n", err.Error())
-		return 1
+		fmt.Fprintf(stderr, "Error:\n%s\n", err.Error())
+		return codeSetupError
 	}
 
 	scenarioCount := 0
 	willRunCount := 0
 	allScenarios := []runner.ScenarioBundle{}
+	var treewalkerErr error
 	for _, path := range cfg.Paths {
-		res, fs, err := parseFilePath(ctx, path, walker)
+		res, fs, err := parseFilePath(ctx, cwd, path, walker)
 		if err != nil {
-			fmt.Fprint(stderr, err.Error())
+			treewalkerErr = errors.Join(treewalkerErr, err)
 		}
 
 		defer func(fs OSRootWorkspace) {
@@ -285,13 +315,13 @@ func sinq(args []string) int {
 			}
 			err := fs.root.Close()
 			if err != nil {
-				fmt.Fprintf(stderr, "Failed to close filetree at %s: %s\n", fs.String(), err.Error())
+				fmt.Fprintf(stderr, "Failed to close filetree at %s:\n%s\n", fs.String(), err.Error())
 			}
 		}(fs)
 
 		if ctx.Err() != nil {
 			fmt.Fprint(stderr, "Received interrupt signal, shutting down\n")
-			return 1
+			return codeAborted
 		}
 
 		allScenarios = slices.Grow(allScenarios, len(res))
@@ -310,18 +340,23 @@ func sinq(args []string) int {
 	}
 	logger.Debug("[sinq] Discovery complete", "duration", discoveryTimer.Time())
 
+	if treewalkerErr != nil {
+		fmt.Fprintf(stderr, "Error: Failed to parse scenarios:\n%s\n", indentedError(treewalkerErr))
+		return codeSetupError
+	}
+
 	if cfg.List {
 		err = infoPrinter.PrintScenarios(allScenarios, cfg, wantColorOut)
 		if err != nil {
-			logger.Error("[sinq] Failed to list scenarios", "error", err.Error())
-			return 1
+			fmt.Fprintf(stderr, "Error: Failed to list scenarios:\n%s\n", indentedError(err))
+			return codeSetupError
 		}
-		return 0
+		return codeSuccess
 	}
 
 	if willRunCount == 0 {
-		fmt.Fprintf(stderr, "Error: No scenarios to run. Did you mistype filters?\n")
-		return 1
+		fmt.Fprint(stderr, "Error: No scenarios to run. Did you mistype filters?\n")
+		return codeSetupError
 	}
 
 	if os.Getenv("CI") != "" {
@@ -329,7 +364,7 @@ func sinq(args []string) int {
 			fmt.Fprintf(stderr, "WARNING: Running in a CI environment with --log-level debug. This risks leaking secrets in CI logs.\n")
 		}
 		if cfg.DumpOnFailure {
-			fmt.Fprintf(stderr, "WARNING: Running in a CI environment with --dump-on-failure. This risks leaking secrets in CI logs if requests fail.\n")
+			fmt.Fprintf(stderr, "WARNING: Running in a CI environment with --dump-on-failure. This risks leaking secrets in CI logs if stages fail.\n")
 		}
 	}
 
@@ -350,8 +385,8 @@ func sinq(args []string) int {
 
 	rn, err := runner.NewRunner(cfg, ctx, transport, eb, timer.DefaultClock{}, OSWorkspace{})
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: Failed to construct runner: %s\n", err.Error())
-		return 1
+		fmt.Fprintf(stderr, "Error: Failed to construct runner:\n%s\n", err.Error())
+		return codeSetupError
 	}
 
 	agg := aggregator.NewAggregator()
@@ -379,6 +414,7 @@ func handleReporting(
 	wantColorErr, wantColorOut bool,
 ) int {
 
+	res := 0
 	resultReporter := result.NewResultReporter()
 
 	report := reporter.NewPool(resultReporter)
@@ -389,13 +425,15 @@ func handleReporting(
 	}
 
 	if err != nil {
-		logger.Warn("[sinq] Failed to attach spinner reporter", "error", err)
+		logger.Debug("[sinq] Failed to attach spinner reporter", "error", err)
 	}
 
 	if cfg.Out != "" {
-		err := report.Register(createReporter(cfg, stderr, wantColorErr))
+		cloneCfg := cfg
+		cloneCfg.Format = "std"
+		err := report.Register(createReporter(cloneCfg, stderr, wantColorErr))
 		if err != nil {
-			logger.Warn("[sinq] Failed to attach reporter", "error", err)
+			logger.Debug("[sinq] Failed to attach reporter", "error", err)
 		}
 
 		var file *os.File
@@ -408,43 +446,56 @@ func handleReporting(
 		}
 
 		if err != nil {
-			fmt.Fprintf(stderr, "Error: Failed to open output file: %s\n", err.Error())
+			res = codeSetupError
+			fmt.Fprintf(stderr, "Error: Failed to open output file:\n%s\n", err.Error())
 		} else {
 			defer func() {
 				err := file.Close()
 				if err != nil {
-					fmt.Fprintf(stderr, "Error: Failed to close output file: %s\n", err.Error())
+					fmt.Fprintf(stderr, "Error: Failed to close output file:\n%s\n", err.Error())
 				}
 			}()
 
 			err = report.Register(createReporter(cfg, file, false))
 			if err != nil {
-				logger.Warn("[sinq] Failed to attach reporter", "error", err)
+				logger.Debug("[sinq] Failed to attach reporter", "error", err)
 			}
 		}
 	} else {
 		err := report.Register(createReporter(cfg, stdout, wantColorOut))
 		if err != nil {
-			logger.Warn("[sinq] Failed to attach reporter", "error", err)
+			logger.Debug("[sinq] Failed to attach reporter", "error", err)
 		}
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Go(func() {
-		err := report.Report(resultCh, durationCh, scenarioCount)
+	sig := make(chan error, 1)
+	go func() {
+		defer close(sig)
+		sig <- report.Report(resultCh, durationCh, scenarioCount)
+	}()
 
-		if err != nil {
-			fmt.Fprintf(stderr, "Error: Failed to report results: %s\n", err.Error())
-		}
-	})
-
-	wg.Wait()
-
-	if resultReporter.Success() {
-		return 0
+	err = <-sig
+	if err != nil {
+		logger.Debug("[sinq] Failed to report", "error", err)
+		fmt.Fprintf(stderr, "Error: Failed to report results:\n%s\n", err.Error())
+		res = codeSetupError
 	}
 
-	return 1
+	if res != 0 {
+		return res
+	}
+
+	switch resultReporter.Status() {
+	case event.Failure:
+		res = codeRunFailure
+	case event.Aborted:
+		res = codeAborted
+	case event.Error:
+		res = codeRunError
+	default:
+		res = codeSuccess
+	}
+	return res
 }
 
 func createReporter(cfg config.Config, out io.Writer, wantColor bool) reporter.Reporter {

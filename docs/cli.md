@@ -15,10 +15,10 @@ Multiple paths may be listed and are scanned independently.
 | Flag | Value | Default | Notes |
 | --- | --- | --- | --- |
 | `-w, --workers` | int | `10` | Number of scenarios run concurrently. Must be positive. |
-| `-c, --count` | int | `1` | Run every scenario this many times. Must be positive. Multiplies with `env_matrix` variants, so a scenario with a 4-way matrix and `--count 3` runs 12 times. With more than one run, each is reported with its run number, counting from 1, after the scenario name (`checkout#2`). |
+| `-c, --count` | int | `1` | Run every scenario this many times. Must be positive. Multiplies with `env_matrix` variants, so a scenario with a 4-way matrix and `--count 3` runs 12 times. With more than one run, each is reported with its run number, counting from 1, after the scenario name and any matrix labels (`checkout (admin, card) #2`; in JUnit, `checkout_admin_card#2`). |
 | `-i, --insecure` | | off | Skip TLS certificate verification. |
-| `-u, --unrestricted` | | off | Load the Lua `os` and `io` libraries. This disables the script sandbox; only use it with files you trust. See [Libraries](lua-api.md#12-libraries). |
-| `-l, --list` | | | Parse the paths and print the scenarios that would run, without executing them. |
+| `-u, --unrestricted` | | off | Load the Lua `os` and `io` libraries. This disables the script sandbox; only use it with files you trust. See [Libraries](lua-api.md#13-libraries). |
+| `-l, --list` | | | Parse the paths and print the scenarios that would run and their stages, without executing them. [Script-only stages](scenario.md#script-only-stages) are marked `(Lua only)`. |
 
 ### Selecting scenarios
 
@@ -44,11 +44,11 @@ A scenario's name comes from its `.scenario` file (`"name"`), defaulting to the 
 | `-f, --format` | `std` \| `junit` | `std` | Report format. `std` is the human-readable console report; `junit` is JUnit XML (see [CI/CD Integration](ci-cd-integration.md)). |
 | `-o, --out` | path | stdout | Write the report to a file instead of stdout. Missing parent directories are created. |
 | `-S, --show` | `all` \| `no-skip` \| `failed` \| `none` | `no-skip` | Which scenario results to include in the report. `std` format only; `junit` output always includes every result. |
-| `-V, --verbose` | | off | Add per-stage timings to each request in the report. `std` format only. |
+| `-V, --verbose` | | off | Add the duration of each lifecycle step to every stage in the report. `std` format only. |
 | `-p, --print` | | off | Capture Lua `print` / `io.write` output and attach it to the scenario result. Without this, that output is discarded. |
 | `-C, --color` | `always` \| `never` \| `auto` | `auto` | Terminal color. `auto` disables color when the output is not a TTY or when a CI/`NO_COLOR` environment variable is set. |
 | `--no-spinner` | | off | Disable the live spinner / progress bar. |
-| `--dump-on-failure` | | off | Print the full request and response of a request that failed, errored or was aborted. May expose secrets; use with care in CI where logs are retained. |
+| `--dump-on-failure` | | off | Print the full request and response of a stage that failed, errored or was aborted. May expose secrets; use with care in CI where logs are retained. |
 | `-L, --log-level` | `debug` \| `info` \| `warn` \| `error` | `warn` | Diagnostic log verbosity, written to stderr. `debug` includes request/response bodies and may expose secrets. |
 
 ### Overrides and inputs
@@ -58,7 +58,7 @@ A scenario's name comes from its `.scenario` file (`"name"`), defaulting to the 
 | `-e, --env` | `key=value` | | Override an environment value for every scenario. Repeatable. Keys use dot-notation for nesting (`API.TIMEOUT=500`) and values are parsed as JSON, so arrays and objects work (`HOSTS=["a","b"]`). |
 | `-s, --secret` | `key=value` | | Same as `--env`, but for the `secrets` table. Repeatable. |
 | `--secrets-file` | path | | Load `secrets` from a JSON file. Values from `--secret` override individual keys. |
-| `--plugins` | path | | Directories to add to the Lua `require` search path. Join multiple with `:` (`;` on Windows), or pass the flag more than once. Takes precedence over `SINQ_LUA_PATH`. See [Libraries](lua-api.md#12-libraries). |
+| `--plugins` | path | | Directories to add to the Lua `require` search path. Join multiple with `:` (`;` on Windows), or pass the flag more than once. Takes precedence over `SINQ_LUA_PATH`. See [Libraries](lua-api.md#13-libraries). |
 
 ### Caching
 
@@ -91,7 +91,12 @@ These tune the opt-in per-request response cache (`req.cache(true)` or `req.cach
 | Code | Meaning |
 | --- | --- |
 | `0` | Every scenario ran and passed. |
-| `1` | A scenario failed an assertion, errored or was aborted (`Ctrl+C`), the arguments were invalid, or no scenario was selected to run (none found, or the filters excluded all of them). |
+| `1` | At least one assertion failed, and nothing worse happened. |
+| `2` | At least one stage errored: a request still got no response after `$RETRY`, a scenario hit its `timeout`, a script raised an error, and so on (everything the JUnit report marks as `<error>`). |
+| `3` | The run couldn't be set up: invalid arguments, a path that doesn't exist or fails to parse, a secrets file that can't be read, a `--out` file that can't be written, or no scenario selected to run (none found, or the filters excluded all of them). |
+| `130` | The run was cancelled (`Ctrl+C` / `SIGINT`, or `SIGTERM`) before anything failed or errored. |
+
+When several apply, the most severe wins: `3`, then `2`, then `1`, then `130`. A cancelled run that already had a failing assertion exits `1`. To publish results without failing the job on assertion failures alone, let your CI accept `1`; see [CI/CD Integration](ci-cd-integration.md#exit-codes).
 
 ## Examples
 

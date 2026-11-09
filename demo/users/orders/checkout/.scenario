@@ -1,5 +1,6 @@
 {
   "name": "Checkout",
+  "env": { "WEBHOOK_SECRET": "demo-webhook-secret" },
   "env_matrix": [
     {
       "card": { "method": "card", "expected_status": 200 },

@@ -74,13 +74,13 @@ plugins:
           - authoring.md: Writing scenarios, common patterns, a Lua API cheat-sheet, and how to debug failures.
         Reference:
           - cli.md: Every flag, the scenario filters, environment variables, and exit codes.
-          - scenario.md: The .sinq format, the .scenario config schema, and the request lifecycle.
-          - lua-api.md: Full Lua API - globals, hooks, encoding, crypto, jwt, json, fake data, retry and assert helpers.
+          - scenario.md: The .sinq format, the .scenario config schema, and the stage lifecycle.
+          - lua-api.md: Full Lua API - globals, hooks, encoding, crypto, jwt, json, fake data, regex, retry and assert helpers.
           - env-matrix.md: Running a scenario once per combination of environment values.
           - ci-cd-integration.md: Exit codes and the JUnit XML mapping.
           - versioning.md: What the SemVer compatibility promise covers.
         Architecture:
-          - overview.md: The three stages - discovery, execution, reporting.
+          - overview.md: The three phases - discovery, execution, reporting.
           - treewalker.md: How directories become scenarios and how config is inherited.
           - runner.md: The worker pool, isolation, caching, and cancellation.
         Background:

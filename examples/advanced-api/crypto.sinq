@@ -1,3 +1,4 @@
+### Sign a request
 POST ${env.BASE_URL}/advanced/crypto
 X-Signature: ${env.signature}
 X-Base64-Signature: ${env.b64_sig}
@@ -13,4 +14,19 @@ $PRE{
 
 $ASSERT{
     sinq.assert.code(200)
+}
+
+### Verify a download's checksums
+GET ${env.BASE_URL}/advanced/crypto/blob
+
+$ASSERT{
+    sinq.assert.code(200)
+    local body = res.bodyRaw
+
+    -- Header names arrive in canonical form: Content-Md5, not Content-MD5.
+    -- Content-MD5 holds the base64 of the raw digest.
+    sinq.assert.equals(sinq.crypto.md5(body, "base64"), res.headers["Content-Md5"], "MD5 mismatch")
+    sinq.assert.equals(sinq.crypto.sha1(body), res.headers["X-Checksum-Sha1"], "SHA-1 mismatch")
+    sinq.assert.equals(sinq.crypto.sha256(body), res.headers["X-Checksum-Sha256"], "SHA-256 mismatch")
+    sinq.assert.equals(sinq.crypto.sha512(body, "base64url"), res.headers["X-Checksum-Sha512"], "SHA-512 mismatch")
 }

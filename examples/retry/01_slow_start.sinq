@@ -1,0 +1,15 @@
+### Wait for a slow start
+GET ${env.BASE_URL}/retry/slow-start
+
+$RETRY{
+    -- An attempt that got no response has res.error set and no res.code.
+    if res.error then
+        return sinq.retry.whenExponential(res.error.kind == "timeout", 2, 10)
+    end
+    return sinq.retry.stop
+}
+
+$ASSERT{
+    sinq.assert.code(200)
+    sinq.assert.isTrue(res.attempt > 1, "Expected the first attempt to time out")
+}

@@ -33,7 +33,7 @@ const (
 	PathCtxKey TreewalkerCtxKey = "path"
 )
 
-type ParseRequestsFunc func(io.Reader, string) ([]*scenario.RequestBlueprint, error)
+type ParseStagesFunc func(io.Reader, string, string) ([]*scenario.StageBlueprint, error)
 type ParseScenarioConfigFunc func(*scenario.ScenarioConfig, io.Reader) error
 
 type task struct {
@@ -45,15 +45,17 @@ type task struct {
 type Treewalker struct {
 	cfg                 config.Config
 	eb                  *event.Bus
-	parseRequest        ParseRequestsFunc
+	parseStages         ParseStagesFunc
 	parseScenarioConfig ParseScenarioConfigFunc
 	seqId               *atomic.Int64
 	eventSeq            *atomic.Int64
+	workerEnvs          []workerEnv
+	cwdName             string
 }
 
-func NewTreewalker(cfg config.Config, eb *event.Bus, parseRequest ParseRequestsFunc, parseScenarioConfig ParseScenarioConfigFunc) (*Treewalker, error) {
-	if parseRequest == nil {
-		return nil, errors.New("empty parse request function")
+func NewTreewalker(cfg config.Config, eb *event.Bus, parseStages ParseStagesFunc, parseScenarioConfig ParseScenarioConfigFunc, cwdName string) (*Treewalker, error) {
+	if parseStages == nil {
+		return nil, errors.New("empty parse stage function")
 	}
 	if parseScenarioConfig == nil {
 		return nil, errors.New("empty parse scenario config function")
@@ -61,7 +63,26 @@ func NewTreewalker(cfg config.Config, eb *event.Bus, parseRequest ParseRequestsF
 	if eb == nil {
 		return nil, errors.New("empty EventBus")
 	}
-	return &Treewalker{cfg, eb, parseRequest, parseScenarioConfig, &atomic.Int64{}, &atomic.Int64{}}, nil
+	if cfg.Workers <= 0 {
+		return nil, fmt.Errorf("worker count non-positive: %d", cfg.Workers)
+	}
+	stageCache := make(map[string][]*scenario.StageBlueprint)
+	stageCacheLock := sync.RWMutex{}
+	scenarioConfigCache := make(map[string]scenario.ScenarioConfig)
+	scenarioConfigCacheLock := sync.RWMutex{}
+
+	res := &Treewalker{cfg, eb, parseStages, parseScenarioConfig, &atomic.Int64{}, &atomic.Int64{}, make([]workerEnv, 0, cfg.Workers), cwdName}
+	for wIdx := range cfg.Workers {
+		res.workerEnvs = append(res.workerEnvs, workerEnv{
+			id:                      wIdx + 1,
+			stageCache:              stageCache,
+			scenarioConfigCache:     scenarioConfigCache,
+			stageCacheLock:          &stageCacheLock,
+			scenarioConfigCacheLock: &scenarioConfigCacheLock,
+			t:                       res,
+		})
+	}
+	return res, nil
 }
 
 const coordinatorId = 0
@@ -74,16 +95,28 @@ func newEvent(kind event.EventType, workerId int) event.Event {
 	}
 }
 
-func errAttr(err error) slog.Attr {
-	return slog.String("error", err.Error())
-}
-
 func (t *Treewalker) log(level slog.Level, msg string, attrs ...slog.Attr) event.Event {
 	e := newEvent(event.Log, coordinatorId)
 	e.Level = level
 	e.Message = msg
 	e.Attrs = attrs
 	return e
+}
+
+func located(path string, err error) error {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		errs := joined.Unwrap()
+		res := make([]error, 0, len(errs))
+		for _, e := range errs {
+			res = append(res, located(path, e))
+		}
+		return errors.Join(res...)
+	}
+
+	if posErr, ok := err.(scenario.PositionError); ok {
+		return fmt.Errorf("%s:%d:%d: %w", path, posErr.Line, posErr.Offset, posErr.Err)
+	}
+	return fmt.Errorf("%s: %w", path, err)
 }
 
 func (t *Treewalker) send(es ...event.Event) {
@@ -93,7 +126,7 @@ func (t *Treewalker) send(es ...event.Event) {
 	t.eb.Send(context.Background(), es...)
 }
 
-const requestFiletype string = ".sinq"
+const stagesFiletype string = ".sinq"
 const scenarioConfigFiletype string = ".scenario"
 
 func (t *Treewalker) nextSeqId() (seqId int) {
@@ -109,8 +142,8 @@ func (t *Treewalker) exploreFS(ctx context.Context, cancelCtx context.CancelCaus
 
 	entries, err := fs.ReadDir(fileSystem, directoryName)
 	if err != nil {
-		t.send(t.log(slog.LevelError, "[Treewalker] An error occurred while exploring the file system", errAttr(err), slog.String("directory", directoryName)))
-		err = fmt.Errorf("Error on path: %s: %w", directoryName, err)
+		t.send(t.log(slog.LevelDebug, "[Treewalker] An error occurred while exploring the file system", event.ErrAttr(err), slog.String("directory", directoryName)))
+		err = located(filepath.Join(rootName, directoryName), fmt.Errorf("Failed to read directory: %w", err))
 		select {
 		case errorCh <- err:
 		case <-ctx.Done():
@@ -136,7 +169,7 @@ func (t *Treewalker) exploreFS(ctx context.Context, cancelCtx context.CancelCaus
 			continue
 		}
 
-		if entry.Type().IsRegular() && (strings.HasSuffix(entry.Name(), requestFiletype) || strings.HasSuffix(entry.Name(), scenarioConfigFiletype)) {
+		if entry.Type().IsRegular() && (strings.HasSuffix(entry.Name(), stagesFiletype) || strings.HasSuffix(entry.Name(), scenarioConfigFiletype)) {
 			toPrepend = append(toPrepend, path.Join(directoryName, entry.Name()))
 		}
 	}
@@ -172,7 +205,7 @@ func (t *Treewalker) startExploration(ctx context.Context, cancelCtx context.Can
 	return taskCh
 }
 
-func (t *Treewalker) ParseSingleFile(fileSystem fs.FS, filename string) (scenario.ScenarioBlueprint, error) {
+func (t *Treewalker) ParseSingleFile(fileSystem fs.FS, filename, rootName string) (scenario.ScenarioBlueprint, error) {
 	totalTimer := timer.NewTimer(timer.DefaultClock{})
 	defer func() {
 		t.send(t.discoveryFinished(filename, totalTimer))
@@ -182,16 +215,16 @@ func (t *Treewalker) ParseSingleFile(fileSystem fs.FS, filename string) (scenari
 	base := filepath.Base(filename)
 	file, err := fileSystem.Open(base)
 	if err != nil {
-		return res, err
+		return res, located(filepath.Join(rootName, base), fmt.Errorf("Failed to open file: %w", err))
 	}
 
-	requests, err := t.parseRequest(file, base)
+	stages, err := t.parseStages(file, base, rootName)
 	file.Close()
 	if err != nil {
-		return res, err
+		return res, located(filepath.Join(rootName, base), err)
 	}
 
-	res.Requests = requests
+	res.Stages = stages
 
 	cfg := scenario.SaneDefaultConfig()
 	cfg.Name = base
@@ -266,7 +299,7 @@ func (t *Treewalker) ParseSecrets() (map[string]any, error) {
 	if len(t.cfg.Treewalker.SecretsFile) > 0 {
 		bytes, err := os.ReadFile(t.cfg.Treewalker.SecretsFile)
 		if err != nil {
-			t.send(t.log(slog.LevelDebug, "[Treewalker] Failed to read file to parse secrets", errAttr(err)))
+			t.send(t.log(slog.LevelDebug, "[Treewalker] Failed to read file to parse secrets", event.ErrAttr(err)))
 			if os.IsNotExist(err) {
 				return nil, fmt.Errorf("Secrets file %s does not exist", t.cfg.Treewalker.SecretsFile)
 			}
@@ -276,7 +309,7 @@ func (t *Treewalker) ParseSecrets() (map[string]any, error) {
 		if len(bytes) > 0 {
 			err = json.Unmarshal(bytes, &secrets)
 			if err != nil {
-				t.send(t.log(slog.LevelDebug, "[Treewalker] Failed to unmarshal secrets", errAttr(err)))
+				t.send(t.log(slog.LevelDebug, "[Treewalker] Failed to unmarshal secrets", event.ErrAttr(err)))
 				return nil, errors.New("Failed to unmarshal secrets")
 			}
 		}

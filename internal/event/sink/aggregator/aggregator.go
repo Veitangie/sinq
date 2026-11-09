@@ -22,9 +22,10 @@ func NewAggregator() *Aggregator {
 	}
 }
 
-type RequestResult struct {
+type StageResult struct {
 	FailedAssertions []string
 	Name             string
+	Filename         string
 	ErrorMessage     string
 	Request          string
 	Response         string
@@ -42,54 +43,54 @@ type RequestResult struct {
 }
 
 type ScenarioResult struct {
-	Tags           []string
-	Labels         []string
-	RequestResults []RequestResult
-	Name           string
-	Output         *bytes.Buffer
-	StartedAt      time.Time
-	TotalDuration  time.Duration
-	Status         event.ResultStatus
-	CntId          int
-	TotalRunCount  int
+	Tags          []string
+	Labels        []string
+	StageResults  []StageResult
+	Name          string
+	Output        *bytes.Buffer
+	StartedAt     time.Time
+	TotalDuration time.Duration
+	Status        event.ResultStatus
+	CntId         int
+	TotalRunCount int
 }
 
 type enrichedScenarioResult struct {
-	Tags           []string
-	Labels         []string
-	RequestResults []enrichedRequestResult
-	Name           string
-	Output         *bytes.Buffer
-	StartedAt      time.Time
-	TotalDuration  time.Duration
-	Status         event.ResultStatus
-	CntId          int
-	TotalRunCount  int
+	Tags          []string
+	Labels        []string
+	StageResults  []enrichedStageResult
+	Name          string
+	Output        *bytes.Buffer
+	StartedAt     time.Time
+	TotalDuration time.Duration
+	Status        event.ResultStatus
+	CntId         int
+	TotalRunCount int
 }
 
 func (e enrichedScenarioResult) output() ScenarioResult {
 	res := ScenarioResult{
-		Tags:           e.Tags,
-		Labels:         e.Labels,
-		RequestResults: make([]RequestResult, 0, len(e.RequestResults)),
-		Name:           e.Name,
-		Output:         e.Output,
-		StartedAt:      e.StartedAt,
-		TotalDuration:  e.TotalDuration,
-		Status:         e.Status,
-		CntId:          e.CntId,
-		TotalRunCount:  e.TotalRunCount,
+		Tags:          e.Tags,
+		Labels:        e.Labels,
+		StageResults:  make([]StageResult, 0, len(e.StageResults)),
+		Name:          e.Name,
+		Output:        e.Output,
+		StartedAt:     e.StartedAt,
+		TotalDuration: e.TotalDuration,
+		Status:        e.Status,
+		CntId:         e.CntId,
+		TotalRunCount: e.TotalRunCount,
 	}
 
-	for _, er := range e.RequestResults {
-		res.RequestResults = append(res.RequestResults, er.RequestResult)
+	for _, er := range e.StageResults {
+		res.StageResults = append(res.StageResults, er.StageResult)
 	}
 
 	return res
 }
 
-type enrichedRequestResult struct {
-	RequestResult
+type enrichedStageResult struct {
+	StageResult
 	keepDumps bool
 }
 
@@ -146,9 +147,10 @@ func (a *Aggregator) AggregateOver(es <-chan event.Event) (<-chan ScenarioResult
 				if e.Flags&event.SkippedScenarioMask != 0 {
 					res.Status = event.Skipped
 				}
-				res.RequestResults = make([]enrichedRequestResult, len(e.RequestNames))
-				for idx := range res.RequestResults {
-					res.RequestResults[idx].Name = e.RequestNames[idx]
+				res.StageResults = make([]enrichedStageResult, len(e.StageNames))
+				for idx := range res.StageResults {
+					res.StageResults[idx].Name = e.StageNames[idx].Name
+					res.StageResults[idx].Filename = e.StageNames[idx].Filename
 				}
 				continue
 			case event.RunnerDone:
@@ -170,8 +172,8 @@ func (a *Aggregator) AggregateOver(es <-chan event.Event) (<-chan ScenarioResult
 				continue
 			}
 
-			eventIsRequest := e.Kind >= event.RequestStart && e.Kind <= event.RequestEnd
-			if eventIsRequest && (e.RequestIdx >= len(res.RequestResults) || e.RequestIdx < 0) {
+			eventIsStage := e.Kind >= event.StageStart && e.Kind <= event.StageEnd
+			if eventIsStage && (e.StageIdx >= len(res.StageResults) || e.StageIdx < 0) {
 				continue
 			}
 
@@ -184,30 +186,30 @@ func (a *Aggregator) AggregateOver(es <-chan event.Event) (<-chan ScenarioResult
 
 func (a *Aggregator) handleEvent(resCh chan<- ScenarioResult, res *enrichedScenarioResult, e event.Event) {
 	switch e.Kind {
-	case event.RequestStart:
+	case event.StageStart:
 		if res.Status == event.Unset {
 			res.Status = event.Success
 		}
-		if res.RequestResults[e.RequestIdx].StartedAt.IsZero() {
-			res.RequestResults[e.RequestIdx].StartedAt = e.StartedAt
+		if res.StageResults[e.StageIdx].StartedAt.IsZero() {
+			res.StageResults[e.StageIdx].StartedAt = e.StartedAt
 		}
 	case event.PreScript:
-		res.RequestResults[e.RequestIdx].Pre += e.Duration
+		res.StageResults[e.StageIdx].Pre += e.Duration
 	case event.Materialization:
-		res.RequestResults[e.RequestIdx].Materialization += e.Duration
+		res.StageResults[e.StageIdx].Materialization += e.Duration
 	case event.Parsing:
-		res.RequestResults[e.RequestIdx].Parsing += e.Duration
+		res.StageResults[e.StageIdx].Parsing += e.Duration
 	case event.Execution:
-		res.RequestResults[e.RequestIdx].Execution += e.Duration
-		res.RequestResults[e.RequestIdx].Attempts += 1
+		res.StageResults[e.StageIdx].Execution += e.Duration
+		res.StageResults[e.StageIdx].Attempts += 1
 	case event.RetryScript:
-		res.RequestResults[e.RequestIdx].Retry += e.Duration
+		res.StageResults[e.StageIdx].Retry += e.Duration
 	case event.AssertScript:
-		res.RequestResults[e.RequestIdx].Assert += e.Duration
+		res.StageResults[e.StageIdx].Assert += e.Duration
 	case event.PostScript:
-		res.RequestResults[e.RequestIdx].Post += e.Duration
-	case event.RequestEnd:
-		res.RequestResults[e.RequestIdx].Total += e.Duration
+		res.StageResults[e.StageIdx].Post += e.Duration
+	case event.StageEnd:
+		res.StageResults[e.StageIdx].Total += e.Duration
 		switch e.Status {
 		case event.Failure:
 			fallthrough
@@ -215,26 +217,26 @@ func (a *Aggregator) handleEvent(resCh chan<- ScenarioResult, res *enrichedScena
 			fallthrough
 		case event.Aborted:
 			res.Status = max(res.Status, e.Status)
-			if !res.RequestResults[e.RequestIdx].keepDumps {
-				res.RequestResults[e.RequestIdx].Request = withNewline(e.Request)
-				res.RequestResults[e.RequestIdx].Response = withNewline(e.Response)
-				res.RequestResults[e.RequestIdx].keepDumps = true
+			if !res.StageResults[e.StageIdx].keepDumps {
+				res.StageResults[e.StageIdx].Request = withNewline(e.Request)
+				res.StageResults[e.StageIdx].Response = withNewline(e.Response)
+				res.StageResults[e.StageIdx].keepDumps = true
 			}
 		default:
-			if !res.RequestResults[e.RequestIdx].keepDumps {
-				res.RequestResults[e.RequestIdx].Request = ""
-				res.RequestResults[e.RequestIdx].Response = ""
+			if !res.StageResults[e.StageIdx].keepDumps {
+				res.StageResults[e.StageIdx].Request = ""
+				res.StageResults[e.StageIdx].Response = ""
 			}
 		}
 
 		if len(e.FailedAssertions) != 0 {
-			res.RequestResults[e.RequestIdx].FailedAssertions = append(res.RequestResults[e.RequestIdx].FailedAssertions, e.FailedAssertions...)
+			res.StageResults[e.StageIdx].FailedAssertions = append(res.StageResults[e.StageIdx].FailedAssertions, e.FailedAssertions...)
 		}
-		if res.RequestResults[e.RequestIdx].ErrorMessage == "" {
-			res.RequestResults[e.RequestIdx].ErrorMessage = e.ErrorString
+		if res.StageResults[e.StageIdx].ErrorMessage == "" {
+			res.StageResults[e.StageIdx].ErrorMessage = e.ErrorString
 		}
 
-		res.RequestResults[e.RequestIdx].Status = max(res.RequestResults[e.RequestIdx].Status, e.Status)
+		res.StageResults[e.StageIdx].Status = max(res.StageResults[e.StageIdx].Status, e.Status)
 	case event.ScenarioEnd:
 		delete(a.store, e.RunId)
 

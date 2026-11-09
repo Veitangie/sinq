@@ -16,6 +16,11 @@ $ASSERT{
     local resp_body = res.json()
     assert(resp_body.status == "verified", "Expected verified status")
 
-    local decoded = sinq.jwt.verify(env.jwt_token, secrets.JWT_SECRET)
+    local decoded = sinq.jwt.verify(env.jwt_token, secrets.JWT_SECRET, "HS256")
     assert(decoded.claims.sub == "user-123", "sub match")
+
+    -- decode reads a token without checking its signature.
+    local unverified = sinq.jwt.decode(env.jwt_token)
+    sinq.assert.equals(unverified.method, "HS256")
+    sinq.assert.equals(unverified.claims.role, "admin")
 }

@@ -4,7 +4,7 @@ The **Runner** executes the scenarios the Treewalker discovered.
 
 ## Concurrent Execution
 
-The unit of concurrency is the **scenario**, not the individual request. `sinq` runs a fixed pool of workers (10 by default, set with `-w` / `--workers`), and each worker runs one scenario at a time. Requests inside a scenario always run in order; unrelated scenarios overlap.
+The unit of concurrency is the **scenario**, not the individual stage. `sinq` runs a fixed pool of workers (10 by default, set with `-w` / `--workers`), and each worker runs one scenario at a time. Stages inside a scenario always run in order; unrelated scenarios overlap.
 
 The Treewalker produces a list of scenario runs. The coordinator feeds them into a channel, and each worker pulls the next one when it finishes the current one.
 
@@ -27,4 +27,4 @@ That shared call belongs to no single scenario, so it is bounded by `--cache-tim
 ## Cancellation
 
 * **Scenario `timeout`:** in-flight requests are dropped, sleeping `$RETRY` loops wake, and the scenario ends with an **Error** (deadline exceeded).
-* **`SIGINT` / `Ctrl+C`:** the same, but running scenarios are marked **Aborted** and the remaining ones are not started.
+* **`SIGINT` / `Ctrl+C`** (or `SIGTERM`): the same, but running scenarios are marked **Aborted**. Scenarios that hadn't started yet are not started and don't appear in the report. The run exits with `130`, unless something had already failed or errored (see [Exit codes](cli.md#exit-codes)).

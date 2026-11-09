@@ -14,10 +14,9 @@ import (
 	"veitangie.dev/sinq/internal/config"
 	"veitangie.dev/sinq/internal/event"
 	"veitangie.dev/sinq/internal/event/sink/aggregator"
+	"veitangie.dev/sinq/internal/ui"
 	"veitangie.dev/spinq"
 )
-
-const LightGray = "\033[38;5;244m"
 
 type reportData struct {
 	cfg                    config.ReporterConfig
@@ -34,13 +33,12 @@ type reportData struct {
 	ranScenarios           int
 	successfulScenarios    int
 	abortedScenarios       int
-	totalRequests          int
-	ranRequests            int
-	successfulRequests     int
-	abortedRequests        int
-	prefixedLabelsWriter   *prefixedWriter
+	totalStages            int
+	ranStages              int
+	successfulStages       int
+	abortedStages          int
 	prefixedScenarioWriter *prefixedWriter
-	prefixedRequestWriter  *prefixedWriter
+	prefixedStageWriter    *prefixedWriter
 	prefixedVerboseWriter  *prefixedWriter
 	writer                 io.Writer
 	printed                bool
@@ -64,12 +62,11 @@ func newReportData(cfg config.ReporterConfig, writer io.Writer, size int) *repor
 		result.markSkipped = spinq.Gray + result.markSkipped + spinq.ResetStyle
 		result.cyan = spinq.Cyan
 		result.magenta = spinq.Magenta
-		result.lightGray = LightGray
+		result.lightGray = ui.LightGray
 		result.reset = spinq.ResetStyle
 	}
-	result.prefixedLabelsWriter = &prefixedWriter{prefix: []byte{' ', ' ', ' ', ' ', ' '}, underlying: writer}
 	result.prefixedScenarioWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "   %s┃%s ", result.magenta, result.reset), underlying: writer}
-	result.prefixedRequestWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "     %s┃%s ", result.cyan, result.reset), underlying: writer}
+	result.prefixedStageWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "     %s┃%s ", result.cyan, result.reset), underlying: writer}
 	result.prefixedVerboseWriter = &prefixedWriter{prefix: fmt.Appendf(nil, "     %s┃%s ", result.lightGray, result.reset), underlying: writer}
 
 	return &result
@@ -101,34 +98,34 @@ func (rd *reportData) report(result aggregator.ScenarioResult) error {
 		scenarioTackOn = fmt.Sprintf(" [Started: %s]", result.StartedAt.Format("15:04:05.000"))
 	}
 
-	ranRequestsScenario := 0
-	sentRequestsScenario := 0
-	successfulRequestsScenario := 0
-	abortedRequestsScenario := 0
-	for _, request := range result.RequestResults {
-		rd.totalRequests += 1
-		switch request.Status {
+	ranStagesScenario := 0
+	sentStagesScenario := 0
+	successfulStagesScenario := 0
+	abortedStagesScenario := 0
+	for _, stage := range result.StageResults {
+		rd.totalStages += 1
+		switch stage.Status {
 		case event.Success:
-			successfulRequestsScenario += 1
+			successfulStagesScenario += 1
 			fallthrough
 		case event.Failure:
 			fallthrough
 		case event.Error:
-			ranRequestsScenario += 1
-			sentRequestsScenario += request.Attempts
+			ranStagesScenario += 1
+			sentStagesScenario += stage.Attempts
 		case event.Aborted:
-			abortedRequestsScenario += 1
-			ranRequestsScenario += 1
-			sentRequestsScenario += request.Attempts
+			abortedStagesScenario += 1
+			ranStagesScenario += 1
+			sentStagesScenario += stage.Attempts
 		default:
 		}
 	}
 
-	rd.ranRequests += sentRequestsScenario
-	rd.successfulRequests += successfulRequestsScenario
-	rd.abortedRequests += abortedRequestsScenario
-	skippedRequestsScenario := len(result.RequestResults) - ranRequestsScenario
-	failedRequestsScenario := ranRequestsScenario - successfulRequestsScenario - abortedRequestsScenario
+	rd.ranStages += sentStagesScenario
+	rd.successfulStages += successfulStagesScenario
+	rd.abortedStages += abortedStagesScenario
+	skippedStagesScenario := len(result.StageResults) - ranStagesScenario
+	failedStagesScenario := ranStagesScenario - successfulStagesScenario - abortedStagesScenario
 
 	switch rd.cfg.Show {
 	case config.None:
@@ -145,27 +142,31 @@ func (rd *reportData) report(result aggregator.ScenarioResult) error {
 	}
 
 	fullScenarioName := bytes.NewBufferString(result.Name)
+	if len(result.Labels) > 0 {
+		fullScenarioName.Write([]byte{' ', '('})
+		fullScenarioName.WriteString(result.Labels[0])
+		for _, label := range result.Labels[1:] {
+			fullScenarioName.Write([]byte{',', ' '})
+			fullScenarioName.WriteString(label)
+		}
+		fullScenarioName.WriteByte(')')
+	}
 	if result.TotalRunCount > 1 {
 		numberString := strconv.Itoa(result.CntId + 1)
-		fullScenarioName.WriteByte('#')
+		fullScenarioName.Write([]byte{' ', '#'})
 		fullScenarioName.WriteString(numberString)
 	}
 
 	rd.printed = true
-	tally := rd.makeTally(successfulRequestsScenario, failedRequestsScenario, abortedRequestsScenario, skippedRequestsScenario)
+	tally := rd.makeTally(successfulStagesScenario, failedStagesScenario, abortedStagesScenario, skippedStagesScenario)
 
-	_, err := fmt.Fprintf(rd.writer, " %s Scenario: %s (%s in %s)%s\n",
+	_, err := fmt.Fprintf(rd.writer, " %s %s (%s in %s)%s\n",
 		scenarioMark,
 		fullScenarioName,
 		strings.Join(tally, " "),
 		fmtDuration(result.TotalDuration),
 		scenarioTackOn,
 	)
-	if err != nil {
-		return err
-	}
-
-	err = rd.reportLabels(result)
 	if err != nil {
 		return err
 	}
@@ -179,30 +180,10 @@ func (rd *reportData) report(result aggregator.ScenarioResult) error {
 		return nil
 	}
 
-	for _, request := range result.RequestResults {
-		err = rd.reportRequest(request)
+	for _, stage := range result.StageResults {
+		err = rd.reportStage(stage)
 		if err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-func (rd *reportData) reportLabels(result aggregator.ScenarioResult) error {
-	if len(result.Labels) != 0 {
-		_, err := fmt.Fprint(rd.writer, "   Labels:\n")
-		if err != nil {
-			return err
-		}
-		for _, label := range result.Labels {
-			_, err := fmt.Fprint(rd.prefixedLabelsWriter, label)
-			if err != nil {
-				return err
-			}
-			_, err = fmt.Fprint(rd.prefixedLabelsWriter, "\n")
-			if err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -227,68 +208,68 @@ func (rd *reportData) reportOutput(result aggregator.ScenarioResult) error {
 	return nil
 }
 
-func (rd *reportData) reportRequest(request aggregator.RequestResult) error {
-	requestMark := rd.markSuccess
-	switch request.Status {
+func (rd *reportData) reportStage(stage aggregator.StageResult) error {
+	stageMark := rd.markSuccess
+	switch stage.Status {
 	case event.Unset:
 		fallthrough
 	case event.Skipped:
-		requestMark = rd.markSkipped
+		stageMark = rd.markSkipped
 	case event.Aborted:
-		requestMark = rd.markAborted
+		stageMark = rd.markAborted
 	case event.Success:
 	default:
-		requestMark = rd.markFail
+		stageMark = rd.markFail
 	}
 
-	requestTackOn := ""
+	stageTackOn := ""
 	if rd.cfg.Verbose {
-		requestTackOn = fmt.Sprintf(" [Started: %s]", request.StartedAt.Format("15:04:05.000"))
+		stageTackOn = fmt.Sprintf(" [Started: %s]", stage.StartedAt.Format("15:04:05.000"))
 	}
 
-	_, err := fmt.Fprintf(rd.writer, "   %s %s (%s)%s\n", requestMark, request.Name, fmtDuration(request.Total), requestTackOn)
+	_, err := fmt.Fprintf(rd.writer, "   %s %s (%s)%s\n", stageMark, stage.Name, fmtDuration(stage.Total), stageTackOn)
 	if err != nil {
 		return err
 	}
 
-	if len(request.FailedAssertions) > 0 {
-		_, err = fmt.Fprintf(rd.writer, "     %s Failed assertions: %s\n", rd.markFail, strings.Join(request.FailedAssertions, ", "))
+	if len(stage.FailedAssertions) > 0 {
+		_, err = fmt.Fprintf(rd.writer, "     %s Failed assertions: %s\n", rd.markFail, strings.Join(stage.FailedAssertions, ", "))
 
 		if err != nil {
 			return err
 		}
 	}
-	if err == nil && request.ErrorMessage != "" {
-		_, err = fmt.Fprintf(rd.writer, "     %s Error: %s\n", rd.markFail, request.ErrorMessage)
+	if err == nil && stage.ErrorMessage != "" {
+		_, err = fmt.Fprintf(rd.writer, "     %s Error: %s\n", rd.markFail, stage.ErrorMessage)
 		if err != nil {
 			return err
 		}
 	}
 
 	if rd.cfg.Verbose {
-		err = rd.reportDurations(request)
+		err = rd.reportDurations(stage)
 		if err != nil {
 			return err
 		}
 	}
 
-	if request.Request != "" {
+	if stage.Request != "" {
 		_, err = fmt.Fprint(rd.writer, "     Request:\n")
 		if err != nil {
 			return err
 		}
-		_, err = io.WriteString(rd.prefixedRequestWriter, request.Request)
+		_, err = io.WriteString(rd.prefixedStageWriter, stage.Request)
 		if err != nil {
 			return err
 		}
 	}
 
-	if request.Response != "" {
+	if stage.Response != "" {
 		_, err = fmt.Fprint(rd.writer, "     Response:\n")
 		if err != nil {
 			return err
 		}
-		_, err = io.WriteString(rd.prefixedRequestWriter, request.Response)
+		_, err = io.WriteString(rd.prefixedStageWriter, stage.Response)
 		if err != nil {
 			return err
 		}
@@ -296,32 +277,32 @@ func (rd *reportData) reportRequest(request aggregator.RequestResult) error {
 	return nil
 }
 
-func (rd *reportData) reportDurations(request aggregator.RequestResult) error {
-	_, err := reportTime(rd.prefixedVerboseWriter, "Pre:    %8s\n", request.Pre)
+func (rd *reportData) reportDurations(stage aggregator.StageResult) error {
+	_, err := reportTime(rd.prefixedVerboseWriter, "Pre:    %8s\n", stage.Pre)
 	if err != nil {
 		return err
 	}
-	_, err = reportTime(rd.prefixedVerboseWriter, "Mat:    %8s\n", request.Materialization)
+	_, err = reportTime(rd.prefixedVerboseWriter, "Mat:    %8s\n", stage.Materialization)
 	if err != nil {
 		return err
 	}
-	_, err = reportTime(rd.prefixedVerboseWriter, "Parse:  %8s\n", request.Parsing)
+	_, err = reportTime(rd.prefixedVerboseWriter, "Parse:  %8s\n", stage.Parsing)
 	if err != nil {
 		return err
 	}
-	_, err = reportTime(rd.prefixedVerboseWriter, "Exec:   %8s\n", request.Execution)
+	_, err = reportTime(rd.prefixedVerboseWriter, "Exec:   %8s\n", stage.Execution)
 	if err != nil {
 		return err
 	}
-	_, err = reportTime(rd.prefixedVerboseWriter, "Retry:  %8s\n", request.Retry)
+	_, err = reportTime(rd.prefixedVerboseWriter, "Retry:  %8s\n", stage.Retry)
 	if err != nil {
 		return err
 	}
-	_, err = reportTime(rd.prefixedVerboseWriter, "Assert: %8s\n", request.Assert)
+	_, err = reportTime(rd.prefixedVerboseWriter, "Assert: %8s\n", stage.Assert)
 	if err != nil {
 		return err
 	}
-	_, err = reportTime(rd.prefixedVerboseWriter, "Post:   %8s\n", request.Post)
+	_, err = reportTime(rd.prefixedVerboseWriter, "Post:   %8s\n", stage.Post)
 	return err
 }
 
@@ -355,7 +336,7 @@ func (rd *reportData) reportEnd(duration time.Duration) error {
 	}
 
 	plural := "s"
-	if rd.ranRequests == 1 {
+	if rd.ranStages == 1 {
 		plural = ""
 	}
 
@@ -365,7 +346,7 @@ func (rd *reportData) reportEnd(duration time.Duration) error {
 		statusText,
 		fmtDuration(duration),
 		strings.Join(tally, " "),
-		rd.ranRequests,
+		rd.ranStages,
 		plural,
 	)
 	return err

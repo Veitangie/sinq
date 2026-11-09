@@ -1,0 +1,34 @@
+### Find the latest order
+GET ${env.BASE_URL}/advanced/regex/latest
+
+$ASSERT{
+    sinq.assert.code(200)
+
+    -- Long strings ([[...]]) keep backslashes as they are, so \d needs no escaping.
+    ORDER_LINK = sinq.regex.compile([[^/orders/(?P<id>\d+)(\?(.*))?$]])
+    local m = ORDER_LINK.match(res.headers["Location"])
+    sinq.assert.isTrue(m ~= nil, "Location doesn't point at an order")
+
+    -- A group that didn't take part in the match is false, so this tells
+    -- "no query string" apart from an empty one.
+    sinq.assert.isTrue(m ~= nil and m[2] == false, "Expected a link without a query string")
+}
+
+$POST{
+    ORDER_ID = ORDER_LINK.match(res.headers["Location"]).id
+
+    -- Colon calls work as well as dots.
+    ERRORS = sinq.json.array()
+    local lines = sinq.regex.compile([[(?P<level>\w+) (?P<code>E\d+)]])
+    for _, line in ipairs(lines:matchAll(res.bodyRaw)) do
+        if line.level == "error" then table.insert(ERRORS, line.code) end
+    end
+}
+
+### Report its errors
+POST ${env.BASE_URL}/advanced/regex/orders/${ORDER_ID}
+Content-Type: application/json
+
+{ "errors": ${ ERRORS } }
+
+$ASSERT{ sinq.assert.code(204, "Order errors were not reported as expected") }

@@ -23,9 +23,10 @@ import (
 )
 
 type preScriptResultBuilder struct {
-	workspace Workspace
-	filename  string
-	res       preScriptResult
+	workspace   Workspace
+	filename    string
+	isNoRequest bool
+	res         preScriptResult
 }
 
 type preScriptResult struct {
@@ -39,6 +40,10 @@ type preScriptResult struct {
 
 func (b *preScriptResultBuilder) attach() lua.LGFunction {
 	return func(ls *lua.LState) int {
+		if b.isNoRequest {
+			ls.RaiseError("req.attach: invalid call for non-request stage")
+			return 0
+		}
 		attachedPath := ls.CheckString(1)
 		if filepath.IsAbs(attachedPath) {
 			ls.RaiseError("req.attach: invalid file path '%s', should not be absolute", attachedPath)
@@ -59,6 +64,11 @@ func (b *preScriptResultBuilder) attach() lua.LGFunction {
 
 func (b *preScriptResultBuilder) saveTo() lua.LGFunction {
 	return func(ls *lua.LState) int {
+		if b.isNoRequest {
+			ls.RaiseError("req.saveResponseTo: invalid call for non-request stage")
+			return 0
+		}
+
 		savePath := ls.CheckString(1)
 		if filepath.IsAbs(savePath) {
 			ls.RaiseError("req.saveResponseTo: invalid file path '%s', should not be absolute", savePath)
@@ -89,6 +99,11 @@ func (b *preScriptResultBuilder) saveTo() lua.LGFunction {
 
 func (b *preScriptResultBuilder) cache() lua.LGFunction {
 	return func(ls *lua.LState) int {
+		if b.isNoRequest {
+			ls.RaiseError("req.cache: invalid call for non-request stage")
+			return 0
+		}
+
 		flag := true
 		key := ""
 		switch typed := ls.Get(1).(type) {
@@ -231,6 +246,11 @@ func contentDispositionAndTypeFromTable(tbl *lua.LTable, source string) (string,
 
 func (b *preScriptResultBuilder) multipart() lua.LGFunction {
 	return func(ls *lua.LState) int {
+		if b.isNoRequest {
+			ls.RaiseError("req.multipart: invalid call for non-request stage")
+			return 0
+		}
+
 		args := allArgs(ls)
 		acc := make([]multipartEntry, 0, len(args))
 		for _, tbl := range args {
@@ -297,24 +317,28 @@ func (b *preScriptResultBuilder) multipart() lua.LGFunction {
 
 func (b *preScriptResultBuilder) multipartBoundary() lua.LGFunction {
 	return func(ls *lua.LState) int {
+		if b.isNoRequest {
+			ls.RaiseError("req.multipartBoundary: invalid call for non-request stage")
+			return 0
+		}
 		boundary := ls.CheckString(1)
 		b.res.multipart.boundary = boundary
 		return 0
 	}
 }
 
-func (w *worker) setRequestIdx(ls *lua.LState) int {
+func (w *worker) setStageIdx(ls *lua.LState) int {
 	nextIdxFloat := ls.CheckNumber(1)
 
 	nextIdx := int(nextIdxFloat) - 1
-	if nextIdx >= 0 && nextIdx <= w.maxRequestIdx {
-		w.requestIdx = nextIdx
+	if nextIdx >= 0 && nextIdx <= w.maxStageIdx {
+		w.stageIdx = nextIdx
 	}
 	return 0
 }
 
 func (w *worker) finishScenario(ls *lua.LState) int {
-	w.requestIdx = w.maxRequestIdx + 1
+	w.stageIdx = w.maxStageIdx + 1
 	return 0
 }
 
@@ -331,8 +355,8 @@ func (w *worker) runEffectfulScript(token scenario.Token, extract extractPayload
 	return w.safeExecute(token, extract, filename, executionTimeout)
 }
 
-func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration) (preScriptResult, error) {
-	resBuilder := preScriptResultBuilder{workspace: w.env.workspace, filename: filename}
+func (w *worker) runPreScript(token scenario.Token, extract extractPayloadFunc, filename string, executionTimeout time.Duration, isNoRequest bool) (preScriptResult, error) {
+	resBuilder := preScriptResultBuilder{workspace: w.env.workspace, filename: filename, isNoRequest: isNoRequest}
 
 	w.lc.SetupPreScript(
 		resBuilder.attach(),
@@ -599,7 +623,7 @@ func (w *worker) setupScenarioEnvironment(ctx context.Context, env map[string]an
 
 	w.lc.SetContext(ctx)
 
-	w.lc.SetupScenarioEnvironment(w.setRequestIdx, w.finishScenario, w.failAssert, w.env.secrets, env)
+	w.lc.SetupScenarioEnvironment(w.setStageIdx, w.finishScenario, w.failAssert, w.env.secrets, env)
 
 	return nil
 }

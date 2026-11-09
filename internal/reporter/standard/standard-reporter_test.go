@@ -36,12 +36,12 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				{
 					Name:   "Test Scenario",
 					Status: event.Success,
-					RequestResults: []aggregator.RequestResult{
+					StageResults: []aggregator.StageResult{
 						{Name: "Req1", Status: event.Success, Attempts: 1},
 					},
 				},
 			},
-			wantOutput: []string{" ✓ Scenario: Test Scenario", " ✓ PASSED in 100ms | Scenarios: 1✓ | 1 request sent"},
+			wantOutput: []string{" ✓ Test Scenario", " ✓ PASSED in 100ms | Scenarios: 1✓ | 1 request sent"},
 		},
 		{
 			name: "Output with Color",
@@ -50,12 +50,12 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				{
 					Name:   "Color Scenario",
 					Status: event.Failure,
-					RequestResults: []aggregator.RequestResult{
+					StageResults: []aggregator.StageResult{
 						{Name: "ReqColor", Status: event.Failure, ErrorMessage: "boom", Attempts: 1},
 					},
 				},
 			},
-			wantOutput: []string{spinq.Red + "✗" + spinq.ResetStyle + " Scenario: Color Scenario", "   " + spinq.Red + "✗" + spinq.ResetStyle + " ReqColor", "     " + spinq.Red + "✗" + spinq.ResetStyle + " Error: boom", spinq.Red + "✗" + spinq.ResetStyle + " FAILED in 100ms | Scenarios: 1" + spinq.Red + "✗" + spinq.ResetStyle + " | 1 request sent"},
+			wantOutput: []string{spinq.Red + "✗" + spinq.ResetStyle + " Color Scenario", "   " + spinq.Red + "✗" + spinq.ResetStyle + " ReqColor", "     " + spinq.Red + "✗" + spinq.ResetStyle + " Error: boom", spinq.Red + "✗" + spinq.ResetStyle + " FAILED in 100ms | Scenarios: 1" + spinq.Red + "✗" + spinq.ResetStyle + " | 1 request sent"},
 		},
 		{
 			name: "Verbose Timings and Assertions",
@@ -64,7 +64,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				{
 					Name:   "Verbose Scenario",
 					Status: event.Failure,
-					RequestResults: []aggregator.RequestResult{
+					StageResults: []aggregator.StageResult{
 						{
 							Name:             "ReqV",
 							Status:           event.Failure,
@@ -98,12 +98,12 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				{
 					Name:   "Aborted Scenario",
 					Status: event.Aborted,
-					RequestResults: []aggregator.RequestResult{
+					StageResults: []aggregator.StageResult{
 						{Name: "ReqA", Status: event.Aborted},
 					},
 				},
 			},
-			wantOutput: []string{spinq.Yellow + "○" + spinq.ResetStyle + " Scenario: Aborted Scenario", "   " + spinq.Yellow + "○" + spinq.ResetStyle + " ReqA"},
+			wantOutput: []string{spinq.Yellow + "○" + spinq.ResetStyle + " Aborted Scenario", "   " + spinq.Yellow + "○" + spinq.ResetStyle + " ReqA"},
 		},
 		{
 			name: "Skipped Status Formatting",
@@ -112,12 +112,12 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				{
 					Name:   "Skipped Scenario",
 					Status: event.Unset,
-					RequestResults: []aggregator.RequestResult{
+					StageResults: []aggregator.StageResult{
 						{Name: "ReqS", Status: event.Unset},
 					},
 				},
 			},
-			wantOutput: []string{spinq.Gray + "-" + spinq.ResetStyle + " Scenario: Skipped Scenario", " " + spinq.Gray + "-" + spinq.ResetStyle + " SKIPPED in 100ms | Scenarios: 1" + spinq.Gray + "-" + spinq.ResetStyle + " | 0 requests sent"},
+			wantOutput: []string{spinq.Gray + "-" + spinq.ResetStyle + " Skipped Scenario", " " + spinq.Gray + "-" + spinq.ResetStyle + " SKIPPED in 100ms | Scenarios: 1" + spinq.Gray + "-" + spinq.ResetStyle + " | 0 requests sent"},
 		},
 		{
 			name: "Show NoSkip filters Skipped",
@@ -132,7 +132,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 					Status: event.Success,
 				},
 			},
-			wantOutput: []string{" ✓ Scenario: Success Scenario"},
+			wantOutput: []string{" ✓ Success Scenario"},
 		},
 		{
 			name: "Success with skipped scenario prints PASSED",
@@ -160,7 +160,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				{
 					Name:   "Success Scenario",
 					Status: event.Success,
-					RequestResults: []aggregator.RequestResult{
+					StageResults: []aggregator.StageResult{
 						{Name: "Req1", Status: event.Success},
 						{Name: "Req2", Status: event.Unset},
 					},
@@ -168,12 +168,12 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				{
 					Name:   "Failure Scenario",
 					Status: event.Failure,
-					RequestResults: []aggregator.RequestResult{
+					StageResults: []aggregator.StageResult{
 						{Name: "Req3", Status: event.Failure},
 					},
 				},
 			},
-			wantOutput: []string{" ✗ Scenario: Failure Scenario"},
+			wantOutput: []string{" ✗ Failure Scenario"},
 		},
 		{
 			name: "Dump On Failure fields",
@@ -182,7 +182,7 @@ func TestStandardReporter_FormatAndColor(t *testing.T) {
 				{
 					Name:   "Dump Scenario",
 					Status: event.Failure,
-					RequestResults: []aggregator.RequestResult{
+					StageResults: []aggregator.StageResult{
 						{
 							Name:     "ReqDump",
 							Status:   event.Failure,
@@ -235,7 +235,7 @@ func TestStandardReporter_OutputPrint(t *testing.T) {
 		Name:   "Print Scenario",
 		Status: event.Failure,
 		Output: outputBuf,
-		RequestResults: []aggregator.RequestResult{
+		StageResults: []aggregator.StageResult{
 			{Name: "Req", Status: event.Failure},
 		},
 	}

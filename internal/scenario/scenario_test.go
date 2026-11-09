@@ -32,7 +32,7 @@ func TestDurationUnmarshalJSON(t *testing.T) {
 func TestScenarioBlueprintString(t *testing.T) {
 	bp := ScenarioBlueprint{
 		Config: &ScenarioConfig{},
-		Requests: []*RequestBlueprint{
+		Stages: []*StageBlueprint{
 			{Filename: "test.sinq"},
 		},
 	}
@@ -42,7 +42,7 @@ func TestScenarioBlueprintString(t *testing.T) {
 }
 
 func TestRequestBlueprintString(t *testing.T) {
-	bp := RequestBlueprint{
+	bp := StageBlueprint{
 		Filename: "test.sinq",
 	}
 	if bp.String() == "" {
@@ -98,7 +98,7 @@ func TestToken_IsSpecialScript(t *testing.T) {
 func TestScenarioBlueprintString_AndThenSeparator(t *testing.T) {
 	bp := ScenarioBlueprint{
 		Config: &ScenarioConfig{},
-		Requests: []*RequestBlueprint{
+		Stages: []*StageBlueprint{
 			{Filename: "first.sinq"},
 			{Filename: "second.sinq"},
 			{Filename: "third.sinq"},

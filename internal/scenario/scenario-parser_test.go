@@ -5,6 +5,7 @@ package scenario
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode"
@@ -293,7 +294,7 @@ two lines, and ignores }"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := strings.NewReader(tt.input)
-			gotSlice, err := ParseRequestBlueprints(r, "test")
+			gotSlice, err := ParseStageBlueprints(r, "test", "")
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseRequestBlueprint() error = %v, wantErr %t", err, tt.wantErr)
@@ -304,7 +305,7 @@ two lines, and ignores }"
 			}
 
 			if len(gotSlice) == 0 {
-				t.Fatalf("ParseRequestBlueprints() returned 0 blueprints")
+				t.Fatalf("ParseStageBlueprints() returned 0 blueprints")
 			}
 			got := gotSlice[0]
 
@@ -351,7 +352,7 @@ two lines, and ignores }"
 func TestScriptError_IncludesScriptName(t *testing.T) {
 	input := `$PRE{ x = "unterminated`
 	r := strings.NewReader(input)
-	_, err := ParseRequestBlueprints(r, "test.sinq")
+	_, err := ParseStageBlueprints(r, "test.sinq", "")
 
 	if err == nil {
 		t.Fatalf("Expected an error for an unterminated string, got nil")
@@ -364,9 +365,9 @@ func TestScriptError_IncludesScriptName(t *testing.T) {
 func TestParseDelimiter_NoSpuriousEmptyTextTokenAtBoundary(t *testing.T) {
 	input := "$X{ a=1 }\n###\nGET /"
 	r := strings.NewReader(input)
-	blueprints, err := ParseRequestBlueprints(r, "boundary.sinq")
+	blueprints, err := ParseStageBlueprints(r, "boundary.sinq", "")
 	if err != nil {
-		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+		t.Fatalf("ParseStageBlueprints() error = %v", err)
 	}
 
 	if len(blueprints) != 2 {
@@ -410,7 +411,7 @@ func TestParseRequestBlueprint_TruncatedLongBracket(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := strings.NewReader(tt.input)
-			_, err := ParseRequestBlueprints(r, "truncated.sinq")
+			_, err := ParseStageBlueprints(r, "truncated.sinq", "")
 			if err == nil {
 				t.Fatalf("Expected a clean parse error for truncated input %q, got nil", tt.input)
 			}
@@ -550,9 +551,9 @@ $ASSERT{ assert(200) }
 DELETE /api/v1/users/1`
 
 	r := strings.NewReader(input)
-	blueprints, err := ParseRequestBlueprints(r, "multi.sinq")
+	blueprints, err := ParseStageBlueprints(r, "multi.sinq", "")
 	if err != nil {
-		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+		t.Fatalf("ParseStageBlueprints() error = %v", err)
 	}
 
 	if len(blueprints) != 3 {
@@ -578,9 +579,9 @@ DELETE /api/v1/users/1`
 func TestParseDelimiter_BugTrailingNewline(t *testing.T) {
 	input := "GET /\n###\nPOST /"
 	r := strings.NewReader(input)
-	blueprints, err := ParseRequestBlueprints(r, "bug_newline.sinq")
+	blueprints, err := ParseStageBlueprints(r, "bug_newline.sinq", "")
 	if err != nil {
-		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+		t.Fatalf("ParseStageBlueprints() error = %v", err)
 	}
 
 	if len(blueprints) != 2 {
@@ -599,9 +600,9 @@ func TestParseDelimiter_BugTrailingNewline(t *testing.T) {
 func TestParseDelimiter_BugNoBacktrack(t *testing.T) {
 	input := "GET /\n##$PRE{ local x = 1 }\nPOST /"
 	r := strings.NewReader(input)
-	blueprints, err := ParseRequestBlueprints(r, "bug_backtrack.sinq")
+	blueprints, err := ParseStageBlueprints(r, "bug_backtrack.sinq", "")
 	if err != nil {
-		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+		t.Fatalf("ParseStageBlueprints() error = %v", err)
 	}
 
 	if blueprints[0].Pre.Type == IncompleteToken {
@@ -612,7 +613,7 @@ func TestParseDelimiter_BugNoBacktrack(t *testing.T) {
 func TestParseDelimiter_BugEndOfFile(t *testing.T) {
 	input := "GET /\n###\n"
 	r := strings.NewReader(input)
-	_, err := ParseRequestBlueprints(r, "bug_end.sinq")
+	_, err := ParseStageBlueprints(r, "bug_end.sinq", "")
 	if err == nil {
 		t.Errorf("BUG FOUND: Expected an error when a delimiter is at the end of the file, but it was accepted and created a ghost request!")
 	}
@@ -621,9 +622,9 @@ func TestParseDelimiter_BugEndOfFile(t *testing.T) {
 func TestParseDelimiter_EscapeDelimiter(t *testing.T) {
 	input := "GET /\n\\###\nPOST /"
 	r := strings.NewReader(input)
-	blueprints, err := ParseRequestBlueprints(r, "escaped.sinq")
+	blueprints, err := ParseStageBlueprints(r, "escaped.sinq", "")
 	if err != nil {
-		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+		t.Fatalf("ParseStageBlueprints() error = %v", err)
 	}
 
 	if len(blueprints) != 1 {
@@ -639,9 +640,9 @@ func TestParseDelimiter_EscapeDelimiter(t *testing.T) {
 func TestParseDelimiter_BugIncompleteAtEOF(t *testing.T) {
 	input := "GET /\n###"
 	r := strings.NewReader(input)
-	blueprints, err := ParseRequestBlueprints(r, "bug_incomplete_eof.sinq")
+	blueprints, err := ParseStageBlueprints(r, "bug_incomplete_eof.sinq", "")
 	if err != nil {
-		t.Fatalf("BUG FOUND: Expected ParseRequestBlueprints to successfully parse the incomplete delimiter at EOF as raw text, but got error: %v", err)
+		t.Fatalf("BUG FOUND: Expected ParseStageBlueprints to successfully parse the incomplete delimiter at EOF as raw text, but got error: %v", err)
 	}
 
 	if len(blueprints) != 1 {
@@ -657,9 +658,9 @@ func TestParseDelimiter_BugIncompleteAtEOF(t *testing.T) {
 func TestParseDelimiter_CommentAsFilename(t *testing.T) {
 	input := "GET /\n### Setup Request\nPOST /"
 	r := strings.NewReader(input)
-	blueprints, err := ParseRequestBlueprints(r, "test.sinq")
+	blueprints, err := ParseStageBlueprints(r, "test.sinq", "")
 	if err != nil {
-		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+		t.Fatalf("ParseStageBlueprints() error = %v", err)
 	}
 
 	if len(blueprints) != 2 {
@@ -675,9 +676,9 @@ func TestParseDelimiter_CommentAsFilename(t *testing.T) {
 func TestParseDelimiter_CommentAtStartOfFile(t *testing.T) {
 	input := "### Request one\nGET /\n### Request two\nPOST /"
 	r := strings.NewReader(input)
-	blueprints, err := ParseRequestBlueprints(r, "test.sinq")
+	blueprints, err := ParseStageBlueprints(r, "test.sinq", "")
 	if err != nil {
-		t.Fatalf("ParseRequestBlueprints() error = %v", err)
+		t.Fatalf("ParseStageBlueprints() error = %v", err)
 	}
 
 	if len(blueprints) != 2 {
@@ -704,9 +705,9 @@ func TestParseDelimiter_BugPanicOnDanglingEscape(t *testing.T) {
 
 	input := "\\\n###\\"
 	r := strings.NewReader(input)
-	blueprints, err := ParseRequestBlueprints(r, "test.sinq")
+	blueprints, err := ParseStageBlueprints(r, "test.sinq", "")
 	if err == nil {
-		t.Fatalf("ParseRequestBlueprints swallowed error for \\n###\\\\")
+		t.Fatalf("ParseStageBlueprints swallowed error for \\n###\\\\")
 	}
 	for _, b := range blueprints {
 		for _, token := range b.Content {
@@ -800,13 +801,13 @@ X-Escape: \`,
 	f.Fuzz(func(t *testing.T, data string) {
 		r := strings.NewReader(data)
 
-		bps, err := ParseRequestBlueprints(r, "fuzz.sinq")
+		bps, err := ParseStageBlueprints(r, "fuzz.sinq", "")
 
 		if err != nil {
 			return
 		}
 
-		verifyBounds := func(bp *RequestBlueprint, tok Token) {
+		verifyBounds := func(bp *StageBlueprint, tok Token) {
 			if tok.Type != IncompleteToken {
 				_ = bp.ExtractPayload(tok)
 			}
@@ -823,4 +824,36 @@ X-Escape: \`,
 			}
 		}
 	})
+}
+
+func TestParseStageBlueprints_ErrorsCarryTheirPosition(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		line, col  int
+		wantInText string
+	}{
+		{"unterminated script", "GET http://x/\n\n$PRE{ unterminated\n", 4, 1, `Failed to parse lua script "PRE": Unexpected EOF`},
+		{"script defined twice", "GET http://x/\n\n$PRE{ a = 1 }\n$PRE{ b = 2 }\n", 4, 1, "Pre script is defined more than once"},
+		{"newline before the brace", "GET http://x/\n$ASSERT\n{ }\n", 2, 2, "Expected start of lua script with {, got newline instead"},
+		{"escape at the end", "GET http://x/\\", 1, 15, "Unexpected EOF after escape character"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseStageBlueprints(strings.NewReader(tt.raw), "pos.sinq", "")
+			var posErr PositionError
+			if !errors.As(err, &posErr) {
+				t.Fatalf("Expected a PositionError, got %T: %v", err, err)
+			}
+			if posErr.Line != tt.line || posErr.Offset != tt.col {
+				t.Errorf("Expected position %d:%d, got %d:%d (%v)", tt.line, tt.col, posErr.Line, posErr.Offset, err)
+			}
+			if want := fmt.Sprintf("%d:%d: ", posErr.Line, posErr.Offset); !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("Expected the message to lead with %q, got %q", want, err.Error())
+			}
+			if !strings.Contains(err.Error(), tt.wantInText) {
+				t.Errorf("Expected %q in the message, got %q", tt.wantInText, err.Error())
+			}
+		})
+	}
 }

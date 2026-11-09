@@ -91,7 +91,7 @@ func (sp *cachedRequestProcessor) process(
 		request.GetBody = getBody(workspace)
 		body, err := getBody(workspace)()
 		if err != nil {
-			sp.eb.Send(context.Background(), sp.log(slog.LevelDebug, "[Runner] Failed to open request body", errAttr(err)))
+			sp.eb.Send(context.Background(), sp.log(slog.LevelDebug, "[Runner] Failed to open request body", event.ErrAttr(err)))
 			return intermediate{}, err
 		}
 
@@ -163,10 +163,11 @@ func makeIntermediate(workspace Workspace, filenameTo string, maxBodySize int64,
 		return result, sinqerror.WrapNetworkError(err)
 	}
 
-	if uint64(len(data)) > uint64(maxBodySize) {
+	result.size = min(int64(len(data)), maxBodySize)
+	if int64(len(data)) > maxBodySize {
 		data = data[:len(data)-1]
-		io.CopyN(io.Discard, response.Body, 50*(1<<20))
 		result.oversized = true
+		io.CopyN(io.Discard, response.Body, 50*(1<<20))
 	}
 
 	result.body = data

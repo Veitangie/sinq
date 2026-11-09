@@ -49,7 +49,7 @@ func TestWorker_ExecuteAndExtractValue_CacheTrap(t *testing.T) {
 
 func TestWorker_RequestCompleted_Indexing(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	resp := intermediate{
 		statusCode: 200,
@@ -77,7 +77,7 @@ func TestWorker_RequestCompleted_Indexing(t *testing.T) {
 
 func TestWorker_RequestCompleted_JSONArrayBlindspot(t *testing.T) {
 	w := setupTestWorker(t, nil)
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	resp := intermediate{
 		statusCode: 200,
@@ -144,7 +144,7 @@ func TestWorker_ProcessScenario_EmptyRequestFailsCleanly(t *testing.T) {
 			Name:       "EmptyRequestScenario",
 			ReqTimeout: scenario.Duration{Duration: 1 * time.Second},
 		},
-		Requests:  []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
+		Stages:    []*scenario.StageBlueprint{{Filename: "req1.sinq"}},
 		workspace: &mockWorkspace{FS: fstest.MapFS{}},
 		env:       map[string]any{},
 		labels:    []string{},
@@ -227,12 +227,12 @@ func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
 	w := setupTestWorker(t, nil)
 	w.env.transport = mockRoundTripper{}
 
-	skipBP, err := scenario.ParseRequestBlueprints(bytes.NewBufferString("$PRE{\n  req.skip()\n}\n\nGET http://localhost/ HTTP/1.1\r\n\r\n"), "skip.sinq")
+	skipBP, err := scenario.ParseStageBlueprints(bytes.NewBufferString("$PRE{\n  req.skip()\n}\n\nGET http://localhost/ HTTP/1.1\r\n\r\n"), "skip.sinq", "")
 	if err != nil {
 		t.Fatalf("Failed to parse skip request: %v", err)
 	}
 
-	failBP, err := scenario.ParseRequestBlueprints(bytes.NewBufferString("GET http://localhost/ HTTP/1.1\r\n\r\n$ASSERT{\n  sinq.assert.fail(\"assertion failed\")\n}\n"), "fail.sinq")
+	failBP, err := scenario.ParseStageBlueprints(bytes.NewBufferString("GET http://localhost/ HTTP/1.1\r\n\r\n$ASSERT{\n  sinq.assert.fail(\"assertion failed\")\n}\n"), "fail.sinq", "")
 	if err != nil {
 		t.Fatalf("Failed to parse fail request: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
 			ReqTimeout:    scenario.Duration{Duration: 1 * time.Second},
 			ScriptTimeout: scenario.Duration{Duration: 1 * time.Second},
 		},
-		Requests:  []*scenario.RequestBlueprint{skipBP[0], failBP[0]},
+		Stages:    []*scenario.StageBlueprint{skipBP[0], failBP[0]},
 		workspace: &mockWorkspace{},
 		env:       map[string]any{"base_url": "http://localhost"},
 		labels:    []string{},
@@ -257,7 +257,7 @@ func TestWorker_ProcessScenario_SkipThenFail(t *testing.T) {
 	select {
 	case res := <-resCh:
 		if res.Status != event.Failure {
-			t.Errorf("Expected scenario status to be Failure, got %v: %+v", res.Status, res.RequestResults)
+			t.Errorf("Expected scenario status to be Failure, got %v: %+v", res.Status, res.StageResults)
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("Worker did not return a result")
@@ -294,7 +294,7 @@ $POST{ items = { ` + quote(items) + ` }; failOn = {}; for _, v in ipairs({ ` + q
 GET http://localhost/loop?id=${ return items[1] } HTTP/1.1
 
 $ASSERT{ sinq.assert.isTrue(not failOn[items[1]], "iteration for " .. items[1] .. " failed") }
-$POST{ table.remove(items, 1); if #items > 0 then sinq.setNextRequest(#sinq.responses) end }
+$POST{ table.remove(items, 1); if #items > 0 then sinq.setNextStage(#sinq.responses) end }
 
 ### After
 GET http://localhost/after HTTP/1.1
@@ -313,7 +313,7 @@ func luaSet(list []string) string {
 func runScenarioSource(t *testing.T, raw string, setup ...func(*worker)) (aggregator.ScenarioResult, int) {
 	t.Helper()
 	res, sent := runScenarioSourceAllowingErrors(t, raw, setup...)
-	for _, rr := range res.RequestResults {
+	for _, rr := range res.StageResults {
 		if rr.Status == event.Error {
 			t.Fatalf("Stage %q errored, the scenario itself is broken: %s", rr.Name, rr.ErrorMessage)
 		}
@@ -330,7 +330,7 @@ func runScenarioSourceAllowingErrors(t *testing.T, raw string, setup ...func(*wo
 		fn(w)
 	}
 
-	bps, err := scenario.ParseRequestBlueprints(strings.NewReader(raw), "repeat.sinq")
+	bps, err := scenario.ParseStageBlueprints(strings.NewReader(raw), "repeat.sinq", "")
 	if err != nil {
 		t.Fatalf("Failed to parse requests: %v", err)
 	}
@@ -344,7 +344,7 @@ func runScenarioSourceAllowingErrors(t *testing.T, raw string, setup ...func(*wo
 			MaxRetries:    3,
 			FailFast:      false,
 		},
-		Requests:  bps,
+		Stages:    bps,
 		workspace: &mockWorkspace{},
 		labels:    []string{},
 		run:       true,
@@ -356,8 +356,8 @@ func runScenarioSourceAllowingErrors(t *testing.T, raw string, setup ...func(*wo
 
 	select {
 	case res := <-resCh:
-		if len(res.RequestResults) != 3 {
-			t.Fatalf("Expected 3 stage results, got %d: %+v", len(res.RequestResults), res.RequestResults)
+		if len(res.StageResults) != 3 {
+			t.Fatalf("Expected 3 stage results, got %d: %+v", len(res.StageResults), res.StageResults)
 		}
 		return res, int(transport.sent.Load())
 	case <-time.After(2 * time.Second):
@@ -379,22 +379,22 @@ func TestWorker_ProcessScenario_RepeatedStage_EarlierFailedPassFailsStage(t *tes
 	if res.Status != event.Failure {
 		t.Errorf("Expected scenario status Failure, got %v", res.Status)
 	}
-	loop := res.RequestResults[1]
+	loop := res.StageResults[1]
 	if loop.Status != event.Failure {
 		t.Errorf("Expected Loop to be marked Failure because one of its passes failed, got %v", loop.Status)
 	}
 	if !slices.Contains(loop.FailedAssertions, "iteration for a failed") {
 		t.Errorf("Expected Loop to keep the failure from its first pass, got %v", loop.FailedAssertions)
 	}
-	if res.RequestResults[0].Status != event.Success || res.RequestResults[2].Status != event.Success {
-		t.Errorf("Expected Setup and After to succeed, got %v and %v", res.RequestResults[0].Status, res.RequestResults[2].Status)
+	if res.StageResults[0].Status != event.Success || res.StageResults[2].Status != event.Success {
+		t.Errorf("Expected Setup and After to succeed, got %v and %v", res.StageResults[0].Status, res.StageResults[2].Status)
 	}
 }
 
 func TestWorker_ProcessScenario_RepeatedStage_LastFailedPassFailsStage(t *testing.T) {
 	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"c"})
 
-	loop := res.RequestResults[1]
+	loop := res.StageResults[1]
 	if loop.Status != event.Failure {
 		t.Errorf("Expected Loop to be marked Failure, got %v", loop.Status)
 	}
@@ -406,7 +406,7 @@ func TestWorker_ProcessScenario_RepeatedStage_LastFailedPassFailsStage(t *testin
 func TestWorker_ProcessScenario_RepeatedStage_KeepsFailuresFromEveryPass(t *testing.T) {
 	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"a", "c"})
 
-	loop := res.RequestResults[1]
+	loop := res.StageResults[1]
 	if loop.Status != event.Failure {
 		t.Errorf("Expected Loop to be marked Failure, got %v", loop.Status)
 	}
@@ -422,7 +422,7 @@ func TestWorker_ProcessScenario_RepeatedStage_AllPassesSucceed(t *testing.T) {
 	if res.Status != event.Success {
 		t.Errorf("Expected scenario status Success, got %v", res.Status)
 	}
-	for _, rr := range res.RequestResults {
+	for _, rr := range res.StageResults {
 		if rr.Status != event.Success || len(rr.FailedAssertions) != 0 {
 			t.Errorf("Expected stage %q to succeed with no failures, got %v %v", rr.Name, rr.Status, rr.FailedAssertions)
 		}
@@ -448,7 +448,7 @@ $POST{ items = { ` + strings.Join(items, ", ") + ` }; failOn = ` + luaSet(plan.f
 ### Loop
 GET http://localhost/loop?id=${ return current } HTTP/1.1
 
-$PRE{ current = table.remove(items, 1); if #items > 0 then sinq.setNextRequest(2) end; if skipOn[current] then req.skip() end }
+$PRE{ current = table.remove(items, 1); if #items > 0 then sinq.setNextStage(2) end; if skipOn[current] then req.skip() end }
 $RETRY{ if retryOn[current] and res.attempt < 2 then return 0 end; return -1 }
 $ASSERT{ sinq.assert.isTrue(not failOn[current], "iteration for " .. current .. " failed") }
 
@@ -464,7 +464,7 @@ func TestWorker_ProcessScenario_RepeatedStage_SkippedThenRanPassIsSuccess(t *tes
 	if sent != 4 {
 		t.Fatalf("Expected 4 requests on the wire (Setup, Loop for b and c, After), got %d", sent)
 	}
-	if loop := res.RequestResults[1]; loop.Status != event.Success {
+	if loop := res.StageResults[1]; loop.Status != event.Success {
 		t.Errorf("Expected Loop to be Success since two of its passes ran and passed, got %v", loop.Status)
 	}
 }
@@ -472,7 +472,7 @@ func TestWorker_ProcessScenario_RepeatedStage_SkippedThenRanPassIsSuccess(t *tes
 func TestWorker_ProcessScenario_RepeatedStage_RanThenSkippedPassIsSuccess(t *testing.T) {
 	res, _ := runPreDrivenLoopScenario(t, loopPlan{items: []string{"a", "b", "c"}, skipOn: []string{"c"}})
 
-	if loop := res.RequestResults[1]; loop.Status != event.Success {
+	if loop := res.StageResults[1]; loop.Status != event.Success {
 		t.Errorf("Expected Loop to be Success since two of its passes ran and passed, got %v", loop.Status)
 	}
 }
@@ -480,7 +480,7 @@ func TestWorker_ProcessScenario_RepeatedStage_RanThenSkippedPassIsSuccess(t *tes
 func TestWorker_ProcessScenario_RepeatedStage_FailedThenSkippedPassIsFailure(t *testing.T) {
 	res, _ := runPreDrivenLoopScenario(t, loopPlan{items: []string{"a", "b", "c"}, failOn: []string{"a"}, skipOn: []string{"b"}})
 
-	loop := res.RequestResults[1]
+	loop := res.StageResults[1]
 	if loop.Status != event.Failure {
 		t.Errorf("Expected Loop to stay Failure after a later pass was skipped, got %v", loop.Status)
 	}
@@ -509,11 +509,11 @@ func TestWorker_ProcessScenario_RepeatedStage_AttemptsMatchRequestsSent(t *testi
 			}
 
 			attempts := 0
-			for _, rr := range res.RequestResults {
+			for _, rr := range res.StageResults {
 				attempts += rr.Attempts
 			}
 			if attempts != sent {
-				t.Errorf("Expected Attempts across all stages to add up to the %d requests sent, got %d: %+v", sent, attempts, res.RequestResults)
+				t.Errorf("Expected Attempts across all stages to add up to the %d requests sent, got %d: %+v", sent, attempts, res.StageResults)
 			}
 		})
 	}
@@ -522,7 +522,7 @@ func TestWorker_ProcessScenario_RepeatedStage_AttemptsMatchRequestsSent(t *testi
 func TestWorker_ProcessScenario_RepeatedStage_DumpIsFromFailingPass(t *testing.T) {
 	res, _ := runRepeatedStageScenario(t, []string{"a", "b", "c"}, []string{"a"}, func(w *worker) { w.env.cfg.DumpOnFailure = true })
 
-	loop := res.RequestResults[1]
+	loop := res.StageResults[1]
 	if loop.Request == "" || loop.Response == "" {
 		t.Fatalf("Expected a dump for the failed Loop stage, got request %q and response %q", loop.Request, loop.Response)
 	}
@@ -553,7 +553,7 @@ func TestWorker_ProcessScenario_RepeatedStage_LaterPassInterruptedIsAborted(t *t
 	if res.Status != event.Aborted {
 		t.Errorf("Expected scenario status Aborted, got %v", res.Status)
 	}
-	if loop := res.RequestResults[1]; loop.Status != event.Aborted {
+	if loop := res.StageResults[1]; loop.Status != event.Aborted {
 		t.Errorf("Expected Loop to be Aborted since its last pass was interrupted, got %v", loop.Status)
 	}
 }
@@ -563,7 +563,7 @@ func TestWorker_ProcessScenario_RepeatedStage_ErrorAfterFailedPassIsError(t *tes
 		w.env.transport = &failingRoundTripper{failQuery: "id=c", failErr: errors.New("connection refused")}
 	})
 
-	loop := res.RequestResults[1]
+	loop := res.StageResults[1]
 	if loop.Status != event.Error {
 		t.Errorf("Expected Loop to be Error since its last pass errored, got %v", loop.Status)
 	}
@@ -605,7 +605,7 @@ GET http://localhost/after HTTP/1.1
 			if sent != 5 {
 				t.Errorf("Expected each of the 3 poll attempts to reach the server (5 requests in total), got %d", sent)
 			}
-			if poll := res.RequestResults[1]; poll.Attempts != 3 {
+			if poll := res.StageResults[1]; poll.Attempts != 3 {
 				t.Errorf("Expected 3 attempts for the polled stage, got %d", poll.Attempts)
 			}
 		})
@@ -660,7 +660,7 @@ GET http://localhost/after HTTP/1.1
 `
 			res, sent := runScenarioSourceAllowingErrors(t, raw, cachedVia)
 
-			cached := res.RequestResults[1]
+			cached := res.StageResults[1]
 			if cached.Status != event.Error || !strings.Contains(cached.ErrorMessage, tt.wantErr) {
 				t.Errorf("Expected the stage to error with %q, got %v %q", tt.wantErr, cached.Status, cached.ErrorMessage)
 			}
@@ -687,7 +687,7 @@ func TestWorker_MaterializeRequest_UnsupportedInlineTypesFail(t *testing.T) {
 			w := setupTestWorker(t, context.Background())
 
 			source := []byte(tt.script)
-			req := &scenario.RequestBlueprint{
+			req := &scenario.StageBlueprint{
 				Source:   source,
 				Filename: "inline_types.sinq",
 				Content: []scenario.Token{
@@ -713,7 +713,7 @@ func TestWorker_MaterializeRequest_UnserializableInlineTableFails(t *testing.T) 
 
 { "ids": ${ return { 1, nil, 3 } } }
 `
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "sparse_inline.sinq")
+	reqBp, err := scenario.ParseStageBlueprints(strings.NewReader(rawSinq), "sparse_inline.sinq", "")
 	if err != nil {
 		t.Fatalf("failed to parse request: %v", err)
 	}
@@ -800,7 +800,7 @@ func TestWorker_Run_NilContext(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessRequest_ContextAlreadyCanceled(t *testing.T) {
+func TestWorker_ProcessStage_ContextAlreadyCanceled(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 	obs := observe(t, w)
 
@@ -808,19 +808,19 @@ func TestWorker_ProcessRequest_ContextAlreadyCanceled(t *testing.T) {
 	cancel()
 
 	scenarioBp := &scenario.ScenarioBlueprint{
-		Config:   &scenario.ScenarioConfig{Name: "cancelled"},
-		Requests: []*scenario.RequestBlueprint{{Filename: "req.sinq"}},
+		Config: &scenario.ScenarioConfig{Name: "cancelled"},
+		Stages: []*scenario.StageBlueprint{{Filename: "req.sinq"}},
 	}
 
-	if w.processRequest(ctx, scenarioBp, 0, &http.Client{}, time.Second) {
+	if w.processStage(ctx, scenarioBp, 0, &http.Client{}, time.Second) {
 		t.Error("expected shouldContinue to be false when the context is already cancelled")
 	}
-	if ends := obs.ofKind(event.RequestEnd); len(ends) != 1 || ends[0].Status != event.Aborted {
-		t.Errorf("expected one Aborted RequestEnd for a cancelled context, got %+v", ends)
+	if ends := obs.ofKind(event.StageEnd); len(ends) != 1 || ends[0].Status != event.Aborted {
+		t.Errorf("expected one Aborted StageEnd for a cancelled context, got %+v", ends)
 	}
 }
 
-func TestWorker_ProcessRequest_ContextDeadlineExceeded(t *testing.T) {
+func TestWorker_ProcessStage_ContextDeadlineExceeded(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 	obs := observe(t, w)
 
@@ -829,15 +829,15 @@ func TestWorker_ProcessRequest_ContextDeadlineExceeded(t *testing.T) {
 	time.Sleep(time.Millisecond)
 
 	scenarioBp := &scenario.ScenarioBlueprint{
-		Config:   &scenario.ScenarioConfig{Name: "timed-out"},
-		Requests: []*scenario.RequestBlueprint{{Filename: "req.sinq"}},
+		Config: &scenario.ScenarioConfig{Name: "timed-out"},
+		Stages: []*scenario.StageBlueprint{{Filename: "req.sinq"}},
 	}
 
-	if w.processRequest(ctx, scenarioBp, 0, &http.Client{}, time.Second) {
+	if w.processStage(ctx, scenarioBp, 0, &http.Client{}, time.Second) {
 		t.Error("expected shouldContinue to be false when the context deadline is exceeded")
 	}
-	if ends := obs.ofKind(event.RequestEnd); len(ends) != 1 || ends[0].Status != event.Error {
-		t.Errorf("expected one Error RequestEnd for a deadline-exceeded context, got %+v", ends)
+	if ends := obs.ofKind(event.StageEnd); len(ends) != 1 || ends[0].Status != event.Error {
+		t.Errorf("expected one Error StageEnd for a deadline-exceeded context, got %+v", ends)
 	}
 }
 
@@ -852,8 +852,8 @@ func TestWorker_ProcessScenario_TagFilterExcludesScenario(t *testing.T) {
 			Name: "FilteredScenario",
 			Tags: map[string]struct{}{"other": {}},
 		},
-		Requests: []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
-		env:      map[string]any{},
+		Stages: []*scenario.StageBlueprint{{Filename: "req1.sinq"}},
+		env:    map[string]any{},
 	}
 
 	w.processScenario(context.Background(), bundle)
@@ -874,24 +874,24 @@ func TestWorker_ProcessScenario_RequestNamePrefersExplicitName(t *testing.T) {
 
 	resCh := observe(t, w).results
 
-	bp, err := scenario.ParseRequestBlueprints(bytes.NewBufferString("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req1.sinq")
+	bp, err := scenario.ParseStageBlueprints(bytes.NewBufferString("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req1.sinq", "")
 	if err != nil {
 		t.Fatalf("failed to parse request blueprint: %v", err)
 	}
 	bp[0].Name = "Custom Request Name"
 
 	bundle := taskBundle{
-		Config:   &scenario.ScenarioConfig{Name: "NamedRequestScenario"},
-		Requests: bp,
-		env:      map[string]any{},
+		Config: &scenario.ScenarioConfig{Name: "NamedRequestScenario"},
+		Stages: bp,
+		env:    map[string]any{},
 	}
 
 	w.processScenario(context.Background(), bundle)
 
 	select {
 	case res := <-resCh:
-		if len(res.RequestResults) != 1 || res.RequestResults[0].Name != "Custom Request Name" {
-			t.Errorf("expected the explicit request Name to be used over Filename, got %+v", res.RequestResults)
+		if len(res.StageResults) != 1 || res.StageResults[0].Name != "Custom Request Name" {
+			t.Errorf("expected the explicit request Name to be used over Filename, got %+v", res.StageResults)
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("processScenario did not report a result")
@@ -904,7 +904,7 @@ func TestWorker_MaterializeRequest_ContextCancelledMidLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	req := &scenario.RequestBlueprint{
+	req := &scenario.StageBlueprint{
 		Source: []byte("GET /\r\n\r\n"),
 		Content: []scenario.Token{
 			{Type: scenario.Text, Start: 0, End: 9, PayloadStart: 0, PayloadEnd: 9},
@@ -920,7 +920,7 @@ func TestWorker_MaterializeRequest_ContextCancelledMidLoop(t *testing.T) {
 func TestWorker_MaterializeRequest_IncompleteToken(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 
-	req := &scenario.RequestBlueprint{
+	req := &scenario.StageBlueprint{
 		Source:   []byte("GET / $BAD"),
 		Filename: "bad.sinq",
 		Content: []scenario.Token{
@@ -940,7 +940,7 @@ func TestWorker_MaterializeRequest_IncompleteToken(t *testing.T) {
 func TestWorker_MaterializeRequest_UnexpectedDelimiter(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 
-	req := &scenario.RequestBlueprint{
+	req := &scenario.StageBlueprint{
 		Source:   []byte("GET / ###"),
 		Filename: "bad.sinq",
 		Content: []scenario.Token{
@@ -971,7 +971,7 @@ func TestWorker_LoggingContext(t *testing.T) {
 
 	baseCtx := context.Background()
 	got := w.loggingContext(baseCtx)
-	if has(got, string(scenarioNameContext), "") || has(got, string(requestNameContext), "") {
+	if has(got, string(scenarioNameContext), "") || has(got, string(stageNameContext), "") {
 		t.Errorf("expected no scenario/request name keys for a bare context, got %v", got)
 	}
 
@@ -981,15 +981,15 @@ func TestWorker_LoggingContext(t *testing.T) {
 		t.Errorf("expected scenarioName to be included when present in the context, got %v", got2)
 	}
 
-	withRequest := context.WithValue(baseCtx, requestNameContext, "myRequest")
+	withRequest := context.WithValue(baseCtx, stageNameContext, "myRequest")
 	got3 := w.loggingContext(withRequest)
-	found := has(got3, string(requestNameContext), "myRequest")
+	found := has(got3, string(stageNameContext), "myRequest")
 	if !found {
 		t.Errorf("expected requestName to be included when present in the context, got %v", got3)
 	}
 }
 
-func TestWorker_ProcessRequest_ClearsDumpWhenNoAssertionFailures(t *testing.T) {
+func TestWorker_ProcessStage_ClearsDumpWhenNoAssertionFailures(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	}))
@@ -999,7 +999,7 @@ func TestWorker_ProcessRequest_ClearsDumpWhenNoAssertionFailures(t *testing.T) {
 	w.env.cfg.DumpOnFailure = true
 	obs := observe(t, w)
 
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET "+srv.URL+" HTTP/1.1\r\n\r\n"), "ok.sinq")
+	reqBp, err := scenario.ParseStageBlueprints(strings.NewReader("GET "+srv.URL+" HTTP/1.1\r\n\r\n"), "ok.sinq", "")
 	if err != nil {
 		t.Fatalf("failed to parse blueprint: %v", err)
 	}
@@ -1011,12 +1011,12 @@ func TestWorker_ProcessRequest_ClearsDumpWhenNoAssertionFailures(t *testing.T) {
 			ScriptTimeout: scenario.Duration{Duration: 2 * time.Second},
 			MaxBodySize:   scenario.SaneDefaultConfig().MaxBodySize,
 		},
-		Requests:  reqBp,
+		Stages:    reqBp,
 		workspace: &mockWorkspace{},
 		run:       true,
 	})
 
-	rr := obs.result().RequestResults[0]
+	rr := obs.result().StageResults[0]
 	if rr.Request != "" || rr.Response != "" {
 		t.Errorf("expected Request/Response dumps to be cleared when there are no assertion failures, got Request=%q Response=%q", rr.Request, rr.Response)
 	}
@@ -1040,7 +1040,7 @@ func TestWorker_ProcessScenario_MaxRedirectsBoundary(t *testing.T) {
 		w := setupTestWorker(t, context.Background())
 		resCh := observe(t, w).results
 
-		bp, err := scenario.ParseRequestBlueprints(strings.NewReader("GET "+redirectSrv.URL+" HTTP/1.1\r\n\r\n"), "redirect.sinq")
+		bp, err := scenario.ParseStageBlueprints(strings.NewReader("GET "+redirectSrv.URL+" HTTP/1.1\r\n\r\n"), "redirect.sinq", "")
 		if err != nil {
 			t.Fatalf("failed to parse blueprint: %v", err)
 		}
@@ -1051,7 +1051,7 @@ func TestWorker_ProcessScenario_MaxRedirectsBoundary(t *testing.T) {
 				ReqTimeout:   scenario.Duration{Duration: 2 * time.Second},
 				MaxRedirects: maxRedirects,
 			},
-			Requests:  bp,
+			Stages:    bp,
 			workspace: &mockWorkspace{},
 			env:       map[string]any{},
 			run:       true,
@@ -1068,25 +1068,25 @@ func TestWorker_ProcessScenario_MaxRedirectsBoundary(t *testing.T) {
 		return event.Unset
 	}
 
-	if status := run(1); status != event.Error {
-		t.Errorf("expected MaxRedirects=1 with exactly one redirect present to fail with Error, got %v", status)
+	if status := run(0); status != event.Error {
+		t.Errorf("expected MaxRedirects=0 with exactly one redirect present to fail with Error, got %v", status)
 	}
-	if status := run(2); status != event.Success {
-		t.Errorf("expected MaxRedirects=2 with exactly one redirect present to succeed, got %v", status)
+	if status := run(1); status != event.Success {
+		t.Errorf("expected MaxRedirects=1 with exactly one redirect present to succeed, got %v", status)
 	}
 }
 
-func TestWorker_ProcessRequest_PostScriptFailure(t *testing.T) {
+func TestWorker_ProcessStage_PostScriptFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
 
 	w := setupTestWorker(t, context.Background())
-	w.lc.SetupRequestEnvironment(0)
+	w.lc.SetupStageEnvironment(0, true)
 
 	rawSinq := "GET " + srv.URL + "\n$POST{\nerror(\"boom\")\n}"
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "post_fail.sinq")
+	reqBp, err := scenario.ParseStageBlueprints(strings.NewReader(rawSinq), "post_fail.sinq", "")
 	if err != nil {
 		t.Fatalf("failed to parse blueprint: %v", err)
 	}
@@ -1097,14 +1097,14 @@ func TestWorker_ProcessRequest_PostScriptFailure(t *testing.T) {
 			ReqTimeout:    scenario.Duration{Duration: 2 * time.Second},
 			ScriptTimeout: scenario.Duration{Duration: 2 * time.Second},
 		},
-		Requests: reqBp,
+		Stages: reqBp,
 	}
 
 	obs := observe(t, w)
-	if w.processRequest(context.Background(), scenarioBp, 0, srv.Client(), scenarioBp.Config.ReqTimeout.Duration) {
+	if w.processStage(context.Background(), scenarioBp, 0, srv.Client(), scenarioBp.Config.ReqTimeout.Duration) {
 		t.Error("expected shouldContinue to be false when the post script fails")
 	}
-	ends := obs.ofKind(event.RequestEnd)
+	ends := obs.ofKind(event.StageEnd)
 	if len(ends) == 0 || ends[len(ends)-1].Status != event.Error || ends[len(ends)-1].ErrorString == "" {
 		t.Fatalf("expected the request to end with an Error from the failing post script, got %+v", ends)
 	}
@@ -1115,12 +1115,12 @@ func TestWorker_ProcessScenario_SetsMaxRequestIdx(t *testing.T) {
 	w.env.transport = mockRoundTripper{}
 	resCh := observe(t, w).results
 
-	bp1, _ := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req.sinq")
-	bp2, _ := scenario.ParseRequestBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req2.sinq")
+	bp1, _ := scenario.ParseStageBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req.sinq", "")
+	bp2, _ := scenario.ParseStageBlueprints(strings.NewReader("GET http://localhost/ HTTP/1.1\r\n\r\n"), "req2.sinq", "")
 
 	bundle := taskBundle{
 		Config:    &scenario.ScenarioConfig{Name: "TwoRequests"},
-		Requests:  []*scenario.RequestBlueprint{bp1[0], bp2[0]},
+		Stages:    []*scenario.StageBlueprint{bp1[0], bp2[0]},
 		workspace: &mockWorkspace{},
 		env:       map[string]any{},
 		run:       true,
@@ -1128,8 +1128,8 @@ func TestWorker_ProcessScenario_SetsMaxRequestIdx(t *testing.T) {
 
 	w.processScenario(context.Background(), bundle)
 
-	if w.maxRequestIdx != 1 {
-		t.Errorf("expected maxRequestIdx to be len(Requests)-1 = 1, got %d", w.maxRequestIdx)
+	if w.maxStageIdx != 1 {
+		t.Errorf("expected maxStageIdx to be len(Requests)-1 = 1, got %d", w.maxStageIdx)
 	}
 
 	select {
@@ -1139,13 +1139,13 @@ func TestWorker_ProcessScenario_SetsMaxRequestIdx(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessScenario_ZeroRequests(t *testing.T) {
+func TestWorker_ProcessScenario_ZeroStages(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 	resCh := observe(t, w).results
 
 	bundle := taskBundle{
-		Config:    &scenario.ScenarioConfig{Name: "ZeroRequestScenario"},
-		Requests:  []*scenario.RequestBlueprint{},
+		Config:    &scenario.ScenarioConfig{Name: "ZeroStageScenario"},
+		Stages:    []*scenario.StageBlueprint{},
 		workspace: &mockWorkspace{},
 		env:       map[string]any{},
 		run:       true,
@@ -1163,14 +1163,14 @@ func TestWorker_ProcessScenario_ZeroRequests(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessScenario_LogsRequestFailure(t *testing.T) {
+func TestWorker_ProcessScenario_LogsStageFailure(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 	obs := observe(t, w)
 	resCh := obs.results
 
 	bundle := taskBundle{
 		Config:    &scenario.ScenarioConfig{Name: "FailLogScenario", ReqTimeout: scenario.Duration{Duration: time.Second}},
-		Requests:  []*scenario.RequestBlueprint{{Filename: "req1.sinq"}},
+		Stages:    []*scenario.StageBlueprint{{Filename: "req1.sinq"}},
 		workspace: &mockWorkspace{FS: fstest.MapFS{}},
 		env:       map[string]any{},
 		run:       true,
@@ -1184,15 +1184,15 @@ func TestWorker_ProcessScenario_LogsRequestFailure(t *testing.T) {
 		t.Fatal("processScenario deadlocked")
 	}
 
-	if !obs.logged("Request failed") {
-		t.Errorf("expected a 'Request failed' debug log line when a request errors, got logs: %+v", obs.ofKind(event.Log))
+	if !obs.logged("Stage failed") {
+		t.Errorf("expected a 'Stage failed' debug log line when a stage errors, got logs: %+v", obs.ofKind(event.Log))
 	}
 }
 
 func TestWorker_MaterializeRequest_CapacityHintDoesNotPanic(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 
-	req := &scenario.RequestBlueprint{
+	req := &scenario.StageBlueprint{
 		Source: []byte("GET / HTTP/1.1\r\n\r\n"),
 		Content: []scenario.Token{
 			{Type: scenario.Text, Start: 0, End: 18, PayloadStart: 0, PayloadEnd: 18},
@@ -1212,7 +1212,7 @@ func TestWorker_MaterializeRequest_ScriptTokenError(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 
 	source := []byte("if then")
-	req := &scenario.RequestBlueprint{
+	req := &scenario.StageBlueprint{
 		Source:   source,
 		Filename: "script_fail.sinq",
 		Content: []scenario.Token{
@@ -1233,7 +1233,7 @@ func TestWorker_MaterializeRequest_ScriptTokenSuccess(t *testing.T) {
 	w := setupTestWorker(t, context.Background())
 
 	source := []byte(`return "computed"`)
-	req := &scenario.RequestBlueprint{
+	req := &scenario.StageBlueprint{
 		Source:   source,
 		Filename: "script_ok.sinq",
 		Content: []scenario.Token{
@@ -1260,7 +1260,7 @@ func TestWorker_MaterializeRequest_MultipleReturnValues(t *testing.T) {
 
 { "two": ${ return "first", nil }, "twoStr": "${ return "first", "second" }", "plain": ${ return sinq.json.serialize(flat) } }
 `
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "multi_return.sinq")
+	reqBp, err := scenario.ParseStageBlueprints(strings.NewReader(rawSinq), "multi_return.sinq", "")
 	if err != nil {
 		t.Fatalf("failed to parse request: %v", err)
 	}
@@ -1282,7 +1282,7 @@ func TestWorker_MaterializeRequest_NilScriptValueFails(t *testing.T) {
 	rawSinq := `GET http://localhost/ HTTP/1.1
 X-Value: ${ return nil }
 `
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "nil_return.sinq")
+	reqBp, err := scenario.ParseStageBlueprints(strings.NewReader(rawSinq), "nil_return.sinq", "")
 	if err != nil {
 		t.Fatalf("failed to parse request: %v", err)
 	}
@@ -1312,7 +1312,7 @@ func TestWorker_MaterializeRequest_InlineValueTypes(t *testing.T) {
 			w := setupTestWorker(t, context.Background())
 
 			source := []byte(tt.script)
-			req := &scenario.RequestBlueprint{
+			req := &scenario.StageBlueprint{
 				Source:   source,
 				Filename: "inline_types.sinq",
 				Content: []scenario.Token{
@@ -1338,7 +1338,7 @@ func TestWorker_MaterializeRequest_InlineTableIgnoresEarlierIndent(t *testing.T)
 X-Pretty: ${ return (sinq.json.serialize({ a = 1 }, "  ")) }
 X-Table: ${ return { b = 1 } }
 `
-	reqBp, err := scenario.ParseRequestBlueprints(strings.NewReader(rawSinq), "stale_indent.sinq")
+	reqBp, err := scenario.ParseStageBlueprints(strings.NewReader(rawSinq), "stale_indent.sinq", "")
 	if err != nil {
 		t.Fatalf("failed to parse request: %v", err)
 	}

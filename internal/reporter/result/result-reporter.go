@@ -11,39 +11,30 @@ import (
 )
 
 type ResultReporter struct {
-	success bool
+	status event.ResultStatus
 }
 
 func NewResultReporter() *ResultReporter {
-	return &ResultReporter{true}
+	return &ResultReporter{event.Success}
 }
 
 func (r *ResultReporter) Report(source <-chan aggregator.ScenarioResult, timer <-chan time.Duration, size int) error {
 	count := 0
 	for result := range source {
-		if !r.success {
-			continue
-		}
-
-		if result.Status == event.Failure || result.Status == event.Error || result.Status == event.Aborted {
-			r.success = false
-			continue
-		}
-
+		r.status = max(r.status, result.Status)
 		count += 1
-		for _, reqResult := range result.RequestResults {
-			if reqResult.Status == event.Failure || reqResult.Status == event.Error || reqResult.Status == event.Aborted {
-				r.success = false
-				break
-			}
+		for _, stageResult := range result.StageResults {
+			r.status = max(r.status, stageResult.Status)
 		}
 
 	}
 	<-timer
-	r.success = r.success && count == size
+	if count != size {
+		r.status = max(r.status, event.Aborted)
+	}
 	return nil
 }
 
-func (r *ResultReporter) Success() bool {
-	return r.success
+func (r *ResultReporter) Status() event.ResultStatus {
+	return r.status
 }

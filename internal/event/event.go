@@ -12,7 +12,7 @@ type EventType int
 const (
 	Log EventType = iota
 	ScenarioStart
-	RequestStart
+	StageStart
 	PreScript
 	Materialization
 	Parsing
@@ -20,7 +20,7 @@ const (
 	RetryScript
 	AssertScript
 	PostScript
-	RequestEnd
+	StageEnd
 	ScenarioEnd
 	FileOpened
 	FileClosed
@@ -52,6 +52,27 @@ type RunId struct {
 	SeqId int
 	MatId int
 	CntId int
+}
+
+func (r RunId) IsEmpty() bool {
+	return r.SeqId == 0 && r.MatId == 0 && r.CntId == 0
+}
+
+func (r RunId) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Attr{
+			Key:   "seqId",
+			Value: slog.IntValue(r.SeqId),
+		},
+		slog.Attr{
+			Key:   "countId",
+			Value: slog.IntValue(r.CntId),
+		},
+		slog.Attr{
+			Key:   "matrixId",
+			Value: slog.IntValue(r.MatId),
+		},
+	)
 }
 
 func (s ResultStatus) String() string {
@@ -99,11 +120,16 @@ func (s SubSystem) String() string {
 	return "Unknown"
 }
 
+type StageName struct {
+	Name     string
+	Filename string
+}
+
 type Event struct {
 	Error            error
 	Tags             []string
 	Labels           []string
-	RequestNames     []string
+	StageNames       []StageName
 	FailedAssertions []string
 	Attrs            []slog.Attr
 	Name             string
@@ -119,11 +145,15 @@ type Event struct {
 	Kind             EventType
 	Level            slog.Level
 	RunId            RunId
-	RequestIdx       int
+	StageIdx         int
 	Size             int
 	WorkerId         int
 	WorkerSeq        int
 	TotalRunCount    int
 	Source           SubSystem
 	Status           ResultStatus
+}
+
+func ErrAttr(err error) slog.Attr {
+	return slog.Attr{Key: "error", Value: slog.StringValue(err.Error())}
 }

@@ -75,14 +75,22 @@ func expectNoMore(t *testing.T, out <-chan aggregator.ScenarioResult) {
 	}
 }
 
+func stageNames(names ...string) []event.StageName {
+	res := make([]event.StageName, 0, len(names))
+	for _, n := range names {
+		res = append(res, event.StageName{Name: n})
+	}
+	return res
+}
+
 func start(name string, requests ...string) event.Event {
 	return event.Event{
-		Kind:         event.ScenarioStart,
-		RunId:        rid(name),
-		Name:         "scenario " + name,
-		Tags:         []string{"smoke", "api"},
-		StartedAt:    t0,
-		RequestNames: requests,
+		Kind:       event.ScenarioStart,
+		RunId:      rid(name),
+		Name:       "scenario " + name,
+		Tags:       []string{"smoke", "api"},
+		StartedAt:  t0,
+		StageNames: stageNames(requests...),
 	}
 }
 
@@ -90,25 +98,25 @@ func end(name string) event.Event {
 	return event.Event{Kind: event.ScenarioEnd, RunId: rid(name), Duration: 10 * time.Second}
 }
 
-func requestStart(name string, idx int) event.Event {
-	return event.Event{Kind: event.RequestStart, RunId: rid(name), RequestIdx: idx, StartedAt: t0}
+func stageStartEvent(name string, idx int) event.Event {
+	return event.Event{Kind: event.StageStart, RunId: rid(name), StageIdx: idx, StartedAt: t0}
 }
 
 func stage(name string, kind event.EventType, idx int, d time.Duration) event.Event {
-	return event.Event{Kind: kind, RunId: rid(name), RequestIdx: idx, Duration: d}
+	return event.Event{Kind: kind, RunId: rid(name), StageIdx: idx, Duration: d}
 }
 
 func dumpedEnd(name string, idx int, status event.ResultStatus, request, response string) event.Event {
-	e := requestEnd(name, idx, status, "")
+	e := stageEndEvent(name, idx, status, "")
 	e.Request, e.Response = request, response
 	return e
 }
 
-func requestEnd(name string, idx int, status event.ResultStatus, errMsg string, failed ...string) event.Event {
+func stageEndEvent(name string, idx int, status event.ResultStatus, errMsg string, failed ...string) event.Event {
 	return event.Event{
-		Kind:             event.RequestEnd,
+		Kind:             event.StageEnd,
 		RunId:            rid(name),
-		RequestIdx:       idx,
+		StageIdx:         idx,
 		Status:           status,
 		ErrorString:      errMsg,
 		FailedAssertions: failed,
@@ -117,7 +125,7 @@ func requestEnd(name string, idx int, status event.ResultStatus, errMsg string, 
 }
 
 func pass(name string, idx int, status event.ResultStatus, failed ...string) []event.Event {
-	return []event.Event{requestStart(name, idx), requestEnd(name, idx, status, "", failed...)}
+	return []event.Event{stageStartEvent(name, idx), stageEndEvent(name, idx, status, "", failed...)}
 }
 
 func TestAggregator_StartAndEndBuildScenario(t *testing.T) {
@@ -142,28 +150,45 @@ func TestAggregator_StartAndEndBuildScenario(t *testing.T) {
 	if got.Output != output {
 		t.Errorf("Expected Output from ScenarioEnd")
 	}
-	if len(got.RequestResults) != 2 || got.RequestResults[0].Name != "01.sinq" || got.RequestResults[1].Name != "login" {
-		t.Errorf("Expected one named request result per RequestNames entry, got %+v", got.RequestResults)
+	if len(got.StageResults) != 2 || got.StageResults[0].Name != "01.sinq" || got.StageResults[1].Name != "login" {
+		t.Errorf("Expected one named request result per RequestNames entry, got %+v", got.StageResults)
 	}
-	for idx, rr := range got.RequestResults {
+	for idx, rr := range got.StageResults {
 		if rr.Status != event.Unset {
 			t.Errorf("Expected request %d that never ran to stay Unset, got %v", idx, rr.Status)
 		}
 	}
 }
 
+func TestAggregator_StageFilenameIsKept(t *testing.T) {
+	st := start("r1")
+	st.StageNames = []event.StageName{{Name: "Check out", Filename: "orders/03_checkout.sinq"}, {Name: "a.sinq", Filename: "a.sinq"}}
+
+	got := collect(t, run(st, end("r1")), 1)[0]
+
+	if len(got.StageResults) != 2 {
+		t.Fatalf("Expected 2 stage results, got %+v", got.StageResults)
+	}
+	if rr := got.StageResults[0]; rr.Name != "Check out" || rr.Filename != "orders/03_checkout.sinq" {
+		t.Errorf("Expected the named stage to keep its file, got %+v", rr)
+	}
+	if rr := got.StageResults[1]; rr.Name != "a.sinq" || rr.Filename != "a.sinq" {
+		t.Errorf("Expected an unnamed stage's file to equal its name, got %+v", rr)
+	}
+}
+
 func TestAggregator_StageDurationsLandOnTheirRequest(t *testing.T) {
 	kinds := []struct {
 		kind event.EventType
-		get  func(aggregator.RequestResult) time.Duration
+		get  func(aggregator.StageResult) time.Duration
 	}{
-		{event.PreScript, func(r aggregator.RequestResult) time.Duration { return r.Pre }},
-		{event.Materialization, func(r aggregator.RequestResult) time.Duration { return r.Materialization }},
-		{event.Parsing, func(r aggregator.RequestResult) time.Duration { return r.Parsing }},
-		{event.Execution, func(r aggregator.RequestResult) time.Duration { return r.Execution }},
-		{event.RetryScript, func(r aggregator.RequestResult) time.Duration { return r.Retry }},
-		{event.AssertScript, func(r aggregator.RequestResult) time.Duration { return r.Assert }},
-		{event.PostScript, func(r aggregator.RequestResult) time.Duration { return r.Post }},
+		{event.PreScript, func(r aggregator.StageResult) time.Duration { return r.Pre }},
+		{event.Materialization, func(r aggregator.StageResult) time.Duration { return r.Materialization }},
+		{event.Parsing, func(r aggregator.StageResult) time.Duration { return r.Parsing }},
+		{event.Execution, func(r aggregator.StageResult) time.Duration { return r.Execution }},
+		{event.RetryScript, func(r aggregator.StageResult) time.Duration { return r.Retry }},
+		{event.AssertScript, func(r aggregator.StageResult) time.Duration { return r.Assert }},
+		{event.PostScript, func(r aggregator.StageResult) time.Duration { return r.Post }},
 	}
 
 	events := []event.Event{start("r1", "a", "b")}
@@ -174,10 +199,10 @@ func TestAggregator_StageDurationsLandOnTheirRequest(t *testing.T) {
 
 	got := collect(t, run(events...), 1)[0]
 	for i, k := range kinds {
-		if d := k.get(got.RequestResults[1]); d != time.Duration(i+1)*time.Millisecond {
+		if d := k.get(got.StageResults[1]); d != time.Duration(i+1)*time.Millisecond {
 			t.Errorf("Stage %d: expected %v on request 1, got %v", k.kind, time.Duration(i+1)*time.Millisecond, d)
 		}
-		if d := k.get(got.RequestResults[0]); d != 0 {
+		if d := k.get(got.StageResults[0]); d != 0 {
 			t.Errorf("Stage %d: expected nothing on request 0, got %v", k.kind, d)
 		}
 	}
@@ -187,13 +212,13 @@ func TestAggregator_RepeatedPassesSumDurations(t *testing.T) {
 	got := collect(t, run(
 		start("r1", "a"),
 		stage("r1", event.Execution, 0, 2*time.Millisecond),
-		requestEnd("r1", 0, event.Success, ""),
+		stageEndEvent("r1", 0, event.Success, ""),
 		stage("r1", event.Execution, 0, 3*time.Millisecond),
-		requestEnd("r1", 0, event.Success, ""),
+		stageEndEvent("r1", 0, event.Success, ""),
 		end("r1"),
 	), 1)[0]
 
-	rr := got.RequestResults[0]
+	rr := got.StageResults[0]
 	if rr.Execution != 5*time.Millisecond {
 		t.Errorf("Expected Execution summed over passes (5ms), got %v", rr.Execution)
 	}
@@ -203,27 +228,27 @@ func TestAggregator_RepeatedPassesSumDurations(t *testing.T) {
 }
 
 func TestAggregator_RequestStartKeepsFirstPass(t *testing.T) {
-	first := requestStart("r1", 0)
+	first := stageStartEvent("r1", 0)
 	first.StartedAt = t0.Add(time.Second)
-	second := requestStart("r1", 0)
+	second := stageStartEvent("r1", 0)
 	second.StartedAt = t0.Add(5 * time.Second)
 
 	got := collect(t, run(start("r1", "a"), first, second, end("r1")), 1)[0]
-	if !got.RequestResults[0].StartedAt.Equal(t0.Add(time.Second)) {
-		t.Errorf("Expected StartedAt from the first pass, got %v", got.RequestResults[0].StartedAt)
+	if !got.StageResults[0].StartedAt.Equal(t0.Add(time.Second)) {
+		t.Errorf("Expected StartedAt from the first pass, got %v", got.StageResults[0].StartedAt)
 	}
 }
 
 func TestAggregator_FailedAssertionsAccumulateOverPasses(t *testing.T) {
 	got := collect(t, run(
 		start("r1", "a"),
-		requestEnd("r1", 0, event.Failure, "", "first"),
-		requestEnd("r1", 0, event.Failure, "", "second", "third"),
+		stageEndEvent("r1", 0, event.Failure, "", "first"),
+		stageEndEvent("r1", 0, event.Failure, "", "second", "third"),
 		end("r1"),
 	), 1)[0]
 
-	if want := []string{"first", "second", "third"}; !slices.Equal(got.RequestResults[0].FailedAssertions, want) {
-		t.Errorf("Expected %v, got %v", want, got.RequestResults[0].FailedAssertions)
+	if want := []string{"first", "second", "third"}; !slices.Equal(got.StageResults[0].FailedAssertions, want) {
+		t.Errorf("Expected %v, got %v", want, got.StageResults[0].FailedAssertions)
 	}
 }
 
@@ -244,13 +269,13 @@ func TestAggregator_RequestStatusFoldsWithMax(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			events := []event.Event{start("r1", "a")}
 			for _, s := range tc.passes {
-				events = append(events, requestEnd("r1", 0, s, ""))
+				events = append(events, stageEndEvent("r1", 0, s, ""))
 			}
 			events = append(events, end("r1"))
 
 			got := collect(t, run(events...), 1)[0]
-			if got.RequestResults[0].Status != tc.want {
-				t.Errorf("Passes %v: expected %v, got %v", tc.passes, tc.want, got.RequestResults[0].Status)
+			if got.StageResults[0].Status != tc.want {
+				t.Errorf("Passes %v: expected %v, got %v", tc.passes, tc.want, got.StageResults[0].Status)
 			}
 		})
 	}
@@ -279,7 +304,7 @@ func TestAggregator_SkippedScenarioFlag(t *testing.T) {
 			if got.Status != tc.want {
 				t.Errorf("Expected %v (%d), got %v (%d)", tc.want, tc.want, got.Status, got.Status)
 			}
-			for idx, rr := range got.RequestResults {
+			for idx, rr := range got.StageResults {
 				if rr.Status != event.Unset {
 					t.Errorf("Expected request %d of a run that didn't run to stay Unset, got %v", idx, rr.Status)
 				}
@@ -304,18 +329,18 @@ func TestAggregator_ErrorScenarioFlag(t *testing.T) {
 		{"no request started", []event.Event{start("r1", "a"), errorEnd("r1")}, event.Error},
 		{"after a successful request", []event.Event{
 			start("r1", "a", "b"),
-			requestStart("r1", 0),
-			requestEnd("r1", 0, event.Success, ""),
-			requestStart("r1", 1),
+			stageStartEvent("r1", 0),
+			stageEndEvent("r1", 0, event.Success, ""),
+			stageStartEvent("r1", 1),
 			errorEnd("r1"),
 		}, event.Error},
 		{"after a failed request", []event.Event{
 			start("r1", "a"),
-			requestStart("r1", 0),
-			requestEnd("r1", 0, event.Failure, ""),
+			stageStartEvent("r1", 0),
+			stageEndEvent("r1", 0, event.Failure, ""),
 			errorEnd("r1"),
 		}, event.Error},
-		{"not flagged", []event.Event{start("r1", "a"), requestStart("r1", 0), requestEnd("r1", 0, event.Success, ""), end("r1")}, event.Success},
+		{"not flagged", []event.Event{start("r1", "a"), stageStartEvent("r1", 0), stageEndEvent("r1", 0, event.Success, ""), end("r1")}, event.Success},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -328,14 +353,14 @@ func TestAggregator_ErrorScenarioFlag(t *testing.T) {
 
 	got := collect(t, run(
 		start("r1", "a", "b"),
-		requestStart("r1", 0),
-		requestEnd("r1", 0, event.Success, ""),
+		stageStartEvent("r1", 0),
+		stageEndEvent("r1", 0, event.Success, ""),
 		errorEnd("r1"),
 	), 1)[0]
-	if s := got.RequestResults[0].Status; s != event.Success {
+	if s := got.StageResults[0].Status; s != event.Success {
 		t.Errorf("Expected the finished request to keep its Success, got %v (%d)", s, s)
 	}
-	if s := got.RequestResults[1].Status; s != event.Unset {
+	if s := got.StageResults[1].Status; s != event.Unset {
 		t.Errorf("Expected the unreached request to stay Unset, got %v (%d)", s, s)
 	}
 }
@@ -344,8 +369,8 @@ func TestAggregator_ErrorScenarioFlagIsPerRun(t *testing.T) {
 	got := collect(t, run(
 		start("broken", "a"),
 		start("fine", "a"),
-		requestStart("fine", 0),
-		requestEnd("fine", 0, event.Success, ""),
+		stageStartEvent("fine", 0),
+		stageEndEvent("fine", 0, event.Success, ""),
 		errorEnd("broken"),
 		end("fine"),
 	), 2)
@@ -366,8 +391,8 @@ func TestAggregator_SkippedScenarioFlagIsPerRun(t *testing.T) {
 	got := collect(t, run(
 		skippedStart("skipped", "a"),
 		start("ran", "a"),
-		requestStart("ran", 0),
-		requestEnd("ran", 0, event.Success, ""),
+		stageStartEvent("ran", 0),
+		stageEndEvent("ran", 0, event.Success, ""),
 		end("skipped"),
 		end("ran"),
 	), 2)
@@ -401,7 +426,7 @@ func TestAggregator_ScenarioStatusIsNeverUnset(t *testing.T) {
 		"failed request":         append([]event.Event{start("r", "a")}, pass("r", 0, event.Failure)...),
 		"errored request":        append([]event.Event{start("r", "a")}, pass("r", 0, event.Error)...),
 		"aborted request":        append([]event.Event{start("r", "a")}, pass("r", 0, event.Aborted)...),
-		"end without a start":    {requestEnd("r", 0, event.Success, "")},
+		"end without a start":    {stageEndEvent("r", 0, event.Success, "")},
 	}
 	exits := map[string]func([]event.Event) <-chan aggregator.ScenarioResult{
 		"ScenarioEnd": func(evs []event.Event) <-chan aggregator.ScenarioResult {
@@ -444,7 +469,7 @@ func TestAggregator_UnreachedRequestStaysUnset(t *testing.T) {
 	if got.Status == event.Unset {
 		t.Fatalf("Expected the scenario to have a status, got Unset")
 	}
-	if s := got.RequestResults[1].Status; s != event.Unset {
+	if s := got.StageResults[1].Status; s != event.Unset {
 		t.Errorf("Expected the request that was never reached to stay Unset, got %v (%d)", s, s)
 	}
 }
@@ -473,7 +498,7 @@ func TestAggregator_ScenarioStatusFromRequests(t *testing.T) {
 
 			got := collect(t, run(events...), 1)[0]
 			if got.Status != tc.want {
-				t.Errorf("Requests %v: expected scenario %v, got %v", tc.statuses, tc.want, got.Status)
+				t.Errorf("Stages %v: expected scenario %v, got %v", tc.statuses, tc.want, got.Status)
 			}
 		})
 	}
@@ -482,14 +507,14 @@ func TestAggregator_ScenarioStatusFromRequests(t *testing.T) {
 func TestAggregator_ErrorMessageKeepsFirstNonEmpty(t *testing.T) {
 	got := collect(t, run(
 		start("r1", "a"),
-		requestEnd("r1", 0, event.Error, "first error"),
-		requestEnd("r1", 0, event.Success, ""),
-		requestEnd("r1", 0, event.Error, "second error"),
+		stageEndEvent("r1", 0, event.Error, "first error"),
+		stageEndEvent("r1", 0, event.Success, ""),
+		stageEndEvent("r1", 0, event.Error, "second error"),
 		end("r1"),
 	), 1)[0]
 
-	if got.RequestResults[0].ErrorMessage != "first error" {
-		t.Errorf("Expected the first non-empty error message, got %q", got.RequestResults[0].ErrorMessage)
+	if got.StageResults[0].ErrorMessage != "first error" {
+		t.Errorf("Expected the first non-empty error message, got %q", got.StageResults[0].ErrorMessage)
 	}
 }
 
@@ -499,8 +524,8 @@ func TestAggregator_InterleavedRunsStaySeparate(t *testing.T) {
 		start("r2", "a"),
 		stage("r2", event.Execution, 0, 7*time.Millisecond),
 		stage("r1", event.Execution, 0, 1*time.Millisecond),
-		requestEnd("r1", 0, event.Failure, "", "r1 failed"),
-		requestEnd("r2", 0, event.Success, ""),
+		stageEndEvent("r1", 0, event.Failure, "", "r1 failed"),
+		stageEndEvent("r2", 0, event.Success, ""),
 		end("r2"),
 		end("r1"),
 	), 2)
@@ -510,11 +535,11 @@ func TestAggregator_InterleavedRunsStaySeparate(t *testing.T) {
 		byName[r.Name] = r
 	}
 	r1, r2 := byName["scenario r1"], byName["scenario r2"]
-	if r1.RequestResults[0].Execution != time.Millisecond || r2.RequestResults[0].Execution != 7*time.Millisecond {
-		t.Errorf("Expected per-run durations 1ms/7ms, got %v/%v", r1.RequestResults[0].Execution, r2.RequestResults[0].Execution)
+	if r1.StageResults[0].Execution != time.Millisecond || r2.StageResults[0].Execution != 7*time.Millisecond {
+		t.Errorf("Expected per-run durations 1ms/7ms, got %v/%v", r1.StageResults[0].Execution, r2.StageResults[0].Execution)
 	}
-	if !slices.Equal(r1.RequestResults[0].FailedAssertions, []string{"r1 failed"}) || len(r2.RequestResults[0].FailedAssertions) != 0 {
-		t.Errorf("Expected the assertion failure only on r1, got r1=%v r2=%v", r1.RequestResults[0].FailedAssertions, r2.RequestResults[0].FailedAssertions)
+	if !slices.Equal(r1.StageResults[0].FailedAssertions, []string{"r1 failed"}) || len(r2.StageResults[0].FailedAssertions) != 0 {
+		t.Errorf("Expected the assertion failure only on r1, got r1=%v r2=%v", r1.StageResults[0].FailedAssertions, r2.StageResults[0].FailedAssertions)
 	}
 }
 
@@ -522,7 +547,7 @@ func TestAggregator_RunsDifferingOnlyInMatrixOrCountStaySeparate(t *testing.T) {
 	ids := []event.RunId{{SeqId: 1, MatId: 0, CntId: 0}, {SeqId: 1, MatId: 1, CntId: 0}, {SeqId: 1, MatId: 0, CntId: 1}}
 	events := []event.Event{}
 	for i, id := range ids {
-		events = append(events, event.Event{Kind: event.ScenarioStart, RunId: id, Name: "same", RequestNames: []string{"a"}})
+		events = append(events, event.Event{Kind: event.ScenarioStart, RunId: id, Name: "same", StageNames: stageNames("a")})
 		events = append(events, event.Event{Kind: event.Execution, RunId: id, Duration: time.Duration(i+1) * time.Millisecond})
 	}
 	for _, id := range ids {
@@ -532,7 +557,7 @@ func TestAggregator_RunsDifferingOnlyInMatrixOrCountStaySeparate(t *testing.T) {
 	got := collect(t, run(events...), len(ids))
 	durations := []time.Duration{}
 	for _, r := range got {
-		durations = append(durations, r.RequestResults[0].Execution)
+		durations = append(durations, r.StageResults[0].Execution)
 	}
 	slices.Sort(durations)
 	if want := []time.Duration{time.Millisecond, 2 * time.Millisecond, 3 * time.Millisecond}; !slices.Equal(durations, want) {
@@ -583,7 +608,7 @@ func TestAggregator_RunnerDoneEndsStreamEvenWithZeroRunIdOpen(t *testing.T) {
 	defer close(in)
 	out, _ := aggregator.NewAggregator().AggregateOver(in)
 
-	in <- event.Event{Kind: event.ScenarioStart, RunId: event.RunId{}, Name: "zero", RequestNames: []string{"a"}}
+	in <- event.Event{Kind: event.ScenarioStart, RunId: event.RunId{}, Name: "zero", StageNames: stageNames("a")}
 	in <- done()
 
 	got := collect(t, out, 1)[0]
@@ -594,12 +619,12 @@ func TestAggregator_RunnerDoneEndsStreamEvenWithZeroRunIdOpen(t *testing.T) {
 }
 
 func TestAggregator_UnfinishedRunIsAbortedOnRunnerDone(t *testing.T) {
-	got := collect(t, run(start("r1", "a", "b"), requestEnd("r1", 0, event.Success, "")), 1)[0]
+	got := collect(t, run(start("r1", "a", "b"), stageEndEvent("r1", 0, event.Success, "")), 1)[0]
 	if got.Status != event.Aborted {
 		t.Errorf("Expected an unfinished run to be Aborted, got %v", got.Status)
 	}
-	if got.RequestResults[0].Status != event.Success {
-		t.Errorf("Expected the finished request to keep its status, got %v", got.RequestResults[0].Status)
+	if got.StageResults[0].Status != event.Success {
+		t.Errorf("Expected the finished request to keep its status, got %v", got.StageResults[0].Status)
 	}
 }
 
@@ -608,17 +633,17 @@ func TestAggregator_AttemptsCountExecutions(t *testing.T) {
 		start("r1", "a", "b"),
 		stage("r1", event.Execution, 0, time.Millisecond),
 		stage("r1", event.Execution, 0, time.Millisecond),
-		requestEnd("r1", 0, event.Success, ""),
+		stageEndEvent("r1", 0, event.Success, ""),
 		stage("r1", event.Execution, 0, time.Millisecond),
-		requestEnd("r1", 0, event.Success, ""),
+		stageEndEvent("r1", 0, event.Success, ""),
 		end("r1"),
 	), 1)[0]
 
-	if got.RequestResults[0].Attempts != 3 {
-		t.Errorf("Expected 3 attempts over both passes, got %d", got.RequestResults[0].Attempts)
+	if got.StageResults[0].Attempts != 3 {
+		t.Errorf("Expected 3 attempts over both passes, got %d", got.StageResults[0].Attempts)
 	}
-	if got.RequestResults[1].Attempts != 0 {
-		t.Errorf("Expected no attempts on a request that never ran, got %d", got.RequestResults[1].Attempts)
+	if got.StageResults[1].Attempts != 0 {
+		t.Errorf("Expected no attempts on a request that never ran, got %d", got.StageResults[1].Attempts)
 	}
 }
 
@@ -630,7 +655,7 @@ func TestAggregator_SuccessfulRequestHasNoDump(t *testing.T) {
 			end("r1"),
 		), 1)[0]
 
-		if rr := got.RequestResults[0]; rr.Request != "" || rr.Response != "" {
+		if rr := got.StageResults[0]; rr.Request != "" || rr.Response != "" {
 			t.Errorf("%v: expected no dump for a request that didn't fail, got %q / %q", status, rr.Request, rr.Response)
 		}
 	}
@@ -644,7 +669,7 @@ func TestAggregator_FailedPassKeepsDump(t *testing.T) {
 			end("r1"),
 		), 1)[0]
 
-		if rr := got.RequestResults[0]; rr.Request != "GET /x\n" || rr.Response != "500 x\n" {
+		if rr := got.StageResults[0]; rr.Request != "GET /x\n" || rr.Response != "500 x\n" {
 			t.Errorf("%v: expected the pass's dump, got %q / %q", status, rr.Request, rr.Response)
 		}
 	}
@@ -658,7 +683,7 @@ func TestAggregator_DumpIsFromFailingPass(t *testing.T) {
 		end("r1"),
 	), 1)[0]
 
-	if rr := got.RequestResults[0]; rr.Request != "GET /failing\n" || rr.Response != "500 failing\n" {
+	if rr := got.StageResults[0]; rr.Request != "GET /failing\n" || rr.Response != "500 failing\n" {
 		t.Errorf("Expected the dump from the failing pass, got %q / %q", rr.Request, rr.Response)
 	}
 }
@@ -671,7 +696,7 @@ func TestAggregator_FirstFailingPassKeepsItsDump(t *testing.T) {
 		end("r1"),
 	), 1)[0]
 
-	if rr := got.RequestResults[0]; rr.Request != "GET /first\n" || rr.Response != "500 first\n" {
+	if rr := got.StageResults[0]; rr.Request != "GET /first\n" || rr.Response != "500 first\n" {
 		t.Errorf("Expected the first failing pass's dump, got %q / %q", rr.Request, rr.Response)
 	}
 }
@@ -684,7 +709,7 @@ func TestAggregator_LaterCleanPassKeepsFailingDump(t *testing.T) {
 		end("r1"),
 	), 1)[0]
 
-	rr := got.RequestResults[0]
+	rr := got.StageResults[0]
 	if rr.Status != event.Failure {
 		t.Fatalf("Expected the request to stay Failure, got %v", rr.Status)
 	}
@@ -700,12 +725,12 @@ func TestAggregator_DumpsOnExecutionAreIgnored(t *testing.T) {
 	got := collect(t, run(
 		start("r1", "a"),
 		ex,
-		requestEnd("r1", 0, event.Failure, "", "boom"),
+		stageEndEvent("r1", 0, event.Failure, "", "boom"),
 		end("r1"),
 	), 1)[0]
 
-	if rr := got.RequestResults[0]; rr.Request != "" || rr.Response != "" {
-		t.Errorf("Expected only RequestEnd to supply dumps, got %q / %q", rr.Request, rr.Response)
+	if rr := got.StageResults[0]; rr.Request != "" || rr.Response != "" {
+		t.Errorf("Expected only StageEnd to supply dumps, got %q / %q", rr.Request, rr.Response)
 	}
 }
 
@@ -723,14 +748,14 @@ func checkOutOfRangeIgnored(t *testing.T, idx int) {
 	t.Helper()
 	got := collect(t, run(
 		start("r1", "a"),
-		requestStart("r1", idx),
+		stageStartEvent("r1", idx),
 		stage("r1", event.Execution, idx, time.Millisecond),
-		requestEnd("r1", idx, event.Failure, "bad index"),
+		stageEndEvent("r1", idx, event.Failure, "bad index"),
 		end("r1"),
 	), 1)[0]
 
-	if rr := got.RequestResults[0]; rr.Execution != 0 || rr.ErrorMessage != "" {
-		t.Errorf("RequestIdx %d: expected the event to be ignored, request 0 got %+v", idx, rr)
+	if rr := got.StageResults[0]; rr.Execution != 0 || rr.ErrorMessage != "" {
+		t.Errorf("StageIdx %d: expected the event to be ignored, stage 0 got %+v", idx, rr)
 	}
 }
 
@@ -740,16 +765,16 @@ func TestAggregator_OutOfRangeRequestIdxIsIgnored(t *testing.T) {
 	}
 }
 
-func TestAggregator_NegativeRequestIdxIsIgnored(t *testing.T) {
+func TestAggregator_NegativeStageIdxIsIgnored(t *testing.T) {
 	if os.Getenv("SINQ_AGG_NEGATIVE_IDX_CHILD") == "1" {
 		checkOutOfRangeIgnored(t, -1)
 		return
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestAggregator_NegativeRequestIdxIsIgnored$")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestAggregator_NegativeStageIdxIsIgnored$")
 	cmd.Env = append(os.Environ(), "SINQ_AGG_NEGATIVE_IDX_CHILD=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Errorf("Expected a negative RequestIdx to be ignored, the aggregator crashed: %v\n%s", err, out)
+		t.Errorf("Expected a negative StageIdx to be ignored, the aggregator crashed: %v\n%s", err, out)
 	}
 }
 
@@ -765,7 +790,7 @@ func TestAggregator_ScenarioEndIgnoresRequestIdx(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := end("r1")
-			e.RequestIdx = tc.idx
+			e.StageIdx = tc.idx
 
 			got := collect(t, run(tc.start, e), 1)[0]
 			if got.Status == event.Aborted {
@@ -884,8 +909,8 @@ func TestAggregator_SeparateAggregatorsRunInParallel(t *testing.T) {
 
 			out := run(events...)
 			got := collect(t, out, 1)[0]
-			if got.RequestResults[0].Attempts != i {
-				t.Errorf("Aggregator %d: expected %d attempts, got %d", i, i, got.RequestResults[0].Attempts)
+			if got.StageResults[0].Attempts != i {
+				t.Errorf("Aggregator %d: expected %d attempts, got %d", i, i, got.StageResults[0].Attempts)
 			}
 			expectNoMore(t, out)
 		})

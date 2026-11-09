@@ -138,7 +138,7 @@ func TestExtractBodyJson(t *testing.T) {
 		if resVal != lua.LNil {
 			t.Errorf("expected result to be nil, got %v", resVal)
 		}
-		if errVal.Type() != lua.LTString || !strings.Contains(errVal.String(), "no request table found") {
+		if errVal.Type() != lua.LTString || !strings.Contains(errVal.String(), "no response table found") {
 			t.Errorf("expected upvalue error, got %v", errVal)
 		}
 	})

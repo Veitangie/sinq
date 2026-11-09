@@ -1,0 +1,30 @@
+### Read a plain-text body
+GET ${env.BASE_URL}/responses/text
+
+$ASSERT{
+    sinq.assert.code(200)
+    -- extractBodyJson returns an error instead of raising one, for bodies that may not be JSON.
+    local data, err = res.extractBodyJson()
+    sinq.assert.isTrue(data == nil and err ~= nil, "Expected a body that isn't JSON")
+    sinq.assert.contains(res.bodyRaw, "pong")
+}
+
+### Truncate a large body
+GET ${env.BASE_URL}/responses/large
+
+$ASSERT{
+    -- max_body is 1KiB in this scenario's .scenario file.
+    sinq.assert.isTrue(res.oversized, "Expected the body to be truncated")
+    sinq.assert.equals(#res.bodyRaw, 1024)
+}
+
+### Follow redirects
+GET ${env.BASE_URL}/responses/hop/2
+
+$ASSERT{
+    sinq.assert.code(200)
+    sinq.assert.contains(res.bodyRaw, "landed")
+
+    -- Earlier responses stay available by request number.
+    sinq.assert.contains(sinq.responses[1].bodyRaw, "pong")
+}

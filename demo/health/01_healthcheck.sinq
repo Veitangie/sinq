@@ -1,3 +1,15 @@
 GET ${env.BASE_URL}/health
 
-$ASSERT{ sinq.assert.code(200, "Healthcheck failed") }
+$ASSERT{
+    sinq.assert.code(200, "Healthcheck failed")
+
+    -- Long strings ([[...]]) keep backslashes as they are.
+    local semver = sinq.regex.compile([[^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(-rc\.(\d+))?$]])
+    local version = semver.match(res.json().version)
+    sinq.assert.isTrue(version ~= nil, "Version is not semver")
+    if version then
+        sinq.assert.isTrue(tonumber(version.major) >= 2, "Expected API v2 or newer")
+        -- A group that didn't take part in the match is false.
+        sinq.assert.isTrue(version[4] == false, "A release candidate is deployed")
+    end
+}

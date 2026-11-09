@@ -33,6 +33,7 @@ type LuaContext struct {
 	encodingTable     *lua.LTable
 	jwtTable          *lua.LTable
 	fakeTable         *lua.LTable
+	regexTable        *lua.LTable
 	RequestTable      *lua.LTable
 	ResponseTable     *lua.LTable
 	Printer           *bytes.Buffer
@@ -101,7 +102,7 @@ func (lc *LuaContext) SetupScenarioEnvironment(setIdx lua.LGFunction, finishScen
 	lc.sandbox.RawSetString("_G", lc.sandbox)
 
 	lc.sinqTable = lc.NewTable()
-	lc.sinqTable.RawSetString("setNextRequest", lc.NewFunction(setIdx))
+	lc.sinqTable.RawSetString("setNextStage", lc.NewFunction(setIdx))
 	lc.sinqTable.RawSetString("finishScenario", lc.NewFunction(finishScenario))
 
 	lc.allResponsesTable = lc.NewTable()
@@ -190,18 +191,44 @@ func (lc *LuaContext) SetupScenarioEnvironment(setIdx lua.LGFunction, finishScen
 	lc.fakeTable.RawSetString("oneOf", lc.NewFunction(lc.FakeTakeOne))
 	lc.sinqTable.RawSetString("fake", lc.fakeTable)
 
+	lc.regexTable = lc.NewTable()
+	lc.regexTable.RawSetString("compile", lc.NewFunction(compileRegex))
+	lc.sinqTable.RawSetString("regex", lc.regexTable)
+
 	lc.SetGlobal("secrets", ToLuaValue(secrets, lc.LState))
 	lc.SetGlobal("env", ToLuaValue(env, lc.LState))
 
 	lc.SetGlobal("sinq", lc.sinqTable)
 }
 
-func (lc *LuaContext) SetupRequestEnvironment(requestIdx int) {
-	lc.RequestTable = lc.NewTable()
-	lc.ResponseTable = lc.NewTable()
-	lc.allResponsesTable.RawSetInt(requestIdx+1, lc.ResponseTable)
-	lc.SetGlobal("req", lc.RequestTable)
-	lc.SetGlobal("res", lc.ResponseTable)
+func (lc *LuaContext) SetupStageEnvironment(stageIdx int, isRequest bool) {
+	if isRequest {
+		lc.RequestTable = lc.NewTable()
+		lc.ResponseTable = lc.NewTable()
+		lc.allResponsesTable.RawSetInt(stageIdx+1, lc.ResponseTable)
+		lc.SetGlobal("req", lc.RequestTable)
+		lc.SetGlobal("res", lc.ResponseTable)
+	} else {
+		lc.RequestTable = lc.NewTable()
+		lc.ResponseTable = lc.noRequestResponse()
+		lc.allResponsesTable.RawSetInt(stageIdx+1, lua.LNil)
+		lc.SetGlobal("req", lc.RequestTable)
+		lc.SetGlobal("res", lc.ResponseTable)
+	}
+}
+
+func (lc *LuaContext) noRequestResponse() *lua.LTable {
+	fail := lc.NewFunction(func(ls *lua.LState) int {
+		ls.Error(lua.LString("res is not available in a stage without a request"), 2)
+		return 0
+	})
+	meta := lc.NewTable()
+	meta.RawSetString("__index", fail)
+	meta.RawSetString("__newindex", fail)
+
+	res := lc.NewTable()
+	res.Metatable = meta
+	return res
 }
 
 func (lc *LuaContext) RunSandboxed(byteCode *lua.FunctionProto, timeout time.Duration) error {

@@ -510,3 +510,95 @@ func TestEventBus_DoubleCloseIsSafe(t *testing.T) {
 		t.Errorf("Expected a second Close to be a no-op, it panicked with: %v", recovered)
 	}
 }
+
+func logThroughBus(t *testing.T, e event.Event) string {
+	t.Helper()
+	var buf bytes.Buffer
+	var mu sync.Mutex
+	logger := slog.New(slog.NewTextHandler(&lockedWriter{w: &buf, mu: &mu}, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	bus, err := event.NewBus(4, logger)
+	if err != nil {
+		t.Fatalf("NewBus failed: %v", err)
+	}
+	bus.Start()
+	sendWithin(t, bus, []event.Event{e})
+	closeWithin(t, bus)
+
+	mu.Lock()
+	defer mu.Unlock()
+	for line := range strings.SplitSeq(buf.String(), "\n") {
+		if strings.Contains(line, e.Message) {
+			return line
+		}
+	}
+	t.Fatalf("Expected the log %q in the output, got %q", e.Message, buf.String())
+	return ""
+}
+
+func TestEventBus_LogRendersIdentityFromFields(t *testing.T) {
+	line := logThroughBus(t, event.Event{
+		Kind:     event.Log,
+		Level:    slog.LevelWarn,
+		Message:  "identified",
+		RunId:    event.RunId{SeqId: 7, MatId: 2, CntId: 1},
+		WorkerId: 3,
+		Source:   event.Runner,
+		Attrs:    []slog.Attr{slog.String("url", "http://x")},
+	})
+
+	for _, want := range []string{"system=" + event.Runner.String(), "workerId=3", "runId.seqId=7", "runId.matrixId=2", "runId.countId=1", "url=http://x"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("Expected %q in the log line, got %q", want, line)
+		}
+	}
+	if strings.Index(line, "workerId=") > strings.Index(line, "url=") {
+		t.Errorf("Expected identity before the log's own attrs, got %q", line)
+	}
+}
+
+func TestEventBus_LogOmitsEmptyIdentity(t *testing.T) {
+	line := logThroughBus(t, event.Event{
+		Kind:    event.Log,
+		Level:   slog.LevelWarn,
+		Message: "anonymous",
+		Source:  event.Treewalker,
+	})
+
+	if !strings.Contains(line, "system="+event.Treewalker.String()) {
+		t.Errorf("Expected the system even without other identity, got %q", line)
+	}
+	if strings.Contains(line, "workerId=") || strings.Contains(line, "runId") {
+		t.Errorf("Expected no workerId or runId for a zero WorkerId and RunId, got %q", line)
+	}
+}
+
+func TestEventBus_LogRenderingLeavesAttrsAlone(t *testing.T) {
+	attrs := make([]slog.Attr, 1, 8)
+	attrs[0] = slog.String("own", "attr")
+	sink := make(chan []slog.Attr, 1)
+
+	var buf bytes.Buffer
+	var mu sync.Mutex
+	bus, err := event.NewBus(4, slog.New(slog.NewTextHandler(&lockedWriter{w: &buf, mu: &mu}, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	if err != nil {
+		t.Fatalf("NewBus failed: %v", err)
+	}
+	ch := bus.RegisterMC(4)
+	go func() {
+		for e := range ch {
+			sink <- e.Attrs
+		}
+		close(sink)
+	}()
+	bus.Start()
+	sendWithin(t, bus, []event.Event{{Kind: event.Log, Level: slog.LevelWarn, Message: "m", WorkerId: 1, RunId: event.RunId{SeqId: 1}, Source: event.Runner, Attrs: attrs}})
+	closeWithin(t, bus)
+
+	got := <-sink
+	if len(got) != 1 || got[0].Key != "own" {
+		t.Errorf("Expected the sink to get the log's own attrs untouched, got %v", got)
+	}
+	if spare := attrs[:cap(attrs)]; spare[1].Key != "" {
+		t.Errorf("Expected rendering not to write into the attrs' spare capacity, found %v", spare[1])
+	}
+}

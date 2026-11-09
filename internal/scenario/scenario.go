@@ -15,10 +15,10 @@ import (
 )
 
 type ScenarioBlueprint struct {
-	SeqId    int
-	Config   *ScenarioConfig
-	Requests []*RequestBlueprint
-	Secrets  map[string]any
+	SeqId   int
+	Config  *ScenarioConfig
+	Stages  []*StageBlueprint
+	Secrets map[string]any
 }
 
 func (s ScenarioBlueprint) CountVariants() int {
@@ -34,9 +34,9 @@ func (s ScenarioBlueprint) CountVariants() int {
 func (s ScenarioBlueprint) String() string {
 	sb := strings.Builder{}
 
-	for idx, req := range s.Requests {
-		fmt.Fprintf(&sb, "request[%d]:\n%v\n", idx, req)
-		if idx != len(s.Requests)-1 {
+	for idx, req := range s.Stages {
+		fmt.Fprintf(&sb, "stage[%d]:\n%v\n", idx, req)
+		if idx != len(s.Stages)-1 {
 			sb.WriteString(" and then ")
 		}
 	}
@@ -46,7 +46,7 @@ func (s ScenarioBlueprint) String() string {
 	return sb.String()
 }
 
-type RequestBlueprint struct {
+type StageBlueprint struct {
 	Source   []byte
 	Content  []Token
 	Pre      Token
@@ -54,10 +54,26 @@ type RequestBlueprint struct {
 	Retry    Token
 	Post     Token
 	Filename string
+	Rootname string
 	Name     string
 }
 
-func (bp RequestBlueprint) String() string {
+func (bp StageBlueprint) IsEmpty() bool {
+	return len(bp.Content) == 0 && bp.Pre.IsEmpty() && bp.Retry.IsEmpty() && bp.Assert.IsEmpty() && bp.Post.IsEmpty()
+}
+
+func (bp StageBlueprint) Validate() error {
+	if len(bp.Content) == 0 && !bp.Retry.IsEmpty() {
+		return errors.New("Invalid stage: $RETRY needs a request to retry")
+	}
+	return nil
+}
+
+func (bp StageBlueprint) IsNoRequest() bool {
+	return len(bp.Content) == 0 && (!bp.Pre.IsEmpty() || !bp.Assert.IsEmpty() || !bp.Post.IsEmpty())
+}
+
+func (bp StageBlueprint) String() string {
 	sb := strings.Builder{}
 	for _, token := range bp.Content {
 		switch token.Type {
@@ -154,13 +170,13 @@ func (d *Duration) UnmarshalJSON(source []byte) error {
 	return nil
 }
 
-func ParseRequestBlueprints(r io.Reader, filename string) ([]*RequestBlueprint, error) {
+func ParseStageBlueprints(r io.Reader, filename, rootName string) ([]*StageBlueprint, error) {
 	source, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to read request source: %w", err)
 	}
-	currentRes := &RequestBlueprint{Source: source, Filename: filename}
-	res := []*RequestBlueprint{currentRes}
+	currentRes := &StageBlueprint{Source: source, Filename: filename, Rootname: rootName}
+	res := []*StageBlueprint{currentRes}
 	parser := parser{ByteScanner: scanner.NewByteScanner(source)}
 
 	parser.consumeWhitespace()
@@ -186,8 +202,11 @@ ParsingLoop:
 		case IncompleteToken:
 			return nil, errors.New("Incomplete token in parser output")
 		case Delimiter:
-			if len(currentRes.Content) != 0 {
-				currentRes = &RequestBlueprint{Source: source, Filename: filename}
+			if !currentRes.IsEmpty() {
+				if err := currentRes.Validate(); err != nil {
+					return res, err
+				}
+				currentRes = &StageBlueprint{Source: source, Filename: filename, Rootname: rootName}
 				res = append(res, currentRes)
 			}
 			currentRes.Name = string(currentRes.ExtractPayload(t))
@@ -197,14 +216,14 @@ ParsingLoop:
 		}
 	}
 
-	if len(currentRes.Content) == 0 {
-		return res, errors.New("Empty request (did you add ### at the end, denoting the start of a new request?)")
+	if currentRes.IsEmpty() {
+		return res, errors.New("Empty stage (did you add ### at the end, denoting the start of a new stage?)")
 	}
 
-	return res, nil
+	return res, currentRes.Validate()
 }
 
-func (bp *RequestBlueprint) ExtractPayload(t Token) []byte {
+func (bp *StageBlueprint) ExtractPayload(t Token) []byte {
 	check := func(start, end int) bool {
 		return start <= end && start < len(bp.Source) && start >= 0 && end <= len(bp.Source) && end >= 0
 	}
@@ -214,7 +233,7 @@ func (bp *RequestBlueprint) ExtractPayload(t Token) []byte {
 	return []byte{}
 }
 
-func (bp *RequestBlueprint) escapePayload(t Token) []byte {
+func (bp *StageBlueprint) escapePayload(t Token) []byte {
 	if t.Type != Text || !t.HasEscapes {
 		return bp.Source[t.PayloadStart:t.PayloadEnd]
 	}

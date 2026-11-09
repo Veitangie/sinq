@@ -4,10 +4,15 @@
 package main
 
 import (
+	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	mrand "math/rand/v2"
@@ -17,6 +22,20 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+// webhookSecret signs checkout payloads; demo/users/orders/checkout/.scenario holds the same value.
+const webhookSecret = "demo-webhook-secret"
+
+// signedJWT builds an HS256 token by hand, so the demo needs no dependencies.
+func signedJWT(claims map[string]any) string {
+	enc := base64.RawURLEncoding
+	header := enc.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	payload, _ := json.Marshal(claims)
+	unsigned := header + "." + enc.EncodeToString(payload)
+	mac := hmac.New(sha256.New, []byte("demo-session-secret"))
+	mac.Write([]byte(unsigned))
+	return unsigned + "." + enc.EncodeToString(mac.Sum(nil))
+}
 
 func randDuration(minMs, maxMs int) time.Duration {
 	return time.Duration(minMs+mrand.IntN(maxMs-minMs+1)) * time.Millisecond
@@ -120,12 +139,19 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	latency(150, 400)
-	writeJSON(w, http.StatusOK, map[string]string{"token": s.issueToken()})
+	token := signedJWT(map[string]any{
+		"sub": "demo_user",
+		"exp": time.Now().Add(15 * time.Minute).Unix(),
+	})
+	s.mu.Lock()
+	s.validTokens[token] = true
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	latency(80, 220)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "2.4.1"})
 }
 
 func (s *server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +166,7 @@ func (s *server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.users[id] = user
 	s.mu.Unlock()
+	w.Header().Set("Location", "/users/"+id)
 	writeJSON(w, http.StatusCreated, user)
 }
 
@@ -182,7 +209,34 @@ func (s *server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleWishlist(w http.ResponseWriter, r *http.Request) {
 	latency(150, 450)
+	var body struct {
+		Products []string `json:"products"`
+	}
+	if err := readJSON(r, &body); err != nil || len(body.Products) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "products must be a non-empty array"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *server) handleAvatar(w http.ResponseWriter, r *http.Request) {
+	latency(150, 450)
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected multipart/form-data"})
+		return
+	}
+	file, header, err := r.FormFile("avatar")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing avatar part"})
+		return
+	}
+	defer file.Close()
+	size, _ := io.Copy(io.Discard, file)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"filename":     header.Filename,
+		"content_type": header.Header.Get("Content-Type"),
+		"size":         size,
+	})
 }
 
 var catalog = []string{
@@ -215,10 +269,18 @@ func (s *server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleCheckout(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
+	raw = bytes.TrimSpace(raw)
+	mac := hmac.New(sha256.New, []byte(webhookSecret))
+	mac.Write(raw)
+	if !hmac.Equal([]byte(r.Header.Get("X-Signature")), []byte(hex.EncodeToString(mac.Sum(nil)))) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "bad signature"})
+		return
+	}
 	var body struct {
 		Method string `json:"method"`
 	}
-	if err := readJSON(r, &body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
@@ -252,7 +314,8 @@ func (s *server) handleShipment(w http.ResponseWriter, r *http.Request) {
 	if polls >= 3 {
 		status = "delivered"
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+	eta := time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)
+	writeJSON(w, http.StatusOK, map[string]string{"status": status, "eta": eta})
 }
 
 func (s *server) handleReserveStock(w http.ResponseWriter, r *http.Request) {
@@ -311,6 +374,13 @@ func (s *server) handleNotificationStatus(w http.ResponseWriter, r *http.Request
 func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	latency(200, 650)
 	q := r.URL.Query().Get("q")
+	if page := r.URL.Query().Get("page"); page != "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"results": []string{q + "_page_" + page},
+			"next":    page == "1",
+		})
+		return
+	}
 	s.mu.Lock()
 	s.searchAt[q]++
 	polls := s.searchAt[q]
@@ -360,6 +430,7 @@ func main() {
 	mux.HandleFunc("PATCH /users/{id}", s.requireAuth(s.handleUpdateUser))
 	mux.HandleFunc("PATCH /users/{id}/password", s.requireAuth(s.handleChangePassword))
 	mux.HandleFunc("POST /users/{id}/wishlist", s.requireAuth(s.handleWishlist))
+	mux.HandleFunc("POST /users/{id}/avatar", s.requireAuth(s.handleAvatar))
 
 	mux.HandleFunc("GET /products", s.requireAuth(s.handleProducts))
 	mux.HandleFunc("GET /catalog/featured", s.requireAuth(s.handleFeatured))

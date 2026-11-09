@@ -4,4 +4,13 @@ Authorization: Bearer ${AUTH_TOKEN}
 $ASSERT{
     sinq.assert.code(200, "Failed to refresh session")
     sinq.assert.isTrue(type(res.json().token) == "string", "Refreshed token missing")
+
+    -- Read the claims without verifying the signature.
+    local token, err = sinq.jwt.decode(res.json().token)
+    sinq.assert.isTrue(token ~= nil, "Refreshed token is not a JWT: " .. tostring(err))
+    if token then
+        local expiresAt = token.claims.exp * sinq.time.second
+        sinq.assert.isTrue(expiresAt > sinq.time.now(), "Token expired at " .. sinq.time.toString(expiresAt))
+        sinq.assert.isTrue(expiresAt - sinq.time.now() <= 15 * sinq.time.minute, "Token lives longer than 15 minutes")
+    end
 }

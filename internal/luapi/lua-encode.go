@@ -13,7 +13,7 @@ import (
 
 var resultEncoder map[string]func([]byte) string = map[string]func([]byte) string{
 	"hex":       hex.EncodeToString,
-	"base64":    base64.RawStdEncoding.EncodeToString,
+	"base64":    base64.StdEncoding.EncodeToString,
 	"base64url": base64.URLEncoding.EncodeToString,
 	"raw":       func(b []byte) string { return string(b) },
 }

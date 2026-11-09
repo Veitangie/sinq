@@ -18,15 +18,15 @@ local host = env.BASE_URL
 ### `secrets`
 A table containing sensitive values passed to `sinq` via the `-s` / `--secret` / `--secrets-file` CLI flags.
 
-### `req` and `res` (Current Request Context)
-Shorthands for the *current* request and response being processed. 
+### `req` and `res` (Current Stage Context)
+Shorthands for the request and response of the *current* stage.
 
 * `req`: Used in `$PRE` to modify the outgoing request (e.g., `req.attach()`).
-* `res`: A direct reference to `sinq.responses[%current%]`.
+* `res`: A direct reference to `sinq.responses[%current%]`. In a [script-only stage](scenario.md#script-only-stages), reading or writing it raises `res is not available in a stage without a request`; use `rawget(res, "error")` to check without raising.
 
 ### Flow Control
-* **`sinq.setNextRequest(index)`**: Alters execution flow. The next request executed will be the one at the specified `index` (1-based). Useful for building loops or conditional skips within a scenario. It can be called from any hook of the current request, including `$PRE`, which is the place to drive a loop whose runs may call `req.skip()`, since `$POST` doesn't run for a skipped request. A request that runs more than once is reported once. Its status is the most severe across its runs (error, then failure, then aborted, then success, then skipped). It keeps the assertion failures of every run, its timings and attempt counts add up, and `--dump-on-failure` shows the first failing run.
-* **`sinq.finishScenario()`**: Alters execution flow. Tells `sinq` to finish the scenario once the current request completes its life cycle. Useful for gracefully finishing loops or conditional scenario shutdowns.
+* **`sinq.setNextStage(index)`**: Alters execution flow. The next stage executed will be the one at the specified `index` (1-based). Useful for building loops or conditional skips within a scenario. It can be called from any hook of the current stage, including `$PRE`, which is the place to drive a loop whose runs may call `req.skip()`, since `$POST` doesn't run for a skipped stage. A stage that runs more than once is reported once. Its status is the most severe across its runs (error, then failure, then aborted, then success, then skipped). It keeps the assertion failures of every run, its timings and attempt counts add up, and `--dump-on-failure` shows the first failing run.
+* **`sinq.finishScenario()`**: Alters execution flow. Tells `sinq` to finish the scenario once the current stage completes its life cycle. Useful for gracefully finishing loops or conditional scenario shutdowns.
 
 ### Standard Output (`print` & `io.write`)
 `print` (and `io.write`, if `io` is enabled via `--unrestricted`) works in every script. Because scenarios run in parallel, printing straight to the terminal would interleave badly, so this output is discarded by default. Pass `-p` / `--print` to buffer it and attach it to the scenario result instead. Like in standard Lua, `print` converts values with `tostring`, so a table with a `__tostring` metamethod (such as `res.error`) prints as its text.
@@ -35,9 +35,9 @@ Shorthands for the *current* request and response being processed.
 
 ## 2. Variable Scoping (Local vs. Global)
 
-Control variable scoping carefully to avoid leaking state between requests.
+Control variable scoping carefully to avoid leaking state between stages.
 
-* **Temporary Math & Logic:** Use the `local` keyword. This ensures the variable is garbage-collected immediately after the script block finishes.
+* **Temporary Math & Logic:** Use the `local` keyword. A local only exists until the end of its script block.
   ```lua
   local data = res.json()
   local id = data.id
@@ -106,7 +106,7 @@ Tables let you pass a JSON sub-document straight through, for example `"address"
 
 ## 4. Lifecycle-Specific APIs
 
-The following APIs are dynamically injected and destroyed depending on the execution phase of the request.
+The following APIs are dynamically injected and destroyed depending on the execution phase of the stage.
 
 ### `$PRE` (Setup Phase)
 Executes before the HTTP request is materialized. Used for file I/O operations.
@@ -120,7 +120,7 @@ Executes before the HTTP request is materialized. Used for file I/O operations.
 
     !!! warning
         The first request to fill a key decides what is stored, including where its body went. If that request used `req.saveResponseTo`, later requests sharing the key get an empty body and their own `saveResponseTo` file isn't written. An error is cached the same way, and nothing is evicted until the run ends. Share a key only between requests that expect the same response.
-* **`req.skip(enable bool?)`**: Marks the request to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The request is reported as skipped, without a test failure.
+* **`req.skip(enable bool?)`**: Marks the stage to be skipped. Parameter defaults to `true` if omitted. The `$PRE` script will finish executing, but the HTTP request will not be fired and subsequent hooks are bypassed. The stage is reported as skipped, without a test failure. This is the only `req` function allowed in a script-only stage; the others raise an error there.
 * **`req.multipart(entry table, ...)`**: Builds a `multipart/form-data` request body from one or more part definitions. See [Multipart Bodies](#multipart-bodies) below.
 * **`req.multipartBoundary(boundary string)`**: Overrides the randomly generated multipart boundary. See [Multipart Bodies](#multipart-bodies).
 
@@ -184,7 +184,7 @@ Executes after every attempt, including one that got no response (then `res.erro
 ### `$ASSERT` (Validation Phase)
 Executes after the retry loop finishes. Used to validate the final state of the response.
 
-* **`sinq.assert.fail(reason string)`**: Marks the test as failed with the provided reason. **Note: This does not halt Lua execution.** The rest of the `$ASSERT` block will continue to run, allowing you to collect multiple failure reasons for a single request.
+* **`sinq.assert.fail(reason string)`**: Marks the test as failed with the provided reason. **Note: This does not halt Lua execution.** The rest of the `$ASSERT` block will continue to run, allowing you to collect multiple failure reasons for a single stage.
     ```lua
     $ASSERT{
         local data = res.json()
@@ -194,7 +194,7 @@ Executes after the retry loop finishes. Used to validate the final state of the 
         if data.status ~= "active" then
             sinq.assert.fail("User is not active") 
         end
-        -- If both conditions are met, the report will show TWO failures for this request.
+        -- If both conditions are met, the report will show TWO failures for this stage.
     }
     ```
 * **`sinq.assert.code(expectedHttpCode number, message string?)`**: Fails if the actual status code does not match.
@@ -204,16 +204,16 @@ Executes after the retry loop finishes. Used to validate the final state of the 
 * **`sinq.assert.fileMatches(filepath string)`**: Fails if the response previously saved using `req.saveResponseTo()` does not exactly match the contents of `filepath`. Fails immediately if `req.saveResponseTo()` was not called.
 
 ### `$POST` (State Extraction Phase)
-Executes after `$ASSERT`, unless `$ASSERT` raised an error. After failed assertions it runs only if `fail_fast` is off (it's on by default). Typically used to parse the final response payload and store relevant data in the global sandbox for subsequent requests. No special scoped APIs are injected here.
+Executes after `$ASSERT`, unless `$ASSERT` raised an error. After failed assertions it runs only if `fail_fast` is off (it's on by default). Typically used to parse the final response payload and store relevant data in the global sandbox for subsequent stages. No special scoped APIs are injected here.
 
 ---
 
 ## 5. The Responses Table (`sinq.responses`)
 
-When an HTTP request completes, `sinq` parses the response and injects it into the `sinq.responses` table at the index corresponding to the request number. Lua is 1-indexed, meaning the response to the first request in your scenario is accessed via `sinq.responses[1]`.
+When an HTTP request completes, `sinq` parses the response and injects it into the `sinq.responses` table at the index corresponding to the stage number. Lua is 1-indexed, meaning the response to the first stage in your scenario is accessed via `sinq.responses[1]`. A [script-only stage](scenario.md#script-only-stages) has no response, so its index stays `nil`.
 
 !!! note
-    A response object only exists *after* the request has been executed. Accessing `sinq.responses[2]` or the alias `res` during the `$PRE` hook of the second request will return nil.
+    Each stage starts with an empty response table. During the second stage's `$PRE`, `res` and `sinq.responses[2]` are that empty table, so every field (`res.code`, `res.bodyRaw`, ...) is `nil` until the request has been sent. A stage that runs again through `sinq.setNextStage` starts from an empty table again.
 
 ### Response Object Structure
 * `attempt` *(number)*: The current execution attempt, counting from 1 (useful during `$RETRY`).
@@ -234,6 +234,7 @@ When an HTTP request completes, `sinq` parses the response and injects it into t
 * `json()` *(function)*: An unsafe convenience wrapper around `extractBodyJson`. 
     * **Returns:** `table` directly. 
     * **Throws:** Calls a fatal `error()` if the body is not valid JSON, failing the scenario immediately.
+* `bodyJson` *(internal)*: The parsed body, cached by the first `json()` or `extractBodyJson()` call so later calls don't parse again. Both return this same table, so changes made to it show up in later calls too. Don't read or set `bodyJson` directly: it's an implementation detail, isn't covered by the [compatibility promise](versioning.md), and may move out of `res` in any release.
 
 ### Send Failures (`res.error`)
 When an attempt fails without a response (the connection is refused, DNS fails, TLS fails, `req_timeout` runs out, and so on), `res.error` describes it:
@@ -260,7 +261,7 @@ The named kinds are stable within a major version. `other` is not: a minor relea
 !!! warning "`res.error` is a table, not a string"
     `res.error == "timeout"` is always `false`. Compare the kind instead: `res.error.kind == "timeout"`. Functions that take a string, such as `sinq.assert.fail`, need a string too: pass `res.error.kind`, `res.error.message` or `tostring(res.error)`.
 
-**What happens to the request.** `$RETRY` runs after a failed attempt like after any other, so it can retry. Policies written for status codes usually cover failures already, since `res.code` is `nil`: `sinq.retry.when(res.code ~= 200)` retries a refused connection as well. A policy that reads the body has to check `res.error` first:
+**What happens to the stage.** `$RETRY` runs after a failed attempt like after any other, so it can retry. Policies written for status codes usually cover failures already, since `res.code` is `nil`: `sinq.retry.when(res.code ~= 200)` retries a refused connection as well. A policy that reads the body has to check `res.error` first:
 
 ```lua
 $RETRY{
@@ -271,9 +272,9 @@ $RETRY{
 }
 ```
 
-If the last attempt still failed, the request ends as an **Error** with the failure's message, and its `$ASSERT` and `$POST` don't run. Retrying past `max_retries` ends it with `Too many retries` instead.
+If the last attempt still failed, the stage ends as an **Error** with the failure's message, and its `$ASSERT` and `$POST` don't run. Retrying past `max_retries` ends it with `Too many retries` instead.
 
-Not every error reaches `res.error`. These end the request right away, without running `$RETRY`:
+Not every error reaches `res.error`. These end the stage right away, without running `$RETRY`:
 
 * the scenario's own `timeout` running out (Error), or `Ctrl+C` (Aborted),
 * mistakes in the request itself, such as two bodies, a URL scheme other than `http` or `https`, an `req.attach` or `req.multipart` file that can't be opened, or a `req.saveResponseTo` file that can't be created.
@@ -287,6 +288,7 @@ HTTP headers are complex because a single key can have multiple values. `sinq` h
     ```lua
     local contentType = res.headers["Content-Type"]
     ```
+* **Names:** Keys use Go's canonical form, with the first letter and each letter after a `-` uppercase and the rest lowercase: `res.headers["Content-Md5"]`, not `res.headers["Content-MD5"]`.
 * **Multi-Value Headers:** Translated to a 1-indexed Lua table (array) of strings.
     ```lua
     local firstCookie = res.headers["Set-Cookie"][1]
@@ -345,6 +347,9 @@ HTTP headers are complex because a single key can have multiple values. `sinq` h
 * [`sinq.json.parse(source string)`](#10-json-utilities-sinqjson)
 * [`sinq.json.serialize(tbl table, indent string?)`](#10-json-utilities-sinqjson)
 * [`sinq.json.array(tbl table?)`](#10-json-utilities-sinqjson)
+* [`sinq.regex.compile(pattern string)`](#12-regular-expressions-sinqregex)
+* [`sinq.fake.*`](#11-fake-data-generation-sinqfake)
+* [`sinq.retry.*`](#retry-polling-phase) and [`sinq.assert.*`](#assert-validation-phase), available only in their own hooks
 
 ---
 
@@ -364,10 +369,10 @@ Built-in constants and functions to make time-based logic and parsing possible.
 ### Functions
 * **`sinq.time.now()`**: Returns the current UNIX timestamp.
     * **Returns:** `number` (milliseconds since epoch).
-* **`sinq.time.fromString(str string, format string?)`**: Parses a time string into a UNIX timestamp (milliseconds).
+* **`sinq.time.fromString(str string, format string?)`**: Parses a time string into a UNIX timestamp (milliseconds). A string with no time zone is read as UTC.
     * **Returns:** `(result number, error string)`
     * **Format Rules:** Uses [Go's time layout rules](https://pkg.go.dev/time#pkg-constants). If omitted, defaults to ISO8601 (`2006-01-02T15:04:05.000Z07:00`).
-* **`sinq.time.toString(ms number, format string?)`**: Formats a UNIX timestamp (milliseconds) into a time string.
+* **`sinq.time.toString(ms number, format string?)`**: Formats a UNIX timestamp (milliseconds) into a time string, in UTC.
     * **Returns:** `string`
     * **Format Rules:** Uses [Go's time layout rules](https://pkg.go.dev/time#pkg-constants). If omitted, defaults to ISO8601.
 * **`sinq.time.sleep(ms number)`**: Blocks the current script for `ms` milliseconds, then returns nothing. Useful as an unconditional delay before a request fires (e.g. `$PRE{ sinq.time.sleep(2 * sinq.time.second) }` to wait out a fixed propagation delay).
@@ -537,7 +542,46 @@ The `sinq.fake` table exposes deterministic fake data generators. All generators
 
 ---
 
-## 12. Libraries
+## 12. Regular Expressions (`sinq.regex.*`)
+
+* **`sinq.regex.compile(pattern string)`**: Compiles a regular expression.
+    * **Returns:** `(regex table, error string)`. A pattern that doesn't compile, a group named `full`, or two groups sharing a name return `nil` and an error.
+    * **Syntax:** Go's [RE2 syntax](https://pkg.go.dev/regexp/syntax). There are no lookarounds (`(?=...)`) or backreferences (`\1`). In exchange, matching always runs in time linear in the input, so a pattern can't hang a scenario. Named groups are written `(?P<name>...)` or `(?<name>...)`.
+* **`regex.match(source string)`**: Returns the first match, or `nil` if there is none.
+* **`regex.matchAll(source string)`**: Returns an array of every match, left to right, without overlaps. With no matches, the array is empty.
+
+Both methods raise an error if `source` isn't a string, so a missing body (`res.bodyRaw` after a failed attempt) can't pass as "no match". They work as `regex.match(s)` and as `regex:match(s)`.
+
+Each match is a table:
+
+| Field | Value |
+| --- | --- |
+| `full` | The whole match. |
+| `[1]`, `[2]`, ... | The capture groups, in the order their `(` appears. Non-capturing groups `(?:...)` aren't counted. |
+| `name` | A named group, also available by its number. |
+
+A group that didn't take part in the match, such as an optional group that was skipped, is `false`. A group that matched an empty string is `""`. Unlike in many languages, `""` is true in Lua, so `if m[2] then` is only reliable because of this `false`.
+
+```lua
+$POST{
+    local re = sinq.regex.compile([[^/items/(?P<id>\d+)(\?(.*))?$]])
+    local m = re.match(res.headers["Location"])
+    if not m then
+        error("unexpected Location: " .. tostring(res.headers["Location"]))
+    end
+    ITEM_ID = m.id      -- also m[1]
+    if m[3] then        -- false when there is no query string
+        print("query: " .. m[3])
+    end
+}
+```
+
+!!! tip
+    Write patterns as Lua long strings (`[[...]]`), so backslashes don't need escaping: `[[\d+]]` rather than `"\\d+"`.
+
+---
+
+## 13. Libraries
 
 `sinq` does not load two common core Lua libraries - `io` and `os` - by default, so that a `.sinq` script cannot touch the process, spawn a shell, or reach the filesystem outside its scenario workspace.
 
@@ -550,3 +594,21 @@ You can do this using the `SINQ_LUA_PATH` environment variable or the `--plugins
 
 !!! note
     All paths passed to `sinq` as positional arguments and the current working directory also get appended to the end of path for the purposes of searching for Lua plugins. So if you run `sinq` from a directory containing a file `my-module.lua`, `require("my-module")` will work for all `.sinq` files.
+
+---
+
+## 14. Editor Support for Plugins
+
+[`lua-types/sinq.lua`](https://github.com/Veitangie/sinq/blob/main/lua-types/sinq.lua) describes this API for [lua-language-server](https://luals.github.io), so `.lua` plugins get completion and type checks for `sinq`, `req`, `res`, `env` and `secrets`. `sinq` never loads this file; it's only for your editor.
+
+Copy it into your project, or clone the repository, and point a `.luarc.json` at its directory:
+
+```json
+{
+  "runtime.version": "Lua 5.1",
+  "workspace.library": ["path/to/lua-types"]
+}
+```
+
+!!! note
+    The file can't express when something is available. `sinq.retry`, `sinq.assert` and the `req` functions exist only during their own hooks, so calling `sinq.assert.code` outside `$ASSERT` looks fine in the editor and fails at run time. Fields such as `res.code` and `res.json` aren't marked optional, even though they're `nil` after an attempt that got no response, so check `res.error` first when a request can fail.

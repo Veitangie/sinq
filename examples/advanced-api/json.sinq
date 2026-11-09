@@ -6,6 +6,9 @@ $ASSERT{ sinq.assert.code(200) }
 $POST{
     LOADOUT = res.json()
 
+    -- meta is JSON packed inside a string; parse returns (result, error).
+    META = sinq.json.parse(LOADOUT.meta)
+
     -- Unequip everything. An array parsed from JSON stays an array even once
     -- it's empty, so it's sent back as [] rather than {}.
     for i = #LOADOUT.items, 1, -1 do table.remove(LOADOUT.items, i) end
@@ -29,3 +32,19 @@ Content-Type: application/json
 }
 
 $ASSERT{ sinq.assert.code(204, "Loadout was not saved with the expected JSON shape") }
+
+### Prepare the archive
+$PRE{
+    -- A stage with hooks but no request runs only its hooks.
+    ARCHIVE = { version = META.version, class = LOADOUT.class }
+}
+
+$ASSERT{ sinq.assert.equals(ARCHIVE.version, 3, "Unexpected loadout version") }
+
+### Archive loadout
+POST ${env.BASE_URL}/advanced/json/archive
+Content-Type: application/json
+
+${ return sinq.json.serialize(ARCHIVE, "  ") }
+
+$ASSERT{ sinq.assert.code(204, "Archive was not indented JSON with the expected fields") }

@@ -1,6 +1,24 @@
-GET ${env.BASE_URL}/search?q=potion
+### Wait for the index
+GET ${env.BASE_URL}/search?q=${ return sinq.encoding.urlEncode("health potion") }
 Authorization: Bearer ${AUTH_TOKEN}
 
-$RETRY{ return sinq.retry.when(res.json().indexed == false, 250) }
+$RETRY{ return sinq.retry.whenExponential(res.json().indexed == false, 2, 100) }
 
 $ASSERT{ sinq.assert.isTrue(res.json().indexed, "Search index never caught up") }
+
+$POST{ PAGE = 1 }
+
+### Read every page
+GET ${env.BASE_URL}/search?q=${ return sinq.encoding.urlEncode("health potion") }&page=${PAGE}
+Authorization: Bearer ${AUTH_TOKEN}
+
+$ASSERT{ sinq.assert.isTrue(#res.json().results > 0, "Page " .. PAGE .. " is empty") }
+
+$POST{
+    if res.json().next then
+        PAGE = PAGE + 1
+        sinq.setNextStage(3)  -- run this stage again for the next page
+    else
+        sinq.finishScenario()
+    end
+}

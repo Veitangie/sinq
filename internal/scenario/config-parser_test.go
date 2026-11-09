@@ -4,6 +4,7 @@
 package scenario
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -205,4 +206,58 @@ func TestParseConfig_WithTags(t *testing.T) {
 	if len(cfg.Tags) != 2 || !foundApi || !foundFast {
 		t.Errorf("Expected Tags to contain 'api' and 'fast', got: %v", cfg.Tags)
 	}
+}
+
+func TestParseConfig_JSONErrorsCarryTheirPosition(t *testing.T) {
+	tests := []struct {
+		name      string
+		json      string
+		line, col int
+	}{
+		{"syntax error", "{bad json}", 1, 2},
+		{"syntax error further down", "{\n  \"timeout\": \"1s\",\n  oops\n}", 3, 3},
+		{"wrong type", "{\n  \"timeout\": \"1s\",\n  \"tags\": 5\n}", 3, 11},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := SaneDefaultConfig()
+			err := ParseConfig(&cfg, strings.NewReader(tt.json))
+			var posErr PositionError
+			if !errors.As(err, &posErr) {
+				t.Fatalf("Expected a PositionError, got %T: %v", err, err)
+			}
+			if posErr.Line != tt.line || posErr.Offset != tt.col {
+				t.Errorf("Expected position %d:%d, got %d:%d (%v)", tt.line, tt.col, posErr.Line, posErr.Offset, err)
+			}
+			if !strings.Contains(err.Error(), "Failed to parse scenario config") {
+				t.Errorf("Expected the config parse wording, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestParseConfig_JSONErrorPositionEdges(t *testing.T) {
+	t.Run("an error encoding/json can't place stays unplaced", func(t *testing.T) {
+		cfg := SaneDefaultConfig()
+		err := ParseConfig(&cfg, strings.NewReader(`{"timeout": "not a duration"}`))
+		if err == nil {
+			t.Fatal("Expected an invalid duration to fail")
+		}
+		var posErr PositionError
+		if errors.As(err, &posErr) {
+			t.Errorf("Expected no position for a value error, got %d:%d (%v)", posErr.Line, posErr.Offset, err)
+		}
+	})
+
+	t.Run("a file that ends mid-object points at its end", func(t *testing.T) {
+		cfg := SaneDefaultConfig()
+		err := ParseConfig(&cfg, strings.NewReader("{\n  \"timeout\": \"1s\""))
+		var posErr PositionError
+		if !errors.As(err, &posErr) {
+			t.Fatalf("Expected a PositionError, got %T: %v", err, err)
+		}
+		if posErr.Line != 2 || posErr.Offset != 17 {
+			t.Errorf("Expected the end of the file (2:17), got %d:%d (%v)", posErr.Line, posErr.Offset, err)
+		}
+	})
 }

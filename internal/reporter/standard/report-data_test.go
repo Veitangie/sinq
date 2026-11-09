@@ -55,7 +55,7 @@ func TestReportData_WriteErrors(t *testing.T) {
 			Output:        outBuf,
 			StartedAt:     time.Now(),
 			TotalDuration: time.Second,
-			RequestResults: []aggregator.RequestResult{
+			StageResults: []aggregator.StageResult{
 				{
 					Name:             "ErrReq",
 					Status:           event.Failure,
@@ -95,7 +95,7 @@ func TestReportData_ErrorRequestTallyingBug(t *testing.T) {
 		Name:          "Error Scenario",
 		Status:        event.Error,
 		TotalDuration: 1 * time.Millisecond,
-		RequestResults: []aggregator.RequestResult{
+		StageResults: []aggregator.StageResult{
 			{
 				Name:         "ErrorReq",
 				Status:       event.Error,
@@ -110,7 +110,7 @@ func TestReportData_ErrorRequestTallyingBug(t *testing.T) {
 	_ = rep.Report(sourceCh, timerCh, 1)
 
 	outStr := buf.String()
-	expectedStr := " ✗ Scenario: Error Scenario (1✗ in 1ms)"
+	expectedStr := " ✗ Error Scenario (1✗ in 1ms)"
 	if !strings.Contains(outStr, expectedStr) {
 		t.Errorf("Error request was not tallied as a failure (✗). Expected to contain %q\nGot:\n%s", expectedStr, outStr)
 	}
@@ -127,7 +127,7 @@ func TestReportData_ShowNone(t *testing.T) {
 		Name:          "Passed Scenario",
 		Status:        event.Success,
 		TotalDuration: 1 * time.Millisecond,
-		RequestResults: []aggregator.RequestResult{
+		StageResults: []aggregator.StageResult{
 			{
 				Name:     "PassReq",
 				Status:   event.Success,
@@ -139,7 +139,7 @@ func TestReportData_ShowNone(t *testing.T) {
 		Name:          "Failed Scenario",
 		Status:        event.Failure,
 		TotalDuration: 1 * time.Millisecond,
-		RequestResults: []aggregator.RequestResult{
+		StageResults: []aggregator.StageResult{
 			{
 				Name:         "FailReq",
 				Status:       event.Failure,
@@ -194,7 +194,7 @@ func TestReportData_RequestTallyArithmetic(t *testing.T) {
 		Name:          "Tally Scenario",
 		Status:        event.Failure,
 		TotalDuration: time.Millisecond,
-		RequestResults: []aggregator.RequestResult{
+		StageResults: []aggregator.StageResult{
 			{Name: "R1", Status: event.Success},
 			{Name: "R2", Status: event.Error},
 			{Name: "R3", Status: event.Aborted},
@@ -247,7 +247,7 @@ func TestReportData_ShowFailed_Filtering(t *testing.T) {
 				t.Fatalf("Report failed: %v", err)
 			}
 
-			shown := strings.Contains(buf.String(), "Scenario: FilterScenario")
+			shown := strings.Contains(buf.String(), "FilterScenario")
 			if shown != tt.wantShown {
 				t.Errorf("status %v: expected shown=%v, got shown=%v\noutput:\n%s", tt.status, tt.wantShown, shown, buf.String())
 			}
@@ -255,13 +255,13 @@ func TestReportData_ShowFailed_Filtering(t *testing.T) {
 	}
 }
 
-func TestReportData_ReportRequest_NoFailedAssertions(t *testing.T) {
+func TestReportData_ReportStage_NoFailedAssertions(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rd := newReportData(config.ReporterConfig{Color: config.Never}, buf, 1)
 
-	err := rd.reportRequest(aggregator.RequestResult{Name: "Req", Status: event.Success})
+	err := rd.reportStage(aggregator.StageResult{Name: "Req", Status: event.Success})
 	if err != nil {
-		t.Fatalf("reportRequest failed: %v", err)
+		t.Fatalf("reportStage failed: %v", err)
 	}
 
 	if strings.Contains(buf.String(), "Failed assertions") {
@@ -305,7 +305,7 @@ func TestReportData_Report_RequestLoopErrorStopsIteration(t *testing.T) {
 	result := aggregator.ScenarioResult{
 		Name:   "LoopScenario",
 		Status: event.Success,
-		RequestResults: []aggregator.RequestResult{
+		StageResults: []aggregator.StageResult{
 			{Name: marker, Status: event.Success},
 			{Name: "ReqB", Status: event.Success},
 		},
@@ -319,47 +319,47 @@ func TestReportData_Report_RequestLoopErrorStopsIteration(t *testing.T) {
 	}
 }
 
-func TestReportData_ReportRequest_ErrorMessageWriteErrorPropagates(t *testing.T) {
+func TestReportData_ReportStage_ErrorMessageWriteErrorPropagates(t *testing.T) {
 	const marker = "ERR_MSG_MARKER"
 	w := &substringErrorWriter{trigger: marker}
 	rd := newReportData(config.ReporterConfig{Color: config.Never}, w, 1)
 
-	err := rd.reportRequest(aggregator.RequestResult{
+	err := rd.reportStage(aggregator.StageResult{
 		Name:         "Req",
 		Status:       event.Failure,
 		ErrorMessage: marker,
 	})
 	if err == nil {
-		t.Fatal("expected reportRequest to propagate the error-message write error, got nil")
+		t.Fatal("expected reportStage to propagate the error-message write error, got nil")
 	}
 }
 
-func TestReportData_ReportRequest_DurationsWriteErrorPropagates(t *testing.T) {
+func TestReportData_ReportStage_DurationsWriteErrorPropagates(t *testing.T) {
 	w := &substringErrorWriter{trigger: "Pre:"}
 	rd := newReportData(config.ReporterConfig{Color: config.Never, Verbose: true}, w, 1)
 
-	err := rd.reportRequest(aggregator.RequestResult{
+	err := rd.reportStage(aggregator.StageResult{
 		Name:   "Req",
 		Status: event.Success,
 		Pre:    time.Millisecond,
 	})
 	if err == nil {
-		t.Fatal("expected reportRequest to propagate the durations write error, got nil")
+		t.Fatal("expected reportStage to propagate the durations write error, got nil")
 	}
 }
 
-func TestReportData_ReportRequest_ResponseWriteErrorPropagates(t *testing.T) {
+func TestReportData_ReportStage_ResponseWriteErrorPropagates(t *testing.T) {
 	const marker = "RESPONSE_MARKER"
 	w := &substringErrorWriter{trigger: marker}
 	rd := newReportData(config.ReporterConfig{Color: config.Never}, w, 1)
 
-	err := rd.reportRequest(aggregator.RequestResult{
+	err := rd.reportStage(aggregator.StageResult{
 		Name:     "Req",
 		Status:   event.Success,
 		Response: marker,
 	})
 	if err == nil {
-		t.Fatal("expected reportRequest to propagate the response write error, got nil")
+		t.Fatal("expected reportStage to propagate the response write error, got nil")
 	}
 }
 
@@ -385,29 +385,61 @@ func reportOne(t *testing.T, result aggregator.ScenarioResult) (out string) {
 	return buf.String()
 }
 
-func TestReportData_LabelsAreListed(t *testing.T) {
+func TestReportData_LabelsFollowTheName(t *testing.T) {
 	out := reportOne(t, aggregator.ScenarioResult{
-		Name:           "Checkout",
-		Labels:         []string{"admin", "card"},
-		Status:         event.Success,
-		TotalDuration:  time.Millisecond,
-		RequestResults: []aggregator.RequestResult{{Name: "Pay", Status: event.Success, Attempts: 1}},
+		Name:          "Checkout",
+		Labels:        []string{"admin", "card"},
+		Status:        event.Success,
+		TotalDuration: time.Millisecond,
+		StageResults:  []aggregator.StageResult{{Name: "Pay", Status: event.Success, Attempts: 1}},
 	})
 
-	lines := strings.Split(out, "\n")
-	for _, label := range []string{"admin", "card"} {
-		found := false
-		for _, line := range lines {
-			if strings.TrimSpace(line) == label {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("Expected the label %q on a line of its own, got:\n%s", label, out)
-		}
+	if !strings.Contains(out, "Checkout (admin, card) (") {
+		t.Errorf("Expected the labels in parentheses after the name, got:\n%s", out)
 	}
-	if strings.Contains(out, "admin10") || strings.Contains(out, "card10") {
-		t.Errorf("Expected newlines after the labels, not the number 10 ('\\n' printed as a rune), got:\n%s", out)
+}
+
+func TestReportData_RunNumberComesAfterTheLabels(t *testing.T) {
+	out := reportOne(t, aggregator.ScenarioResult{
+		Name:          "Checkout",
+		Labels:        []string{"admin", "card"},
+		CntId:         1,
+		TotalRunCount: 2,
+		Status:        event.Success,
+		TotalDuration: time.Millisecond,
+		StageResults:  []aggregator.StageResult{{Name: "Pay", Status: event.Success, Attempts: 1}},
+	})
+
+	if !strings.Contains(out, "Checkout (admin, card) #2 (") {
+		t.Errorf("Expected the labels after the name and the run number last, got:\n%s", out)
+	}
+}
+
+func TestReportData_RunNumberWithoutLabels(t *testing.T) {
+	out := reportOne(t, aggregator.ScenarioResult{
+		Name:          "Checkout",
+		CntId:         2,
+		TotalRunCount: 3,
+		Status:        event.Success,
+		TotalDuration: time.Millisecond,
+		StageResults:  []aggregator.StageResult{{Name: "Pay", Status: event.Success, Attempts: 1}},
+	})
+
+	if !strings.Contains(out, "Checkout #3 (") {
+		t.Errorf("Expected the run number, counting from 1, after the name, got:\n%s", out)
+	}
+}
+
+func TestReportData_NoLabelsNoParentheses(t *testing.T) {
+	out := reportOne(t, aggregator.ScenarioResult{
+		Name:          "Checkout",
+		Status:        event.Success,
+		TotalDuration: time.Millisecond,
+		StageResults:  []aggregator.StageResult{{Name: "Pay", Status: event.Success, Attempts: 1}},
+	})
+
+	if !strings.Contains(out, "Checkout (1") {
+		t.Errorf("Expected only the tally after the name, got:\n%s", out)
 	}
 }
 
@@ -427,17 +459,17 @@ func TestReportData_RunNumberSuffix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			out := reportOne(t, aggregator.ScenarioResult{
-				Name:           "Counted",
-				CntId:          tc.cntId,
-				TotalRunCount:  tc.total,
-				Status:         event.Success,
-				TotalDuration:  time.Millisecond,
-				RequestResults: []aggregator.RequestResult{{Name: "Req", Status: event.Success, Attempts: 1}},
+				Name:          "Counted",
+				CntId:         tc.cntId,
+				TotalRunCount: tc.total,
+				Status:        event.Success,
+				TotalDuration: time.Millisecond,
+				StageResults:  []aggregator.StageResult{{Name: "Req", Status: event.Success, Attempts: 1}},
 			})
 
 			var scenarioLine string
 			for line := range strings.SplitSeq(out, "\n") {
-				if strings.Contains(line, "Scenario: Counted") {
+				if strings.Contains(line, "Counted") {
 					scenarioLine = line
 				}
 			}
@@ -471,10 +503,10 @@ func TestReportData_RequestsSentPlural(t *testing.T) {
 			sourceCh := make(chan aggregator.ScenarioResult, 1)
 			timerCh := make(chan time.Duration, 1)
 			sourceCh <- aggregator.ScenarioResult{
-				Name:           "Counted",
-				Status:         event.Success,
-				TotalDuration:  time.Millisecond,
-				RequestResults: []aggregator.RequestResult{{Name: "Request", Status: event.Success, Attempts: tc.attempts}},
+				Name:          "Counted",
+				Status:        event.Success,
+				TotalDuration: time.Millisecond,
+				StageResults:  []aggregator.StageResult{{Name: "Request", Status: event.Success, Attempts: tc.attempts}},
 			}
 			close(sourceCh)
 			timerCh <- time.Millisecond
@@ -500,7 +532,7 @@ func TestReportData_RequestsSentSumsAttempts(t *testing.T) {
 		Name:          "Mixed Scenario",
 		Status:        event.Aborted,
 		TotalDuration: 1 * time.Millisecond,
-		RequestResults: []aggregator.RequestResult{
+		StageResults: []aggregator.StageResult{
 			{Name: "Repeated", Status: event.Success, Attempts: 3},
 			{Name: "Failed", Status: event.Failure, Attempts: 2},
 			{Name: "Errored", Status: event.Error, Attempts: 1},

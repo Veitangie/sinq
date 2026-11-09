@@ -6,4 +6,11 @@ Content-Type: application/json
     "confirm": true
 }
 
-$ASSERT{ sinq.assert.code(401, "Regular users should never be able to wipe the server") }
+$ASSERT{
+    sinq.assert.code(401, "Regular users should never be able to wipe the server")
+
+    -- extractBodyJson returns (result, error) instead of raising for a body that isn't JSON.
+    local body, err = res.extractBodyJson()
+    sinq.assert.isTrue(body ~= nil, "Error response is not JSON: " .. tostring(err))
+    sinq.assert.contains(res.bodyRaw, "insufficient_scope", "Expected a scope error")
+}

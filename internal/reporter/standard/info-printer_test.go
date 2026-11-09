@@ -78,7 +78,7 @@ func TestInfoPrinter_PrintScenarios(t *testing.T) {
 				Description: "Desc1",
 				Tags:        map[string]struct{}{"tag1": {}},
 			},
-			Requests: []*scenario.RequestBlueprint{
+			Stages: []*scenario.StageBlueprint{
 				{Filename: "req1.txt"},
 				{Name: "req2"},
 			},
@@ -93,7 +93,7 @@ func TestInfoPrinter_PrintScenarios(t *testing.T) {
 					},
 				},
 			},
-			Requests: []*scenario.RequestBlueprint{
+			Stages: []*scenario.StageBlueprint{
 				{Filename: "req3.txt"},
 			},
 		},
@@ -184,8 +184,8 @@ func TestInfoPrinter_SetWriter_RedirectsPrintScenarios(t *testing.T) {
 
 	scenarios := []runner.ScenarioBundle{
 		{
-			Config:   &scenario.ScenarioConfig{Name: "Scenario1"},
-			Requests: []*scenario.RequestBlueprint{{Filename: "req1.txt"}},
+			Config: &scenario.ScenarioConfig{Name: "Scenario1"},
+			Stages: []*scenario.StageBlueprint{{Filename: "req1.txt"}},
 		},
 	}
 	cfg := config.Config{Reporter: config.ReporterConfig{Show: config.All}}
@@ -269,8 +269,8 @@ func TestInfoPrinter_PrintScenarios_NoSkipFiltersExcluded(t *testing.T) {
 
 	scenarios := []runner.ScenarioBundle{
 		{
-			Config:   &scenario.ScenarioConfig{Name: "ExcludedScenario", Tags: map[string]struct{}{"other": {}}},
-			Requests: []*scenario.RequestBlueprint{{Filename: "r.txt"}}},
+			Config: &scenario.ScenarioConfig{Name: "ExcludedScenario", Tags: map[string]struct{}{"other": {}}},
+			Stages: []*scenario.StageBlueprint{{Filename: "r.txt"}}},
 	}
 	cfg := config.Config{
 		Reporter:    config.ReporterConfig{Show: config.NoSkip},
@@ -286,6 +286,31 @@ func TestInfoPrinter_PrintScenarios_NoSkipFiltersExcluded(t *testing.T) {
 	}
 }
 
+func TestInfoPrinter_PrintScenarios_MarksScriptOnlyStages(t *testing.T) {
+	buf := &bytes.Buffer{}
+	printer, err := NewInfoPrinter(buf, "v1.0.0")
+	if err != nil {
+		t.Fatalf("Failed to create InfoPrinter: %v", err)
+	}
+	stages, err := scenario.ParseStageBlueprints(strings.NewReader("### Prepare\n$PRE{ x = 1 }\n### Send\nGET http://localhost/\n"), "01.sinq", "")
+	if err != nil {
+		t.Fatalf("Failed to parse stages: %v", err)
+	}
+	scenarios := []runner.ScenarioBundle{{Config: &scenario.ScenarioConfig{Name: "Flow"}, Stages: stages}}
+
+	if err := printer.PrintScenarios(scenarios, config.Config{}, false); err != nil {
+		t.Fatalf("PrintScenarios failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Prepare (Lua only)") {
+		t.Errorf("Expected the script-only stage to be marked, got:\n%s", out)
+	}
+	if strings.Contains(out, "Send (Lua only)") {
+		t.Errorf("Expected the request stage to stay unmarked, got:\n%s", out)
+	}
+}
+
 func TestInfoPrinter_PrintScenarios_NonNoSkipIgnoresFiltering(t *testing.T) {
 	buf := &bytes.Buffer{}
 	printer, err := NewInfoPrinter(buf, "v1.0.0")
@@ -295,8 +320,8 @@ func TestInfoPrinter_PrintScenarios_NonNoSkipIgnoresFiltering(t *testing.T) {
 
 	scenarios := []runner.ScenarioBundle{
 		{
-			Config:   &scenario.ScenarioConfig{Name: "IncludedScenario", Tags: map[string]struct{}{"other": {}}},
-			Requests: []*scenario.RequestBlueprint{{Filename: "r.txt"}}},
+			Config: &scenario.ScenarioConfig{Name: "IncludedScenario", Tags: map[string]struct{}{"other": {}}},
+			Stages: []*scenario.StageBlueprint{{Filename: "r.txt"}}},
 	}
 	cfg := config.Config{
 		Reporter:    config.ReporterConfig{Show: config.All},
@@ -322,7 +347,7 @@ func TestInfoPrinter_PrintScenarios_MatrixBoundaryAndHighlights(t *testing.T) {
 	scenarios := []runner.ScenarioBundle{
 		{
 			Config: &scenario.ScenarioConfig{Name: "SingleCombo"},
-			Requests: []*scenario.RequestBlueprint{
+			Stages: []*scenario.StageBlueprint{
 				{Filename: "r1.txt"},
 				{Filename: "r2.txt"},
 				{Filename: "r3.txt"},

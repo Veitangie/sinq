@@ -238,11 +238,11 @@ func setupTestWorker(t *testing.T, ctx context.Context) *worker {
 // required field only has to be added here.
 func newTestProcessor(w *worker) *RequestProcessor {
 	return &RequestProcessor{
-		w:            w,
-		ctx:          context.Background(),
-		scenarioBp:   &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
-		requestTimer: timer.NewTimer(timer.DefaultClock{}),
-		client:       &http.Client{},
-		reqTimeout:   5 * time.Second,
+		w:          w,
+		ctx:        context.Background(),
+		scenarioBp: &scenario.ScenarioBlueprint{Config: &scenario.ScenarioConfig{}},
+		stageTimer: timer.NewTimer(timer.DefaultClock{}),
+		client:     &http.Client{},
+		reqTimeout: 5 * time.Second,
 	}
 }

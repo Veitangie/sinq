@@ -4,6 +4,7 @@
 package result
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -11,79 +12,104 @@ import (
 	"veitangie.dev/sinq/internal/event/sink/aggregator"
 )
 
+func stages(statuses ...event.ResultStatus) aggregator.ScenarioResult {
+	res := aggregator.ScenarioResult{}
+	for _, s := range statuses {
+		res.StageResults = append(res.StageResults, aggregator.StageResult{Status: s})
+	}
+	return res
+}
+
 func TestResultReporter(t *testing.T) {
+	interrupted := []event.ResultStatus{event.Aborted}
 	tests := []struct {
-		name        string
-		results     []aggregator.ScenarioResult
-		size        int
-		wantSuccess bool
+		name    string
+		results []aggregator.ScenarioResult
+		size    int
+		want    []event.ResultStatus
 	}{
 		{
-			name: "All Success",
-			results: []aggregator.ScenarioResult{
-				{
-					RequestResults: []aggregator.RequestResult{
-						{Status: event.Success},
-						{Status: event.Success},
-					},
-				},
-			},
-			wantSuccess: true,
+			name:    "All Success",
+			results: []aggregator.ScenarioResult{stages(event.Success, event.Success)},
+			want:    []event.ResultStatus{event.Success},
 		},
 		{
-			name: "One Failure",
-			results: []aggregator.ScenarioResult{
-				{
-					RequestResults: []aggregator.RequestResult{
-						{Status: event.Success},
-						{Status: event.Failure},
-					},
-				},
-			},
-			wantSuccess: false,
+			name:    "Skipped and never reached stages don't fail the run",
+			results: []aggregator.ScenarioResult{stages(event.Success, event.Skipped, event.Unset)},
+			want:    []event.ResultStatus{event.Success},
 		},
 		{
-			name: "One Error",
-			results: []aggregator.ScenarioResult{
-				{
-					RequestResults: []aggregator.RequestResult{
-						{Status: event.Error},
-					},
-				},
-			},
-			wantSuccess: false,
+			name:    "No scenarios at all",
+			results: []aggregator.ScenarioResult{},
+			want:    []event.ResultStatus{event.Success},
 		},
 		{
-			name: "Request Aborted counts as failure",
-			results: []aggregator.ScenarioResult{
-				{
-					RequestResults: []aggregator.RequestResult{
-						{Status: event.Aborted},
-					},
-				},
-			},
-			wantSuccess: false,
+			name:    "One Failure",
+			results: []aggregator.ScenarioResult{stages(event.Success, event.Failure)},
+			want:    []event.ResultStatus{event.Failure},
 		},
 		{
-			name: "Scenario Aborted counts as failure",
-			results: []aggregator.ScenarioResult{
-				{
-					Status: event.Aborted,
-				},
-			},
-			wantSuccess: false,
+			name:    "Failure as the scenario status",
+			results: []aggregator.ScenarioResult{{Status: event.Failure}},
+			want:    []event.ResultStatus{event.Failure},
 		},
 		{
-			name: "Missing scenarios count as failure",
-			results: []aggregator.ScenarioResult{
-				{
-					RequestResults: []aggregator.RequestResult{
-						{Status: event.Success},
-					},
-				},
-			},
-			size:        2,
-			wantSuccess: false,
+			name:    "One Error",
+			results: []aggregator.ScenarioResult{stages(event.Error)},
+			want:    []event.ResultStatus{event.Error},
+		},
+		{
+			name:    "Error outranks Failure across scenarios",
+			results: []aggregator.ScenarioResult{stages(event.Failure), stages(event.Error), stages(event.Failure)},
+			want:    []event.ResultStatus{event.Error},
+		},
+		{
+			name:    "Error outranks Failure within a scenario",
+			results: []aggregator.ScenarioResult{stages(event.Error, event.Failure)},
+			want:    []event.ResultStatus{event.Error},
+		},
+		{
+			name:    "Request Aborted",
+			results: []aggregator.ScenarioResult{stages(event.Aborted)},
+			want:    interrupted,
+		},
+		{
+			name:    "Scenario Aborted",
+			results: []aggregator.ScenarioResult{{Status: event.Aborted}},
+			want:    interrupted,
+		},
+		{
+			name:    "Failure outranks Aborted across scenarios",
+			results: []aggregator.ScenarioResult{stages(event.Failure), {Status: event.Aborted}},
+			want:    []event.ResultStatus{event.Failure},
+		},
+		{
+			name:    "Failure outranks Aborted within a scenario",
+			results: []aggregator.ScenarioResult{stages(event.Failure, event.Aborted)},
+			want:    []event.ResultStatus{event.Failure},
+		},
+		{
+			name:    "Error outranks Aborted",
+			results: []aggregator.ScenarioResult{stages(event.Error), {Status: event.Aborted}},
+			want:    []event.ResultStatus{event.Error},
+		},
+		{
+			name:    "Missing scenarios count as aborted",
+			results: []aggregator.ScenarioResult{stages(event.Success)},
+			size:    2,
+			want:    interrupted,
+		},
+		{
+			name:    "Failure outranks missing scenarios",
+			results: []aggregator.ScenarioResult{stages(event.Failure)},
+			size:    2,
+			want:    []event.ResultStatus{event.Failure},
+		},
+		{
+			name:    "Error outranks missing scenarios",
+			results: []aggregator.ScenarioResult{stages(event.Error)},
+			size:    2,
+			want:    []event.ResultStatus{event.Error},
 		},
 	}
 
@@ -109,8 +135,8 @@ func TestResultReporter(t *testing.T) {
 				t.Fatalf("Unexpected error: %v", err)
 			}
 
-			if rep.Success() != tt.wantSuccess {
-				t.Errorf("Expected success to be %t, got %t", tt.wantSuccess, rep.Success())
+			if got := rep.Status(); !slices.Contains(tt.want, got) {
+				t.Errorf("Expected status in %v, got %v", tt.want, got)
 			}
 		})
 	}

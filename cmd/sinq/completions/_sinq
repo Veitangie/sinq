@@ -11,7 +11,7 @@ _sinq() {
         '(-v --version)'{-v,--version}'[Print the current sinq version and exit]' \
         '(-h --help)'{-h,--help}'[Print this help message and exit]' \
         '(-i --insecure)'{-i,--insecure}'[Disable SSL/TLS certificate verification]' \
-        '(-V --verbose)'{-V,--verbose}'[Enable verbose reporting (reports each stage duration, only affects "std" format)]' \
+        '(-V --verbose)'{-V,--verbose}'[Enable verbose reporting (reports each lifecycle step duration, only affects "std" format)]' \
         '(-l --list)'{-l,--list}'[Parse and list scenarios at specified directories]' \
         '(-u --unrestricted)'{-u,--unrestricted}'[Load Lua os/io modules - disables the script sandbox]' \
         '(-p --print)'{-p,--print}'[Capture lua output and show it in the report]' \
@@ -27,7 +27,7 @@ _sinq() {
         '*'{-t,--tag}'[Execute only scenarios that have at least one of passed tags]:tag name' \
         '*'{-n,--name}'[Execute only scenarios which names match at least one of passed regular expressions]:test name' \
         '--no-spinner[Disable spinner animation]' \
-        '--dump-on-failure[Print full request and response data of failed, errored or aborted requests]' \
+        '--dump-on-failure[Print full request and response data of failed, errored or aborted stages]' \
         '--secrets-file[Path to JSON-formatted secrets file]:file:_files' \
         '*--no-tag[Do not execute scenarios that have the tag]:tag name' \
         '*--no-name[Do not execute scenarios which names match the regular expression]:test name' \
